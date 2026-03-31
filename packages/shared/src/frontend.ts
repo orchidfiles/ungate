@@ -47,11 +47,13 @@ export interface TunnelState {
 }
 
 export type ExtensionToWebview =
+	| { type: 'port'; port: number | null }
 	| { type: 'tunnel-status'; state: TunnelState }
 	| { type: 'log'; source: 'api' | 'tunnel'; entry: LogEntry }
 	| { type: 'log-bulk'; source: 'api' | 'tunnel'; entries: LogEntry[] };
 
 export type WebviewToExtension =
+	| { type: 'webview-ready' }
 	| { type: 'restart-server' }
 	| { type: 'start-tunnel' }
 	| { type: 'stop-tunnel' }

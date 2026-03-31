@@ -6,6 +6,7 @@ node_modules/
 dist/
 lib/
 build/
+bundle/
 .tmp/
 *.tsbuildinfo
 
@@ -58,5 +59,9 @@ tmp/
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# Extension package
+# Extension
 *.vsix
+bundled/
+out/
+/apps/extension/LICENSE
+/apps/extension/README.md

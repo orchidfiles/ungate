@@ -7,8 +7,7 @@ import { type RequestSource, type AnthropicRequest, type AnthropicError, type Co
 import { RequestBuilder } from './request-builder';
 import { ToolMapper } from './tool-mapper';
 
-import type { ToolUseBlock } from '../tools/normalizer';
-import type { ProxyResult } from '../types/proxy';
+import type { ProxyResult, ToolUseBlock } from '../types/proxy';
 
 type RequestResult =
 	| { success: true; response: Response; source: RequestSource; reverseToolMapping: Record<string, string> }

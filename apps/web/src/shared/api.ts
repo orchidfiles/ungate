@@ -1,14 +1,30 @@
 import type { AnalyticsSummary, AppSettings, Period, RequestRecord } from '@ungate/shared/frontend';
 
 export class Api {
+	private static port: number | null = (window as unknown as { __PORT__?: number | null }).__PORT__ ?? null;
+
+	static {
+		window.addEventListener('message', (event: MessageEvent) => {
+			const message = event.data as { type?: string; port?: number | null };
+
+			if (message.type === 'port') {
+				this.port = message.port ?? null;
+			}
+		});
+	}
+
 	private static getPort(): number {
-		const injected = (window as unknown as { __PORT__?: number }).__PORT__;
+		const injected = (window as unknown as { __PORT__?: number | null }).__PORT__;
 
 		if (injected) {
 			return injected;
 		}
 
-		throw new Error('Missing port: window.__PORT__ is not set');
+		if (this.port) {
+			return this.port;
+		}
+
+		throw new Error('Ungate API is still starting');
 	}
 
 	private static baseUrl(): string {

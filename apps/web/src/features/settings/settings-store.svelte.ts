@@ -1,6 +1,7 @@
 import { Api } from '$shared/api';
+import { postExtensionMessage } from '$shared/vscode';
 
-import type { AppSettings, WebviewToExtension } from '@ungate/shared/frontend';
+import type { AppSettings } from '@ungate/shared/frontend';
 
 interface SettingsStore {
 	readonly settings: AppSettings | null;
@@ -21,16 +22,6 @@ let saving = $state(false);
 let saved = $state(false);
 let restarting = $state(false);
 let savedTimer: ReturnType<typeof setTimeout> | null = null;
-
-function postExtensionMessage(message: WebviewToExtension): void {
-	const acquireVsCodeApi = (
-		window as Window & {
-			acquireVsCodeApi?: () => { postMessage: (message: unknown) => void };
-		}
-	).acquireVsCodeApi;
-
-	acquireVsCodeApi?.().postMessage(message);
-}
 
 function extractError(e: unknown): string {
 	if (e instanceof Error) {

@@ -1,4 +1,6 @@
-import type { TunnelState, ExtensionToWebview, WebviewToExtension } from '@ungate/shared/frontend';
+import { postExtensionMessage } from '$shared/vscode';
+
+import type { TunnelState, ExtensionToWebview } from '@ungate/shared/frontend';
 
 interface TunnelStore {
 	readonly tunnel: TunnelState;
@@ -11,14 +13,6 @@ const defaultState: TunnelState = { status: 'stopped', url: null, error: null };
 
 let tunnel = $state<TunnelState>({ ...defaultState });
 
-function postMessage(message: WebviewToExtension): void {
-	const vscode = (window as Window & { acquireVsCodeApi?: () => { postMessage: (msg: unknown) => void } }).acquireVsCodeApi;
-
-	if (vscode) {
-		vscode().postMessage(message);
-	}
-}
-
 function handleMessage(event: MessageEvent): void {
 	const message = event.data as ExtensionToWebview;
 
@@ -30,15 +24,15 @@ function handleMessage(event: MessageEvent): void {
 window.addEventListener('message', handleMessage);
 
 function startTunnel(): void {
-	postMessage({ type: 'start-tunnel' });
+	postExtensionMessage({ type: 'start-tunnel' });
 }
 
 function stopTunnel(): void {
-	postMessage({ type: 'stop-tunnel' });
+	postExtensionMessage({ type: 'stop-tunnel' });
 }
 
 function restartTunnel(): void {
-	postMessage({ type: 'restart-tunnel' });
+	postExtensionMessage({ type: 'restart-tunnel' });
 }
 
 export function getTunnelStore(): TunnelStore {

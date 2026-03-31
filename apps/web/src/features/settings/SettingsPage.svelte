@@ -1,5 +1,4 @@
 <script lang="ts">
-import { Switch } from '@skeletonlabs/skeleton-svelte';
 import IconCheck from 'virtual:icons/lucide/check';
 import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
 import IconSave from 'virtual:icons/lucide/save';
@@ -52,10 +51,6 @@ function handleSave() {
 function handleSaveAndRestart() {
 	void store.saveAndRestart(currentValues());
 }
-
-function handleQuietToggle() {
-	quiet = !quiet;
-}
 </script>
 
 <div class="space-y-6">
@@ -89,14 +84,6 @@ function handleQuietToggle() {
 						bind:value={apiKey}
 						placeholder="No key (open access)" />
 				</label>
-			</div>
-
-			<div class="flex items-center gap-3">
-				<Switch
-					name="quiet-mode"
-					checked={quiet}
-					onchange={handleQuietToggle} />
-				<span class="text-sm">Quiet mode (suppress console output)</span>
 			</div>
 		</div>
 

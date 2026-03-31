@@ -10,7 +10,7 @@ import { schema } from './schema';
 
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
 
-const MIGRATIONS_PATH = join(import.meta.dirname, '../../drizzle');
+const MIGRATIONS_PATH = process.env.UNGATE_DRIZZLE_PATH ?? join(import.meta.dirname, '../../drizzle');
 const DB_PATH = process.env.UNGATE_DB_PATH ?? join(homedir(), '.ungate', 'data.db');
 
 let _db: DrizzleDb | null = null;
