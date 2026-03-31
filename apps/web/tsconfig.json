@@ -1,0 +1,18 @@
+{
+	"extends": "@ungate/dev-kit/tsconfig-base",
+	"compilerOptions": {
+		"baseUrl": "./",
+		"paths": {
+			"$shared/*": ["src/shared/*"],
+			"$components/*": ["src/components/*"],
+			"$features/*": ["src/features/*"],
+			"$layouts/*": ["src/layouts/*"],
+			"$src/*": ["src/*"]
+		},
+		"types": ["node", "vite/client"],
+		"verbatimModuleSyntax": true,
+		"noEmit": true
+	},
+	"include": ["src", "vite.config.ts", "svelte.config.js", "eslint.config.mjs"],
+	"exclude": ["node_modules", "dist"]
+}

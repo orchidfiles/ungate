@@ -1,0 +1,12 @@
+{
+	"extends": "@ungate/dev-kit/tsconfig-base",
+	"compilerOptions": {
+		"baseUrl": "./",
+		"paths": {
+			"src/*": ["src/*"]
+		},
+		"types": ["node"]
+	},
+	"include": ["src", "tests", "eslint.config.mjs", "drizzle.config.ts"],
+	"exclude": ["node_modules", "dist"]
+}

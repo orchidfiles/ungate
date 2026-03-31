@@ -1,0 +1,3 @@
+pnpm run lint:fix
+git add -A
+pnpm test

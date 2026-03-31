@@ -1,0 +1,43 @@
+import { hoursToMilliseconds } from 'date-fns';
+
+import { Analytics } from '../database/analytics';
+
+import type { FastifyPluginCallback } from 'fastify';
+
+const plugin: FastifyPluginCallback = (app) => {
+	app.get('/analytics', async (request, reply) => {
+		const period = (request.query as Record<string, string>).period ?? 'day';
+		const now = Date.now();
+		const periodOffsets: Record<string, number> = {
+			hour: hoursToMilliseconds(1),
+			day: hoursToMilliseconds(24),
+			week: hoursToMilliseconds(24 * 7),
+			month: hoursToMilliseconds(24 * 30)
+		};
+		const since = period === 'all' ? 0 : now - (periodOffsets[period] ?? periodOffsets.day);
+
+		const analytics = Analytics.getSummary(since, now);
+
+		return reply.send({
+			period,
+			...analytics,
+			note: 'Costs are estimates. Actual costs may be lower due to prompt caching.'
+		});
+	});
+
+	app.get('/analytics/requests', async (request, reply) => {
+		const limitParam = (request.query as Record<string, string>).limit;
+		const limit = Math.min(parseInt(limitParam ?? '100'), 1000);
+		const requests = Analytics.getRecent(limit);
+
+		return reply.send({ requests });
+	});
+
+	app.post('/analytics/reset', async (_request, reply) => {
+		const result = Analytics.reset();
+
+		return reply.send({ success: true, ...result });
+	});
+};
+
+export default plugin;

@@ -1,0 +1,18 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"baseUrl": "./",
+		"types": [
+			"reflect-metadata"
+		]
+	},
+	"include": [
+		"src",
+		"tests",
+		"./eslint.config.mjs"
+	],
+	"exclude": [
+		"lib",
+		"node_modules"
+	]
+}

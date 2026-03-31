@@ -1,0 +1,66 @@
+{
+	"name": "ungate",
+	"displayName": "Ungate",
+	"description": "Use your Claude subscription in Cursor without an API key",
+	"version": "1.0.0",
+	"publisher": "orchidfiles",
+	"license": "MIT",
+	"pricing": "Free",
+	"author": {
+		"name": "orchidfiles",
+		"email": "orchid@orchidfiles.com",
+		"url": "https://orchidfiles.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/orchidfiles/ungate.git"
+	},
+	"bugs": {
+		"url": "https://github.com/orchidfiles/ungate/issues"
+	},
+	"homepage": "https://github.com/orchidfiles/ungate",
+	"keywords": [
+		"claude",
+		"anthropic",
+		"cursor",
+		"proxy",
+		"openai",
+		"ai"
+	],
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"icon": "resources/icon.png",
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"main": "./dist/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "ungate.openDashboard",
+				"title": "Ungate: Open Dashboard"
+			}
+		]
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"package": "pnpm build && vsce package --no-dependencies --out ungate.vsix",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix"
+	},
+	"dependencies": {
+		"cloudflared": "0.7.1"
+	},
+	"devDependencies": {
+		"@types/node": "~22.15.35",
+		"@types/vscode": "~1.85.0",
+		"@ungate/dev-kit": "workspace:*",
+		"@vscode/vsce": "~3.2.0",
+		"typescript": "~5.7.0"
+	},
+	"packageManager": "pnpm@10.24.0+sha512.01ff8ae71b4419903b65c60fb2dc9d34cf8bb6e06d03bde112ef38f7a34d6904c424ba66bea5cdcf12890230bf39f9580473140ed9c946fef328b6e5238a345a"
+}

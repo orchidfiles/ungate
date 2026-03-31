@@ -1,0 +1,12 @@
+{
+	"extends": "@ungate/dev-kit/tsconfig-base",
+	"compilerOptions": {
+		"module": "commonjs",
+		"lib": ["ES2022"],
+		"moduleResolution": "node",
+		"importHelpers": false,
+		"noEmit": true
+	},
+	"include": ["src", "eslint.config.mjs"],
+	"exclude": ["node_modules", "dist"]
+}

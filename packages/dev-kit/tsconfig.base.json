@@ -1,0 +1,22 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"emitDecoratorMetadata": true,
+		"experimentalDecorators": true,
+		"strict": true,
+		"strictPropertyInitialization": false,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"isolatedModules": true,
+		"importHelpers": true,
+		"skipLibCheck": true,
+		"allowJs": true
+	}
+}
