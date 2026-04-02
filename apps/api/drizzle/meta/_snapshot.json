@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4b5f991a-0cac-431f-a2ce-ed83391fbdd1",
+  "id": "ed1b3260-bc3c-4b7c-a022-73478e17e124",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "app_settings": {
@@ -51,15 +51,15 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "oauth_tokens": {
-      "name": "oauth_tokens",
+    "provider_settings": {
+      "name": "provider_settings",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
+        "provider": {
+          "name": "provider",
+          "type": "text",
           "primaryKey": true,
           "notNull": true,
-          "autoincrement": true
+          "autoincrement": false
         },
         "access_token": {
           "name": "access_token",
@@ -72,14 +72,14 @@
           "name": "refresh_token",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "expires_at": {
           "name": "expires_at",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "email": {
@@ -94,6 +94,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "base_url": {
+          "name": "base_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },

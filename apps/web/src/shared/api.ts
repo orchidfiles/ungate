@@ -91,6 +91,18 @@ export class Api {
 		return this.post('/auth/claude/logout');
 	}
 
+	static authMinimaxStatus(): Promise<{ authenticated: boolean; baseUrl?: string }> {
+		return this.get('/auth/minimax/status');
+	}
+
+	static authMinimaxLogin(apiKey: string, baseUrl: string): Promise<{ ok: boolean; error?: string }> {
+		return this.post('/auth/minimax/login', { apiKey, baseUrl });
+	}
+
+	static authMinimaxLogout(): Promise<{ ok: boolean }> {
+		return this.post('/auth/minimax/logout');
+	}
+
 	static async healthCheck(): Promise<boolean> {
 		try {
 			const response = await fetch(`${this.baseUrl()}/health`, { signal: AbortSignal.timeout(1000) });

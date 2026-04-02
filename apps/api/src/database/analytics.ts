@@ -6,7 +6,7 @@ import { requests } from './schema';
 
 import { getDb } from './index';
 
-import type { AnalyticsSummary } from '../types';
+import type { AnalyticsSummary } from '@ungate/shared';
 
 export class Analytics {
 	static getSummary(since: number, until: number = Date.now()): AnalyticsSummary {
@@ -15,7 +15,7 @@ export class Analytics {
 		const totals = db
 			.select({
 				totalRequests: sql<number>`COUNT(*)`,
-				claudeCodeRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'claude_code' THEN 1 ELSE 0 END)`,
+				claudeCodeRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'claude' THEN 1 ELSE 0 END)`,
 				errorRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'error' THEN 1 ELSE 0 END)`,
 				totalInputTokens: sql<number>`SUM(${requests.inputTokens})`,
 				totalOutputTokens: sql<number>`SUM(${requests.outputTokens})`

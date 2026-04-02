@@ -7,6 +7,7 @@ export interface RequestContext {
 	reverseToolMapping: Record<string, string>;
 	inputTokens?: number;
 	outputTokens?: number;
+	bodyJson?: unknown;
 }
 
 export interface ProxyResult {

@@ -10,11 +10,21 @@ export const appSettings = sqliteTable('app_settings', {
 	extraInstruction: text()
 });
 
+export const providerSettings = sqliteTable('provider_settings', {
+	provider: text().primaryKey(),
+	accessToken: text().notNull(),
+	refreshToken: text(),
+	expiresAt: integer(),
+	email: text(),
+	createdAt: integer().notNull(),
+	baseUrl: text()
+});
+
 export const requests = sqliteTable('requests', {
 	id: integer().primaryKey({ autoIncrement: true }),
 	timestamp: integer().notNull(),
 	model: text().notNull(),
-	source: text({ enum: ['claude_code', 'error'] }).notNull(),
+	source: text().notNull(),
 	inputTokens: integer().notNull().default(0),
 	outputTokens: integer().notNull().default(0),
 	estimatedCost: real().notNull().default(0),
@@ -23,13 +33,4 @@ export const requests = sqliteTable('requests', {
 	error: text()
 });
 
-export const oauthTokens = sqliteTable('oauth_tokens', {
-	id: integer().primaryKey({ autoIncrement: true }),
-	accessToken: text().notNull(),
-	refreshToken: text().notNull(),
-	expiresAt: integer().notNull(),
-	email: text(),
-	createdAt: integer().notNull()
-});
-
-export const schema = { appSettings, requests, oauthTokens };
+export const schema = { appSettings, requests, providerSettings };

@@ -17,7 +17,8 @@ let { requests, models, modelFilter, requestLimit, onModelFilterChange, onLimitC
 const limits = [20, 50, 100];
 
 const sourceClasses: Record<string, string> = {
-	claude_code: 'preset-filled-success-500',
+	claude: 'preset-filled-success-500',
+	minimax: 'preset-filled-warning-500',
 	error: 'preset-filled-error-500'
 };
 

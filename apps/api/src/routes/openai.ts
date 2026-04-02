@@ -1,11 +1,9 @@
 import { logger } from 'src/utils/logger';
 
 import { AnthropicToOpenai } from '../adapter/anthropic-to-openai';
-import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
 import { Requests } from '../database/requests';
-import { HeadersExtractor } from '../handlers/headers-extractor';
 import { apiKeyAuth } from '../plugins/auth';
-import { proxyRequest } from '../proxy/anthropic-client';
+import { proxyOpenAIRequest } from '../proxy/proxy-client';
 import { OpenAIStreamHandler } from '../streaming/openai-stream-handler';
 
 import type { OpenAIChatRequest } from '../types/openai';
@@ -16,28 +14,31 @@ const plugin: FastifyPluginCallback = (app) => {
 
 	app.post('/v1/chat/completions', { preHandler: apiKeyAuth(config) }, async (request, reply) => {
 		try {
-			HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'OpenAI /v1/chat/completions');
-
 			const openaiBody = request.body as OpenAIChatRequest;
-			const anthropicBody = openaiToAnthropic(openaiBody);
-			const headers = HeadersExtractor.extractAnthropicHeaders(request.headers);
 
-			const { response, context } = await proxyRequest('/v1/messages', anthropicBody, headers);
+			const { response, context } = await proxyOpenAIRequest(openaiBody);
 
 			if (!response.ok) {
-				const errorJson = await response.json();
-				const error = errorJson as { error?: { message?: string; type?: string } };
-				let errorMessage = error?.error?.message ?? 'Unknown error';
+				let errorMessage = 'Unknown error';
 
-				if (errorMessage.includes('model:')) {
-					errorMessage = errorMessage.replace(/model:\s*x-([^\s,]+)/g, (_match, modelName) => `model: ${modelName}`);
+				if (context.bodyJson && typeof context.bodyJson === 'object') {
+					const err = (context.bodyJson as { error?: { message?: string; type?: string } }).error;
+					if (err?.message) {
+						errorMessage = err.message;
+
+						if (errorMessage.includes('model:')) {
+							errorMessage = errorMessage.replace(/model:\s*x-([^\s,]+)/g, (_match, modelName) => `model: ${modelName}`);
+						}
+					}
+				} else {
+					errorMessage = `HTTP ${response.status}`;
 				}
 
 				const errorLatencyMs = Date.now() - context.startTime;
 
 				Requests.record({
-					model: context.model,
-					source: context.source,
+					model: String(context.model ?? openaiBody.model),
+					source: 'error',
 					inputTokens: 0,
 					outputTokens: 0,
 					stream: false,
@@ -49,10 +50,12 @@ const plugin: FastifyPluginCallback = (app) => {
 				reply.header('openai-processing-ms', errorLatencyMs.toString());
 				reply.header('openai-version', '2020-10-01');
 
-				return reply.code(response.status).send({ error: { message: errorMessage, type: error?.error?.type } });
+				return reply.code(response.status).send({
+					error: { message: errorMessage, type: 'api_error' }
+				});
 			}
 
-			if (anthropicBody.stream) {
+			if (openaiBody.stream) {
 				const streamId = Date.now().toString();
 				const { stream, headers: streamHeaders } = OpenAIStreamHandler.createStreamResponse(
 					response,
@@ -68,12 +71,20 @@ const plugin: FastifyPluginCallback = (app) => {
 				return reply.send(stream);
 			}
 
-			const anthropicResponse = await response.json();
-			const openaiResponse = AnthropicToOpenai.convert(anthropicResponse, openaiBody.model);
+			// Non-streaming: convert to OpenAI format
+			let openaiResponse;
+			if (context.source === 'minimax') {
+				// MiniMax returns OpenAI-compatible format already; body already parsed
+				openaiResponse = context.bodyJson;
+			} else {
+				const anthropicResponse = await response.json();
+				openaiResponse = AnthropicToOpenai.convert(anthropicResponse, openaiBody.model);
+			}
+
 			const latencyMs = Date.now() - context.startTime;
 
 			Requests.record({
-				model: context.model,
+				model: String(context.model ?? openaiBody.model),
 				source: context.source,
 				inputTokens: context.inputTokens ?? 0,
 				outputTokens: context.outputTokens ?? 0,

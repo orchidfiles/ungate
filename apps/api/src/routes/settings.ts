@@ -1,6 +1,6 @@
 import { Settings } from '../database/settings';
 
-import type { AppSettings } from '../types';
+import type { AppSettings } from '@ungate/shared';
 import type { FastifyPluginCallback } from 'fastify';
 
 const plugin: FastifyPluginCallback = (app) => {

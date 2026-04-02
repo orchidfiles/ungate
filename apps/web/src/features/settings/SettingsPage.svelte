@@ -4,6 +4,7 @@ import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
 import IconSave from 'virtual:icons/lucide/save';
 
 import ClaudeAuthSection from '../auth/ClaudeAuthSection.svelte';
+import MiniMaxAuthSection from '../auth/MiniMaxAuthSection.svelte';
 import TunnelPanel from '../tunnel/TunnelPanel.svelte';
 
 import { getSettingsStore } from './settings-store.svelte';
@@ -54,7 +55,11 @@ function handleSaveAndRestart() {
 </script>
 
 <div class="space-y-6">
-	<ClaudeAuthSection />
+	<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+		<ClaudeAuthSection />
+		<MiniMaxAuthSection />
+	</div>
+
 	<TunnelPanel />
 
 	{#if store.error}

@@ -1,12 +1,12 @@
 import { logger } from 'src/utils/logger';
 
 import { OAuth } from '../auth/oauth';
-import { ANTHROPIC_API_URL, CLAUDE_CODE_BETA_HEADERS } from '../config';
-import { type RequestSource, type AnthropicRequest, type AnthropicError, type ContentBlock, type Tool } from '../types';
+import { config } from '../config';
 
 import { RequestBuilder } from './request-builder';
 import { ToolMapper } from './tool-mapper';
 
+import type { RequestSource, AnthropicRequest, AnthropicError, ContentBlock, Tool } from '../types';
 import type { ProxyResult, ToolUseBlock } from '../types/proxy';
 
 type RequestResult =
@@ -38,14 +38,18 @@ async function makeClaudeCodeRequest(
 			reverseToolMapping = mapped.reverseMapping;
 		}
 
-		const url = `${ANTHROPIC_API_URL}${endpoint}?beta=true`;
+		const url = `${config.anthropic.apiUrl}${endpoint}?beta=true`;
 
 		const response = await fetch(url, {
 			method: 'POST',
 			headers: {
 				Accept: 'application/json',
 				Authorization: `Bearer ${token.accessToken}`,
-				'anthropic-beta': CLAUDE_CODE_BETA_HEADERS,
+				'anthropic-beta': [
+					config.anthropic.beta.claudeCode,
+					config.anthropic.beta.oauth,
+					config.anthropic.beta.interleavedThinking
+				].join(','),
 				'anthropic-dangerous-direct-browser-access': 'true',
 				'anthropic-version': '2023-06-01',
 				'Content-Type': 'application/json',
@@ -131,7 +135,7 @@ async function makeClaudeCodeRequest(
 			return { success: false, error: errorMessage || 'Bad request', status: 400 };
 		}
 
-		return { success: true, response, source: 'claude_code', reverseToolMapping };
+		return { success: true, response, source: 'claude', reverseToolMapping };
 	} catch (error) {
 		logger.error(`Claude Code OAuth request failed: ${String(error)}`);
 
