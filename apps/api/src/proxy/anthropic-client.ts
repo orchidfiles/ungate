@@ -2,6 +2,7 @@ import { logger } from 'src/utils/logger';
 
 import { OAuth } from '../auth/oauth';
 import { config } from '../config';
+import { ProviderSettings } from '../database/settings';
 
 import { RequestBuilder } from './request-builder';
 import { ToolMapper } from './tool-mapper';
@@ -67,8 +68,41 @@ async function makeClaudeCodeRequest(
 		}
 
 		if (response.status === 401) {
-			logger.log('OAuth token expired or invalid, clearing cache');
-			OAuth.clearCachedToken();
+			const errorBody = await response.clone().text();
+			logger.error(`Claude Code 401 error: ${errorBody}`);
+
+			const row = ProviderSettings.get('claude');
+
+			if (row?.refreshToken) {
+				logger.log('Attempting token refresh after 401...');
+				const refreshed = await OAuth.refreshToken(row.refreshToken);
+
+				if (refreshed) {
+					const retryResponse = await fetch(url, {
+						method: 'POST',
+						headers: {
+							Accept: 'application/json',
+							Authorization: `Bearer ${refreshed.accessToken}`,
+							'anthropic-beta': [
+								config.anthropic.beta.claudeCode,
+								config.anthropic.beta.oauth,
+								config.anthropic.beta.interleavedThinking
+							].join(','),
+							'anthropic-dangerous-direct-browser-access': 'true',
+							'anthropic-version': '2023-06-01',
+							'Content-Type': 'application/json',
+							'User-Agent': 'claude-cli/2.1.9 (external, claude-vscode, agent-sdk/0.2.7)',
+							'x-app': 'cli',
+							...RequestBuilder.getStainlessHeaders()
+						},
+						body: JSON.stringify(preparedBody)
+					});
+
+					logger.log(`Retry after refresh: ${retryResponse.status}`);
+
+					return { success: true, response: retryResponse, source: 'claude', reverseToolMapping };
+				}
+			}
 
 			return { success: false, error: 'OAuth token invalid', status: 401 };
 		}

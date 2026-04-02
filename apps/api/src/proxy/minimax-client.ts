@@ -74,7 +74,7 @@ export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
 
 		if (!body.stream) {
 			try {
-				const rawJson = await response.json();
+				const rawJson = await response.clone().json();
 				const json = rawJson as {
 					usage?: { input_tokens?: number; output_tokens?: number };
 					error?: { message?: string; type?: string };
@@ -97,6 +97,19 @@ export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
 
 				inputTokens = json.usage?.input_tokens;
 				outputTokens = json.usage?.output_tokens;
+
+				return {
+					response,
+					context: {
+						model: body.model,
+						startTime,
+						source: 'minimax' as const,
+						reverseToolMapping: {},
+						inputTokens,
+						outputTokens,
+						bodyJson: json
+					}
+				};
 			} catch {
 				// response is not JSON (e.g. plain text error), continue without usage
 			}

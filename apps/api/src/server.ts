@@ -25,6 +25,7 @@ export async function startServer(): Promise<void> {
 	app.decorate('config', config);
 
 	await app.register(cors, { origin: '*' });
+
 	await app.register(healthPlugin);
 	await app.register(authPlugin);
 	await app.register(anthropicPlugin);

@@ -1,13 +1,20 @@
 import { logger } from 'src/utils/logger';
 
 import { AnthropicToOpenai } from '../adapter/anthropic-to-openai';
+import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
 import { Requests } from '../database/requests';
+import { HeadersExtractor } from '../handlers/headers-extractor';
 import { apiKeyAuth } from '../plugins/auth';
-import { proxyOpenAIRequest } from '../proxy/proxy-client';
+import { proxyRequest } from '../proxy/anthropic-client';
+import { proxyMiniMaxRequest } from '../proxy/minimax-client';
 import { OpenAIStreamHandler } from '../streaming/openai-stream-handler';
 
 import type { OpenAIChatRequest } from '../types/openai';
 import type { FastifyPluginCallback } from 'fastify';
+
+function isMiniMaxModel(model: string): boolean {
+	return model.trim().toLowerCase().startsWith('minimax');
+}
 
 const plugin: FastifyPluginCallback = (app) => {
 	const { config } = app;
@@ -15,30 +22,103 @@ const plugin: FastifyPluginCallback = (app) => {
 	app.post('/v1/chat/completions', { preHandler: apiKeyAuth(config) }, async (request, reply) => {
 		try {
 			const openaiBody = request.body as OpenAIChatRequest;
+			logger.log(`[openai] body: ${JSON.stringify(request.body)}`);
+			const minimaxRequest = isMiniMaxModel(openaiBody.model);
 
-			const { response, context } = await proxyOpenAIRequest(openaiBody);
+			if (minimaxRequest) {
+				const { response, context } = await proxyMiniMaxRequest(openaiBody);
 
-			if (!response.ok) {
-				let errorMessage = 'Unknown error';
+				if (!response.ok) {
+					let errorMessage = 'Unknown error';
 
-				if (context.bodyJson && typeof context.bodyJson === 'object') {
-					const err = (context.bodyJson as { error?: { message?: string; type?: string } }).error;
-					if (err?.message) {
-						errorMessage = err.message;
+					if (context.bodyJson && typeof context.bodyJson === 'object') {
+						const err = (context.bodyJson as { error?: { message?: string; type?: string } }).error;
 
-						if (errorMessage.includes('model:')) {
-							errorMessage = errorMessage.replace(/model:\s*x-([^\s,]+)/g, (_match, modelName) => `model: ${modelName}`);
+						if (err?.message) {
+							errorMessage = err.message;
+						}
+					} else {
+						errorMessage = `HTTP ${response.status}`;
+					}
+
+					const errorLatencyMs = Date.now() - context.startTime;
+
+					Requests.record({
+						model: String(context.model ?? openaiBody.model),
+						source: 'error',
+						inputTokens: 0,
+						outputTokens: 0,
+						stream: false,
+						latencyMs: errorLatencyMs,
+						error: errorMessage
+					});
+
+					reply.header('x-request-id', `req_${Date.now()}`);
+					reply.header('openai-processing-ms', errorLatencyMs.toString());
+					reply.header('openai-version', '2020-10-01');
+
+					return reply.code(response.status).send({
+						error: { message: errorMessage, type: 'api_error' }
+					});
+				}
+
+				if (openaiBody.stream) {
+					for (const [key, value] of response.headers.entries()) {
+						if (key.toLowerCase() !== 'content-encoding') {
+							reply.header(key, value);
 						}
 					}
-				} else {
-					errorMessage = `HTTP ${response.status}`;
+
+					reply.code(response.status);
+
+					if (response.body) {
+						return reply.send(response.body);
+					}
+
+					const fallbackBody = await response.arrayBuffer();
+
+					return reply.send(fallbackBody);
+				}
+
+				const responseJson = await response.json();
+				const openaiResponse = context.bodyJson ?? responseJson;
+				const latencyMs = Date.now() - context.startTime;
+
+				Requests.record({
+					model: String(context.model ?? openaiBody.model),
+					source: context.source,
+					inputTokens: context.inputTokens ?? 0,
+					outputTokens: context.outputTokens ?? 0,
+					stream: false,
+					latencyMs
+				});
+
+				reply.header('x-request-id', `req_${Date.now()}`);
+				reply.header('openai-processing-ms', latencyMs.toString());
+				reply.header('openai-version', '2020-10-01');
+
+				return reply.send(openaiResponse);
+			}
+
+			HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'OpenAI /v1/chat/completions');
+			const anthropicBody = openaiToAnthropic(openaiBody);
+			const headers = HeadersExtractor.extractAnthropicHeaders(request.headers);
+			const { response, context } = await proxyRequest('/v1/messages', anthropicBody, headers);
+
+			if (!response.ok) {
+				const errorJson = await response.json();
+				const error = errorJson as { error?: { message?: string; type?: string } };
+				let errorMessage = error?.error?.message ?? 'Unknown error';
+
+				if (errorMessage.includes('model:')) {
+					errorMessage = errorMessage.replace(/model:\s*x-([^\s,]+)/g, (_match, modelName) => `model: ${modelName}`);
 				}
 
 				const errorLatencyMs = Date.now() - context.startTime;
 
 				Requests.record({
-					model: String(context.model ?? openaiBody.model),
-					source: 'error',
+					model: context.model,
+					source: context.source,
 					inputTokens: 0,
 					outputTokens: 0,
 					stream: false,
@@ -50,12 +130,10 @@ const plugin: FastifyPluginCallback = (app) => {
 				reply.header('openai-processing-ms', errorLatencyMs.toString());
 				reply.header('openai-version', '2020-10-01');
 
-				return reply.code(response.status).send({
-					error: { message: errorMessage, type: 'api_error' }
-				});
+				return reply.code(response.status).send({ error: { message: errorMessage, type: error?.error?.type } });
 			}
 
-			if (openaiBody.stream) {
+			if (anthropicBody.stream) {
 				const streamId = Date.now().toString();
 				const { stream, headers: streamHeaders } = OpenAIStreamHandler.createStreamResponse(
 					response,
@@ -71,20 +149,12 @@ const plugin: FastifyPluginCallback = (app) => {
 				return reply.send(stream);
 			}
 
-			// Non-streaming: convert to OpenAI format
-			let openaiResponse;
-			if (context.source === 'minimax') {
-				// MiniMax returns OpenAI-compatible format already; body already parsed
-				openaiResponse = context.bodyJson;
-			} else {
-				const anthropicResponse = await response.json();
-				openaiResponse = AnthropicToOpenai.convert(anthropicResponse, openaiBody.model);
-			}
-
+			const anthropicResponse = await response.json();
+			const openaiResponse = AnthropicToOpenai.convert(anthropicResponse, openaiBody.model);
 			const latencyMs = Date.now() - context.startTime;
 
 			Requests.record({
-				model: String(context.model ?? openaiBody.model),
+				model: context.model,
 				source: context.source,
 				inputTokens: context.inputTokens ?? 0,
 				outputTokens: context.outputTokens ?? 0,
