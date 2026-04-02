@@ -101,6 +101,12 @@ function handleCopy() {
 				<IconRotateCcw class="size-4 animate-spin" />
 				{statusLabel[store.tunnel.status] ?? 'Working...'}
 			</button>
+			<button
+				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+				onclick={() => store.stopTunnel()}>
+				<IconSquare class="size-4" />
+				Stop
+			</button>
 		{/if}
 	</div>
 </div>

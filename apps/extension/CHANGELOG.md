@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 — 2026-01-02
+
+- Fix tunnel restart loop
+- Add Stop button while tunnel is starting
+
 ## 1.0.0 — 2026-03-31
 
 - OAuth login via Claude account

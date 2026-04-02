@@ -2,7 +2,7 @@
 	"name": "ungate",
 	"displayName": "Ungate",
 	"description": "Use your Claude subscription in Cursor without an API key",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"publisher": "orchidfiles",
 	"license": "MIT",
 	"pricing": "Free",

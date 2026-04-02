@@ -113,7 +113,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (lastStatus === 'running') {
 				const tunnelState = tunnelManager.getState();
 
-				if (tunnelState.status === 'running' || tunnelState.status === 'starting') {
+				if (tunnelState.status === 'running') {
 					void tunnelManager.restart(port);
 				}
 			}
