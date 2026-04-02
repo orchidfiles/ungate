@@ -1,4 +1,4 @@
-CREATE TABLE `app_settings` (
+CREATE TABLE IF NOT EXISTS `app_settings` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`port` integer DEFAULT 47821 NOT NULL,
 	`api_key` text,
@@ -6,7 +6,7 @@ CREATE TABLE `app_settings` (
 	`extra_instruction` text
 );
 --> statement-breakpoint
-CREATE TABLE `oauth_tokens` (
+CREATE TABLE IF NOT EXISTS `oauth_tokens` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`access_token` text NOT NULL,
 	`refresh_token` text NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE `oauth_tokens` (
 	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `requests` (
+CREATE TABLE IF NOT EXISTS `requests` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`timestamp` integer NOT NULL,
 	`model` text NOT NULL,
