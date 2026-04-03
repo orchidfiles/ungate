@@ -6,11 +6,22 @@ import type { RequestContext, StreamResult } from '../types/proxy';
 
 type MiniMaxStreamState = 'content' | 'thinking';
 
+interface MiniMaxToolCallDelta {
+	index: number;
+	id?: string;
+	type?: string;
+	function?: {
+		name?: string;
+		arguments?: string;
+	};
+}
+
 interface MiniMaxStreamEvent {
 	choices?: {
 		delta?: {
 			content?: string | null;
 			role?: string;
+			tool_calls?: MiniMaxToolCallDelta[];
 		};
 		finish_reason?: string | null;
 	}[];
@@ -164,7 +175,7 @@ export class MiniMaxStreamHandler {
 				const encoder = new TextEncoder();
 				let sseBuffer = '';
 				let sentStart = false;
-				let finishReason: 'stop' | 'length' | null = null;
+				let finishReason: 'stop' | 'length' | 'tool_calls' | null = null;
 				let sawDone = false;
 				let usage:
 					| {
@@ -217,7 +228,7 @@ export class MiniMaxStreamHandler {
 								}
 
 								if (choice?.finish_reason) {
-									finishReason = choice.finish_reason as 'stop' | 'length';
+									finishReason = choice.finish_reason as 'stop' | 'length' | 'tool_calls';
 								}
 
 								if (event.usage?.completion_tokens !== undefined) {
@@ -229,6 +240,22 @@ export class MiniMaxStreamHandler {
 										completion_tokens: completionTokens,
 										total_tokens: totalTokens
 									};
+								}
+
+								const toolCallDeltas = choice?.delta?.tool_calls;
+								if (toolCallDeltas && toolCallDeltas.length > 0) {
+									for (const tc of toolCallDeltas) {
+										const toolCallChunk: Record<string, unknown> = { index: tc.index };
+										if (tc.id) {
+											toolCallChunk.id = tc.id;
+											toolCallChunk.type = 'function';
+											toolCallChunk.function = { name: tc.function?.name ?? '', arguments: '' };
+										} else if (tc.function?.arguments !== undefined) {
+											toolCallChunk.function = { arguments: tc.function.arguments };
+										}
+										safeEnqueue(buildChunk(streamId, modelName, { tool_calls: [toolCallChunk] }));
+									}
+									continue;
 								}
 
 								const deltaText = choice?.delta?.content;

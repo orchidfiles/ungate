@@ -30,8 +30,10 @@ export const config = {
 export type Config = ProxyConfig;
 
 export function getConfig(settings: AppSettings): ProxyConfig {
+	const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : undefined;
+
 	return {
-		port: settings.port,
+		port: envPort ?? settings.port,
 		apiKey: settings.apiKey ?? undefined,
 		quietMode: settings.quiet
 	};

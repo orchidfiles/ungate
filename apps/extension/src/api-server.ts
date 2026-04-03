@@ -73,9 +73,7 @@ export class ApiServer {
 
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
-			...(isDev
-				? { UNGATE_DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') }
-				: { UNGATE_DRIZZLE_PATH: path.join(cwd, 'drizzle') })
+			...(isDev ? { DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
 		};
 
 		const nodeArgs = isDev ? ['-r', 'source-map-support/register', 'dist/main.js'] : ['bundle/main.cjs'];

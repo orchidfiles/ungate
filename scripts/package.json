@@ -1,0 +1,19 @@
+{
+	"name": "@ungate/scripts",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"tunnel": "tsx tunnel/main.ts",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix"
+	},
+	"dependencies": {
+		"cloudflared": "~0.7.1"
+	},
+	"devDependencies": {
+		"@types/node": "~22.0.0",
+		"@ungate/dev-kit": "workspace:*",
+		"tsx": "~4.19.3",
+		"typescript": "~5.7.0"
+	}
+}
