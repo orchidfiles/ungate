@@ -43,8 +43,7 @@ export class ApiServer {
 
 	restart(): void {
 		this.restartRequested = true;
-		this.lastStatus = 'stopped';
-		this.callbacks.onStatusChange('stopped');
+		this.setStatus('stopped');
 
 		if (!this.process) {
 			setTimeout(() => this.spawn(), 0);
@@ -74,9 +73,7 @@ export class ApiServer {
 
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
-			...(isDev
-				? { UNGATE_DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') }
-				: { UNGATE_DRIZZLE_PATH: path.join(cwd, 'drizzle') })
+			...(isDev ? { DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
 		};
 
 		const nodeArgs = isDev ? ['-r', 'source-map-support/register', 'dist/main.js'] : ['bundle/main.cjs'];
@@ -133,12 +130,12 @@ export class ApiServer {
 			return;
 		}
 
-		this.callbacks.onStatusChange('error');
+		this.setStatus('error');
 	}
 
 	private onError(err: Error): void {
 		this.callbacks.onLog('error', `[process] error: ${err.message}`);
-		this.callbacks.onStatusChange('error');
+		this.setStatus('error');
 	}
 
 	private startHealthCheck(): void {
@@ -154,17 +151,17 @@ export class ApiServer {
 					if (res.ok) {
 						const wasDown = this.lastStatus !== 'running';
 
-						this.callbacks.onStatusChange('running');
+						this.setStatus('running');
 
 						if (wasDown) {
 							this.callbacks.onPortDetected(this.port!);
 						}
 					} else {
-						this.callbacks.onStatusChange('error');
+						this.setStatus('error');
 					}
 				})
 				.catch(() => {
-					this.callbacks.onStatusChange('stopped');
+					this.setStatus('stopped');
 				});
 		}, HEALTH_CHECK_INTERVAL_MS);
 	}
@@ -174,6 +171,11 @@ export class ApiServer {
 			clearInterval(this.healthCheckTimer);
 			this.healthCheckTimer = null;
 		}
+	}
+
+	private setStatus(status: ServerStatus): void {
+		this.lastStatus = status;
+		this.callbacks.onStatusChange(status);
 	}
 
 	private getServerCwd(): string {

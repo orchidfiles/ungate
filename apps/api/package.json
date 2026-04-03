@@ -2,7 +2,7 @@
 	"name": "@ungate/api",
 	"type": "module",
 	"scripts": {
-		"start": "node -r source-map-support/register dist/main.js",
+		"start": "DB_PATH=$HOME/.ungate/data-dev.db PORT=4783 node -r source-map-support/register dist/main.js",
 		"build": "pnpm run build:compile && pnpm run build:postbuild",
 		"build:bundle": "tsup",
 		"build:watch": "tsc-watch -p tsconfig.build.json --onCompilationComplete \"pnpm run build:postbuild\"",

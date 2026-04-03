@@ -6,6 +6,7 @@ export interface ProxyConfig {
 
 export * from './anthropic';
 export * from './auth';
-export * from './database';
 export * from './openai';
 export * from './proxy';
+
+export type { RequestSource } from '@ungate/shared';

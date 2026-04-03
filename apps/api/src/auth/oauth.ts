@@ -1,13 +1,11 @@
 import { randomBytes } from 'node:crypto';
 
 import { minutesToMilliseconds } from 'date-fns';
-import { desc } from 'drizzle-orm';
 
 import { logger } from 'src/utils/logger';
 
-import { CLAUDE_CLIENT_ID, ANTHROPIC_TOKEN_URL, CLAUDE_OAUTH_REDIRECT_URI } from '../config';
-import { getDb } from '../database/index';
-import { oauthTokens } from '../database/schema';
+import { config } from '../config';
+import { ProviderSettings } from '../database/settings';
 
 import type { TokenInfo, TokenRefreshResponse, AuthStatus, LoginStart } from '../types/index';
 
@@ -61,8 +59,8 @@ export class OAuth {
 		const params = new URLSearchParams({
 			code: 'true',
 			response_type: 'code',
-			client_id: CLAUDE_CLIENT_ID,
-			redirect_uri: CLAUDE_OAUTH_REDIRECT_URI,
+			client_id: config.claude.clientId,
+			redirect_uri: config.claude.oauth.redirectUri,
 			scope: 'org:create_api_key user:profile user:inference',
 			code_challenge: challenge,
 			code_challenge_method: 'S256',
@@ -98,13 +96,13 @@ export class OAuth {
 		const state = parts[1] ?? sessionId;
 
 		try {
-			const response = await fetch(ANTHROPIC_TOKEN_URL, {
+			const response = await fetch(config.claude.oauth.tokenUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					grant_type: 'authorization_code',
-					client_id: CLAUDE_CLIENT_ID,
-					redirect_uri: CLAUDE_OAUTH_REDIRECT_URI,
+					client_id: config.claude.clientId,
+					redirect_uri: config.claude.oauth.redirectUri,
 					code,
 					state,
 					code_verifier: session.codeVerifier
@@ -122,16 +120,12 @@ export class OAuth {
 			const expiresAt = Date.now() + data.expires_in * 1000;
 			const email = data.account?.email_address;
 
-			const db = getDb();
-			db.insert(oauthTokens)
-				.values({
-					accessToken: data.access_token,
-					refreshToken: data.refresh_token,
-					expiresAt,
-					email: email ?? null,
-					createdAt: Date.now()
-				})
-				.run();
+			ProviderSettings.upsertOAuth('claude', {
+				accessToken: data.access_token,
+				refreshToken: data.refresh_token,
+				expiresAt,
+				email
+			});
 
 			logger.log('✓ OAuth login complete', email ? `(${email})` : '');
 
@@ -153,13 +147,13 @@ export class OAuth {
 		try {
 			logger.log('Refreshing OAuth token...');
 
-			const response = await fetch(ANTHROPIC_TOKEN_URL, {
+			const response = await fetch(config.claude.oauth.tokenUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					grant_type: 'refresh_token',
 					refresh_token: refreshTokenValue,
-					client_id: CLAUDE_CLIENT_ID
+					client_id: config.claude.clientId
 				})
 			});
 
@@ -173,17 +167,11 @@ export class OAuth {
 			const data: TokenRefreshResponse = await response.json();
 			const expiresAt = Date.now() + data.expires_in * 1000;
 
-			const db = getDb();
-			const prev = db.select().from(oauthTokens).orderBy(desc(oauthTokens.id)).limit(1).get();
-			db.insert(oauthTokens)
-				.values({
-					accessToken: data.access_token,
-					refreshToken: data.refresh_token,
-					expiresAt,
-					email: prev?.email ?? null,
-					createdAt: Date.now()
-				})
-				.run();
+			ProviderSettings.upsertOAuth('claude', {
+				accessToken: data.access_token,
+				refreshToken: data.refresh_token,
+				expiresAt
+			});
 
 			logger.log('Token refreshed successfully');
 
@@ -203,33 +191,31 @@ export class OAuth {
 	}
 
 	static async getValidToken(): Promise<TokenInfo | null> {
-		const db = getDb();
-		const row = db.select().from(oauthTokens).orderBy(desc(oauthTokens.id)).limit(1).get();
+		const row = ProviderSettings.get('claude');
 
 		if (!row) {
 			return null;
 		}
 
-		if (!this.isTokenExpired(row.expiresAt)) {
+		if (!this.isTokenExpired(row.expiresAt!)) {
 			const result: TokenInfo = {
 				accessToken: row.accessToken,
-				refreshToken: row.refreshToken,
-				expiresAt: row.expiresAt,
+				refreshToken: row.refreshToken!,
+				expiresAt: row.expiresAt!,
 				isExpired: false
 			};
 
 			return result;
 		}
 
-		return this.refreshToken(row.refreshToken);
+		return this.refreshToken(row.refreshToken!);
 	}
 
 	// No-op — token state is DB-backed, no in-memory cache to clear
 	static clearCachedToken(): void {}
 
 	static getAuthStatus(): AuthStatus {
-		const db = getDb();
-		const row = db.select().from(oauthTokens).orderBy(desc(oauthTokens.id)).limit(1).get();
+		const row = ProviderSettings.get('claude');
 
 		if (!row) {
 			return { authenticated: false };
@@ -239,8 +225,7 @@ export class OAuth {
 	}
 
 	static logout(): void {
-		const db = getDb();
-		db.delete(oauthTokens).run();
-		logger.log('✓ Logged out, all OAuth tokens deleted');
+		ProviderSettings.remove('claude');
+		logger.log('✓ Logged out, OAuth tokens deleted');
 	}
 }

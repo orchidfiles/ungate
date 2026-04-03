@@ -5,17 +5,17 @@ import { requests } from './schema';
 
 import { getDb } from './index';
 
-import type { RequestRecord } from '../types';
+import type { RequestRecord } from '@ungate/shared';
 
 export class Requests {
-	static record(record: RequestRecord): number {
+	static record(record: RequestRecord, cacheReadTokens?: number, cacheCreationTokens?: number): number {
 		const db = getDb();
 		const estimatedCost = Pricing.calculateCost(
 			record.model,
 			record.inputTokens,
 			record.outputTokens,
-			record.cacheReadTokens ?? 0,
-			record.cacheCreationTokens ?? 0
+			cacheReadTokens ?? 0,
+			cacheCreationTokens ?? 0
 		);
 
 		const result = db

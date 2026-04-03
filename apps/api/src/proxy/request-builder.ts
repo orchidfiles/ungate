@@ -2,7 +2,7 @@ import { platform, arch } from 'node:os';
 
 import { logger } from 'src/utils/logger';
 
-import { CLAUDE_CODE_SYSTEM_PROMPT } from '../config';
+import { config } from '../config';
 import { Settings } from '../database/settings';
 
 import type { AnthropicRequest, ContentBlock } from '../types';
@@ -74,8 +74,8 @@ export class RequestBuilder {
 
 		const systemPrompts: ContentBlock[] = [];
 
-		if (CLAUDE_CODE_SYSTEM_PROMPT) {
-			systemPrompts.push({ type: 'text', text: CLAUDE_CODE_SYSTEM_PROMPT });
+		if (config.claudeCode.systemPrompt) {
+			systemPrompts.push({ type: 'text', text: config.claudeCode.systemPrompt });
 		}
 
 		const extraInstruction = Settings.get().extraInstruction;

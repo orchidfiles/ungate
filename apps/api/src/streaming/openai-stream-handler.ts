@@ -210,16 +210,18 @@ export class OpenAIStreamHandler {
 											)
 										);
 
-										Requests.record({
-											model: context.model,
-											source: context.source,
-											inputTokens: finalUsage.input_tokens,
-											outputTokens: finalUsage.output_tokens,
-											cacheReadTokens: finalUsage.cache_read_input_tokens,
-											cacheCreationTokens: finalUsage.cache_creation_input_tokens,
-											stream: true,
-											latencyMs: Date.now() - context.startTime
-										});
+										Requests.record(
+											{
+												model: context.model,
+												source: context.source,
+												inputTokens: finalUsage.input_tokens,
+												outputTokens: finalUsage.output_tokens,
+												stream: true,
+												latencyMs: Date.now() - context.startTime
+											},
+											finalUsage.cache_read_input_tokens,
+											finalUsage.cache_creation_input_tokens
+										);
 									}
 
 									safeEnqueue(new TextEncoder().encode('data: [DONE]\n\n'));

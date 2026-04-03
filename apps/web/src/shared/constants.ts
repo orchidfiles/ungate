@@ -11,6 +11,6 @@ export const PERIODS: { value: Period; label: string }[] = [
 export const REQUEST_LIMITS = [20, 50, 100] as const;
 
 export const DEFAULTS = {
-	period: 'hour' as Period,
+	period: 'day' as Period,
 	requestLimit: 20
 };

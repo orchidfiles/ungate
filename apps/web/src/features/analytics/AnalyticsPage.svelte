@@ -12,9 +12,20 @@ import TokenChart from './TokenChart.svelte';
 
 const store = getAnalyticsStore();
 
+let confirmReset = $state(false);
+
 $effect(() => {
 	void store.load();
 });
+
+function handleReset() {
+	confirmReset = true;
+}
+
+function handleConfirmReset() {
+	confirmReset = false;
+	void store.reset();
+}
 </script>
 
 <div class="space-y-6">
@@ -39,7 +50,7 @@ $effect(() => {
 			</button>
 			<button
 				class="btn btn-sm preset-tonal-error"
-				onclick={() => store.reset()}>
+				onclick={handleReset}>
 				<IconTrash2 class="size-4" />
 				Reset
 			</button>
@@ -54,13 +65,17 @@ $effect(() => {
 	{/if}
 
 	{#if store.summary}
-		<div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
 			<StatCard
 				label="Total Requests"
 				value={Formatter.number(store.summary.totalRequests)} />
 			<StatCard
-				label="Claude Code"
-				value={Formatter.number(store.summary.claudeCodeRequests)}
+				label="Claude"
+				value={Formatter.number(store.summary.claudeRequests)}
+				variant="success" />
+			<StatCard
+				label="MiniMax"
+				value={Formatter.number(store.summary.minimaxRequests)}
 				variant="success" />
 			<StatCard
 				label="Errors"
@@ -78,4 +93,42 @@ $effect(() => {
 		requestLimit={store.requestLimit}
 		onModelFilterChange={(v) => (store.modelFilter = v)}
 		onLimitChange={(v) => (store.requestLimit = v)} />
+
+	{#if confirmReset}
+		<!-- Backdrop -->
+		<div
+			class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center"
+			role="presentation"
+			onclick={() => (confirmReset = false)}
+			onkeydown={(e) => e.key === 'Escape' && (confirmReset = false)}>
+			<!-- Modal -->
+			<div
+				class="card preset-tonal-surface border border-surface-700/30 p-6 w-80 space-y-4"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="reset-dialog-title"
+				tabindex="-1"
+				onclick={(e) => e.stopPropagation()}
+				onkeydown={(e) => e.stopPropagation()}>
+				<p
+					id="reset-dialog-title"
+					class="text-sm font-semibold">Reset Analytics?</p>
+				<p class="text-sm text-surface-400"
+					>This will permanently delete all recorded requests and statistics. This action cannot be undone.</p>
+				<div class="flex gap-2 justify-end">
+					<button
+						class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+						onclick={() => (confirmReset = false)}>
+						Cancel
+					</button>
+					<button
+						class="btn btn-sm preset-filled-error-500"
+						onclick={handleConfirmReset}>
+						<IconTrash2 class="size-4" />
+						Reset
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
