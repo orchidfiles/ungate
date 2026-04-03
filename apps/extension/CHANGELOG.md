@@ -1,6 +1,13 @@
 # Changelog
 
-## 1.0.1 — 2026-01-02
+## 1.1.0 — 2026-04-03
+
+- `MiniMax-M2.7` model support
+- MiniMax Base URL selector: `Global`, `China`, `Custom`
+- MiniMax streaming separates `<think>...</think>` reasoning from the final response
+- Provider-aware analytics for Claude and MiniMax
+
+## 1.0.1 — 2026-04-02
 
 - Fix tunnel restart loop
 - Add Stop button while tunnel is starting

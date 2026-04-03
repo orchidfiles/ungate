@@ -5,7 +5,7 @@
 <h3 align="center">Ungate</h3>
 
 <p align="center">
-  Use any Anthropic model in Cursor via a local proxy that translates OpenAI API calls into Anthropic API calls.
+  Use Claude subscription and MiniMax in Cursor through a local proxy that translates OpenAI-style requests into provider-native APIs.
 </p>
 
 <p align="center">
@@ -16,22 +16,25 @@
 
 ## Why
 
-Cursor supports Claude via API key, but that means paying per token. If you have a Claude Pro or Max subscription, you already have access — Cursor just can't use it. Ungate authenticates with your Claude account via OAuth and exposes an OpenAI-compatible endpoint for Cursor.
+Cursor can connect to OpenAI-compatible APIs, but provider-specific flows still get in the way. Claude subscriptions work through OAuth, not Anthropic API keys. MiniMax works through its own API and has provider-specific streaming behavior. Ungate hides those differences behind one local proxy and one Cursor-compatible endpoint.
 
 ## How it works
 
-Cursor allows a custom OpenAI Base URL. Ungate listens on that URL and translates requests to the Anthropic API — streaming, tool calls, and vision.
+Cursor allows a custom OpenAI Base URL. Ungate listens on that URL and translates requests to the target provider API, including streaming, tool calls, and vision where supported.
 
-The extension starts the proxy as a child process and displays the URL in a Webview panel. Copy it into Cursor Settings → Models → OpenAI Base URL.
+The extension starts the proxy as a child process and shows its settings in a Webview panel. From there you configure the provider, copy the public proxy URL, and copy the proxy API key that Cursor uses to authenticate to your local proxy.
 
 ## Features
 
-- [x] OpenAI-to-Anthropic request translation
+- [x] OpenAI-to-provider request translation
 - [x] Streaming responses
 - [x] Tool calls mapping
 - [x] Image support
 - [x] OAuth authentication via Claude account
+- [x] MiniMax API key authentication
+- [x] MiniMax `<think>...</think>` reasoning separation
 - [x] Request analytics
+- [x] Analytics split by provider: Claude and MiniMax
 - [x] Built-in web UI panel
 
 ## Installation
@@ -48,11 +51,16 @@ Or search `@id:orchidfiles.ungate` in the Extensions panel.
 
 ## Setup
 
-1. Open the Ungate panel from the Activity Bar.
-2. Sign in with your Claude account.
-3. Copy the proxy URL shown in the panel.
-4. Paste it into Cursor Settings → Models → OpenAI Base URL.
-5. Select a model in Cursor and start chatting.
+1. Install the extension. Ungate starts the local API automatically.
+2. Click the `Ungate :<port>` item in the status bar to open the Ungate panel.
+3. Choose the provider you want to use.
+4. For Claude, sign in with your Claude account through OAuth.
+5. For MiniMax, enter your MiniMax API key and choose a Base URL: `Global`, `China`, or `Custom`.
+6. In the Tunnel section, click `Start tunnel`, then copy the public URL shown in the panel.
+7. Paste it into Cursor Settings → Models → OpenAI Base URL.
+8. Copy the proxy API key from the same panel and paste it into Cursor Settings → Models → OpenAI API Key.
+9. If you use MiniMax, add `MiniMax-M2.7` as a custom model in Cursor.
+10. Select a model in Cursor and start chatting.
 
 ## Development
 
