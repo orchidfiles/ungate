@@ -2,7 +2,7 @@
 interface Props {
 	label: string;
 	value: string;
-	variant?: 'default' | 'success' | 'error';
+	variant?: 'default' | 'success' | 'warning' | 'error';
 }
 
 let { label, value, variant = 'default' }: Props = $props();
@@ -10,6 +10,7 @@ let { label, value, variant = 'default' }: Props = $props();
 const colorClass: Record<string, string> = {
 	default: 'text-surface-950-50',
 	success: 'text-success-500',
+	warning: 'text-warning-500',
 	error: 'text-error-500'
 };
 </script>

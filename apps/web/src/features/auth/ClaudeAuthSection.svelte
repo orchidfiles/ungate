@@ -109,13 +109,13 @@ function handleCancelLogin() {
 			Checking status...
 		</div>
 	{:else if authenticated}
-		<div class="flex items-center justify-between">
+		<div class="space-y-3">
 			<div class="flex items-center gap-2 text-sm">
 				<IconCheck class="size-4 text-success-500" />
 				<span>Logged in{email ? ` as ${email}` : ''}</span>
 			</div>
 			<button
-				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500 w-fit"
 				onclick={handleLogout}>
 				<IconLogOut class="size-4" />
 				Logout

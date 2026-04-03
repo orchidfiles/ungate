@@ -15,7 +15,8 @@ export class Analytics {
 		const totals = db
 			.select({
 				totalRequests: sql<number>`COUNT(*)`,
-				claudeCodeRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'claude' THEN 1 ELSE 0 END)`,
+				claudeRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'claude' THEN 1 ELSE 0 END)`,
+				minimaxRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'minimax' THEN 1 ELSE 0 END)`,
 				errorRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'error' THEN 1 ELSE 0 END)`,
 				totalInputTokens: sql<number>`SUM(${requests.inputTokens})`,
 				totalOutputTokens: sql<number>`SUM(${requests.outputTokens})`
@@ -26,7 +27,8 @@ export class Analytics {
 
 		return {
 			totalRequests: totals?.totalRequests ?? 0,
-			claudeCodeRequests: totals?.claudeCodeRequests ?? 0,
+			claudeRequests: totals?.claudeRequests ?? 0,
+			minimaxRequests: totals?.minimaxRequests ?? 0,
 			errorRequests: totals?.errorRequests ?? 0,
 			totalInputTokens: totals?.totalInputTokens ?? 0,
 			totalOutputTokens: totals?.totalOutputTokens ?? 0,

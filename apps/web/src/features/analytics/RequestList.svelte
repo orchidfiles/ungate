@@ -1,11 +1,13 @@
 <script lang="ts">
 import { Formatter } from '$shared/formatter';
 
+import { formatModelName, type ModelOption } from './analytics-store.svelte';
+
 import type { RequestRecord } from '@ungate/shared/frontend';
 
 interface Props {
 	requests: RequestRecord[];
-	models: string[];
+	models: ModelOption[];
 	modelFilter: string;
 	requestLimit: number;
 	onModelFilterChange: (value: string) => void;
@@ -36,18 +38,18 @@ function handleLimitChange(event: Event) {
 <div class="flex items-center gap-3 mb-4">
 	<span class="text-surface-400 text-sm">Model:</span>
 	<select
-		class="select w-auto text-sm"
+		class="select w-auto text-sm border border-surface-700/30"
 		value={modelFilter}
 		onchange={handleModelChange}>
 		<option value="">All Models</option>
 		{#each models as model}
-			<option value={model}>{model}</option>
+			<option value={model.value}>{model.label}</option>
 		{/each}
 	</select>
 
 	<span class="text-surface-400 text-sm">Limit:</span>
 	<select
-		class="select w-auto text-sm"
+		class="select w-auto text-sm border border-surface-700/30"
 		value={requestLimit}
 		onchange={handleLimitChange}>
 		{#each limits as limit}
@@ -65,11 +67,11 @@ function handleLimitChange(event: Event) {
 		{#each requests as req (req.id)}
 			<div class="p-4 border-b border-surface-700/30 last:border-b-0">
 				<div class="flex items-center justify-between mb-2">
-					<span class="text-primary-500 font-medium text-sm">{req.model}</span>
+					<span class="text-primary-500 font-medium text-sm">{formatModelName(req.model)}</span>
 					<span class="badge text-xs {sourceClasses[req.source] || 'preset-tonal-surface'}">{req.source}</span>
 				</div>
 				<div class="text-surface-400 text-xs">
-					{Formatter.date(req.timestamp)} &bull;
+					{Formatter.date(req.timestamp ?? 0)} &bull;
 					{req.inputTokens} in / {req.outputTokens} out
 					{#if req.latencyMs}
 						&bull; {Formatter.latency(req.latencyMs)}

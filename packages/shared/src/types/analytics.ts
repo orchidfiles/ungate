@@ -4,7 +4,8 @@ export type RequestSource = 'claude' | 'minimax' | 'error';
 
 export interface AnalyticsSummary {
 	totalRequests: number;
-	claudeCodeRequests: number;
+	claudeRequests: number;
+	minimaxRequests: number;
 	errorRequests: number;
 	totalInputTokens: number;
 	totalOutputTokens: number;

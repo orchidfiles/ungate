@@ -1,9 +1,8 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 
-import { logger, setQuietMode } from 'src/utils/logger';
+import { setQuietMode } from 'src/utils/logger';
 
-import { OAuth } from './auth/oauth';
 import { getConfig } from './config';
 import { getDb } from './database/index';
 import { Settings } from './database/settings';
@@ -38,14 +37,4 @@ export async function startServer(): Promise<void> {
 	// Always print port to stdout — extension parses this to detect the running port.
 	// Uses globalThis.console to bypass quiet mode.
 	globalThis.console.log(`[ungate] listening on localhost:${config.port}`);
-
-	const status = OAuth.getAuthStatus();
-
-	if (!status.authenticated) {
-		logger.log('\n⚠️  No Claude credentials found.');
-		logger.log('   Open the web UI and log in via the Claude Authorization section.\n');
-	} else {
-		const label = status.email ? ` (${status.email})` : '';
-		logger.log(`✓ Claude credentials loaded${label}`);
-	}
 }

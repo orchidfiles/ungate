@@ -48,6 +48,11 @@ export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
 		model: body.model,
 		messages: body.messages,
 		stream: body.stream ?? false,
+		...(body.stream && {
+			stream_options: {
+				include_usage: true
+			}
+		}),
 		max_completion_tokens: body.max_completion_tokens ?? body.max_tokens ?? 4096,
 		temperature: body.temperature,
 		top_p: body.top_p,

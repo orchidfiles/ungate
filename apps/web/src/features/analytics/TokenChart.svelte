@@ -47,8 +47,14 @@ let chartData = $derived.by(() => {
 				data={chartData}
 				x="time"
 				y={['input', 'output']}
-				padding={defaultChartPadding({ right: 10 })}
-				height={240} />
+				padding={defaultChartPadding({ top: 10, right: 10, bottom: 30, left: 64 })}
+				height={240}
+				xAxis={{
+					tickLabelProps: { class: 'text-surface-400 fill-surface-400' }
+				}}
+				yAxis={{
+					tickLabelProps: { class: 'text-surface-400 fill-surface-400' }
+				}} />
 		</div>
 	{:else}
 		<p class="text-surface-400 text-sm text-center py-10">No data</p>

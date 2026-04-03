@@ -14,7 +14,9 @@ import type { OpenAIChatRequest } from '../types/openai';
 import type { FastifyPluginCallback } from 'fastify';
 
 function isMiniMaxModel(model: string): boolean {
-	return model.trim().toLowerCase().startsWith('minimax');
+	const normalized = model.trim().toLowerCase();
+
+	return normalized.startsWith('minimax') || normalized.startsWith('mini-max');
 }
 
 const plugin: FastifyPluginCallback = (app) => {

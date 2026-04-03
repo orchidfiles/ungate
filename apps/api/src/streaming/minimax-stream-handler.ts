@@ -295,15 +295,16 @@ export class MiniMaxStreamHandler {
 
 					if (usage) {
 						safeEnqueue(buildUsageChunk(streamId, modelName, usage));
-						Requests.record({
-							model: modelName,
-							source: 'minimax',
-							inputTokens: usage.prompt_tokens,
-							outputTokens: usage.completion_tokens,
-							stream: true,
-							latencyMs: Date.now() - context.startTime
-						});
 					}
+
+					Requests.record({
+						model: modelName,
+						source: 'minimax',
+						inputTokens: usage?.prompt_tokens ?? 0,
+						outputTokens: usage?.completion_tokens ?? 0,
+						stream: true,
+						latencyMs: Date.now() - context.startTime
+					});
 
 					safeEnqueue('data: [DONE]\n\n');
 				} catch (error) {
