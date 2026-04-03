@@ -7,6 +7,7 @@ import { HeadersExtractor } from '../handlers/headers-extractor';
 import { apiKeyAuth } from '../plugins/auth';
 import { proxyRequest } from '../proxy/anthropic-client';
 import { proxyMiniMaxRequest } from '../proxy/minimax-client';
+import { MiniMaxStreamHandler } from '../streaming/minimax-stream-handler';
 import { OpenAIStreamHandler } from '../streaming/openai-stream-handler';
 
 import type { OpenAIChatRequest } from '../types/openai';
@@ -22,7 +23,7 @@ const plugin: FastifyPluginCallback = (app) => {
 	app.post('/v1/chat/completions', { preHandler: apiKeyAuth(config) }, async (request, reply) => {
 		try {
 			const openaiBody = request.body as OpenAIChatRequest;
-			logger.log(`[openai] body: ${JSON.stringify(request.body)}`);
+			// logger.log(`[openai] body: ${JSON.stringify(request.body)}`);
 			const minimaxRequest = isMiniMaxModel(openaiBody.model);
 
 			if (minimaxRequest) {
@@ -71,13 +72,18 @@ const plugin: FastifyPluginCallback = (app) => {
 
 					reply.code(response.status);
 
-					if (response.body) {
-						return reply.send(response.body);
+					const { stream, headers: streamHeaders } = MiniMaxStreamHandler.createStreamResponse(
+						response,
+						Date.now().toString(),
+						openaiBody.model,
+						context
+					);
+
+					for (const [key, value] of Object.entries(streamHeaders)) {
+						reply.header(key, value);
 					}
 
-					const fallbackBody = await response.arrayBuffer();
-
-					return reply.send(fallbackBody);
+					return reply.send(stream);
 				}
 
 				const responseJson = await response.json();
