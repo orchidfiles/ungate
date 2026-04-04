@@ -2,7 +2,7 @@ import { logger } from 'src/utils/logger';
 
 import { getProvider } from '../auth';
 import { config } from '../config';
-import { ProviderSettings } from '../database/settings';
+import { ProviderSettings } from '../database/provider-settings';
 
 import type { OpenAIChatRequest } from '../types/openai';
 
@@ -57,7 +57,9 @@ export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
 		temperature: body.temperature,
 		top_p: body.top_p,
 		...(body.tools && body.tools.length > 0 && { tools: body.tools }),
-		...(body.tool_choice && { tool_choice: body.tool_choice })
+		...(body.tool_choice && {
+			tool_choice: typeof body.tool_choice === 'string' ? body.tool_choice : 'auto'
+		})
 	};
 
 	const startTime = Date.now();

@@ -1,6 +1,6 @@
 import { OAuth } from '../auth/oauth';
 import { config } from '../config';
-import { ProviderSettings } from '../database/settings';
+import { ProviderSettings } from '../database/provider-settings';
 
 import type { FastifyPluginCallback } from 'fastify';
 

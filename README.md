@@ -22,6 +22,10 @@ Cursor can connect to OpenAI-compatible APIs, but provider-specific flows still 
 
 Cursor allows a custom OpenAI Base URL. Ungate listens on that URL and translates requests to the target provider API, including streaming, tool calls, and vision where supported.
 
+Cursor 3.0 introduced a bug: built-in model names can bypass `OpenAI Base URL` and go straight to the real provider API. In practice this means requests for standard Claude model names may skip Ungate entirely even when a proxy URL is configured. Ungate treats this as a bug because Cursor ignores the user's proxy setting for those models.
+
+Workaround: use custom model IDs from the Ungate `Models` section instead of Cursor's built-in Claude model names.
+
 The extension starts the proxy as a child process and shows its settings in a Webview panel. From there you configure the provider, copy the public proxy URL, and copy the proxy API key that Cursor uses to authenticate to your local proxy.
 
 ## Features
@@ -59,8 +63,9 @@ Or search `@id:orchidfiles.ungate` in the Extensions panel.
 6. In the Tunnel section, click `Start tunnel`, then copy the public URL shown in the panel.
 7. Paste it into Cursor Settings → Models → OpenAI Base URL.
 8. Copy the proxy API key from the same panel and paste it into Cursor Settings → Models → OpenAI API Key.
-9. If you use MiniMax, add `MiniMax-M2.7` as a custom model in Cursor.
-10. Select a model in Cursor and start chatting.
+9. In the Ungate `Models` section, copy the model IDs you want and add them as custom models in Cursor.
+10. If you use MiniMax, add `MiniMax-M2.7` as a custom model in Cursor.
+11. Select one of your custom models in Cursor and start chatting.
 
 ## Development
 
