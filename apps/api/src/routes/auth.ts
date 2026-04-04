@@ -1,4 +1,5 @@
 import { OAuth } from '../auth/oauth';
+import { OpenAIOAuth } from '../auth/openai-oauth';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
 
@@ -56,6 +57,39 @@ const plugin: FastifyPluginCallback = (app) => {
 
 	app.post('/auth/minimax/logout', (_request, reply) => {
 		ProviderSettings.remove('minimax');
+
+		return reply.send({ ok: true });
+	});
+
+	app.get('/auth/openai/start', async (_request, reply) => {
+		const result = await OpenAIOAuth.startLogin();
+
+		return reply.send(result);
+	});
+
+	app.get('/auth/openai/callback', async (request, reply) => {
+		const { code, state: sessionId } = request.query as { code?: string; state?: string };
+		if (!code || !sessionId) {
+			return reply
+				.type('text/html')
+				.send('<html><body><h1>Missing code or session</h1><p>Please close this window and try again.</p></body></html>');
+		}
+		const result = await OpenAIOAuth.completeLogin(code, sessionId);
+		if (result.ok) {
+			return reply
+				.type('text/html')
+				.send('<html><body><h1>Connected!</h1><p>You can close this window.</p><script>window.close()</script></body></html>');
+		}
+
+		return reply.type('text/html').send(`<html><body><h1>Error</h1><p>${result.error ?? 'Unknown error'}</p></body></html>`);
+	});
+
+	app.get('/auth/openai/status', (_request, reply) => {
+		return reply.send(OpenAIOAuth.getAuthStatus());
+	});
+
+	app.post('/auth/openai/logout', (_request, reply) => {
+		OpenAIOAuth.logout();
 
 		return reply.send({ ok: true });
 	});

@@ -1,8 +1,8 @@
 {
 	"name": "ungate",
 	"displayName": "Ungate",
-	"description": "Use your Claude subscription or MiniMax in Cursor from one extension",
-	"version": "1.2.0",
+	"description": "Use Claude, GPT, or MiniMax subscriptions in Cursor from one extension",
+	"version": "1.3.0",
 	"publisher": "orchidfiles",
 	"license": "MIT",
 	"pricing": "Free",
@@ -22,6 +22,8 @@
 	"keywords": [
 		"claude",
 		"anthropic",
+		"chatgpt",
+		"gpt",
 		"minimax",
 		"cursor",
 		"proxy",

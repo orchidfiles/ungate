@@ -18,6 +18,10 @@ export class ModelMappings {
 			return true;
 		}
 
+		if (value === 'openai') {
+			return true;
+		}
+
 		return false;
 	}
 
@@ -90,6 +94,42 @@ export class ModelMappings {
 			.sort((a, b) => a.sortOrder - b.sortOrder);
 
 		return this.clone(models);
+	}
+
+	static resolveForChatCompletion(requestedModel: string): ModelMappingConfig | null {
+		const enabled = this.list().filter((m) => m.enabled);
+		const t = requestedModel.trim();
+
+		if (!t) {
+			return null;
+		}
+
+		const byId = enabled.find((m) => m.id === t);
+
+		if (byId) {
+			return byId;
+		}
+
+		const byUpstream = enabled.find((m) => m.upstreamModel === t);
+
+		if (byUpstream) {
+			return byUpstream;
+		}
+
+		const lower = t.toLowerCase();
+		const byIdInsensitive = enabled.find((m) => m.id.toLowerCase() === lower);
+
+		if (byIdInsensitive) {
+			return byIdInsensitive;
+		}
+
+		const byUpstreamInsensitive = enabled.find((m) => m.upstreamModel.toLowerCase() === lower);
+
+		if (byUpstreamInsensitive) {
+			return byUpstreamInsensitive;
+		}
+
+		return null;
 	}
 
 	static replace(models: ModelMappingConfig[]): void {

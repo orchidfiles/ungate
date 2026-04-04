@@ -33,7 +33,7 @@ export class ProviderSettings {
 			.run();
 	}
 
-	static upsertOAuth(provider: 'claude', data: OAuthCredentials): void {
+	static upsertOAuth(provider: AIProviderName, data: OAuthCredentials): void {
 		const db = getDb();
 
 		db.insert(providerSettings)
@@ -43,6 +43,7 @@ export class ProviderSettings {
 				refreshToken: data.refreshToken,
 				expiresAt: data.expiresAt,
 				email: data.email ?? null,
+				accountId: data.accountId ?? null,
 				createdAt: Date.now()
 			})
 			.onConflictDoUpdate({
@@ -51,7 +52,8 @@ export class ProviderSettings {
 					accessToken: data.accessToken,
 					refreshToken: data.refreshToken,
 					expiresAt: data.expiresAt,
-					email: data.email ?? null
+					email: data.email ?? null,
+					accountId: data.accountId ?? null
 				}
 			})
 			.run();

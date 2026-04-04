@@ -2,12 +2,13 @@ import { logger } from 'src/utils/logger';
 
 import { AnthropicToOpenai } from '../adapter/anthropic-to-openai';
 import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
-import { Settings } from '../database/app-settings';
+import { ModelMappings } from '../database/model-mappings';
 import { Requests } from '../database/requests';
 import { HeadersExtractor } from '../handlers/headers-extractor';
 import { apiKeyAuth } from '../plugins/auth';
 import { proxyRequest } from '../proxy/anthropic-client';
 import { proxyMiniMaxRequest } from '../proxy/minimax-client';
+import { proxyOpenAIRequest } from '../proxy/proxy-client';
 import { MiniMaxStreamHandler } from '../streaming/minimax-stream-handler';
 import { OpenAIStreamHandler } from '../streaming/openai-stream-handler';
 
@@ -27,8 +28,7 @@ const plugin: FastifyPluginCallback = (app) => {
 		try {
 			const openaiBody = request.body as OpenAIChatRequest;
 
-			const settings = Settings.get();
-			const resolvedModel = settings.models.find((m) => m.id === openaiBody.model) ?? null;
+			const resolvedModel = ModelMappings.resolveForChatCompletion(openaiBody.model);
 
 			const isMiniMax = resolvedModel?.provider === 'minimax' || isMiniMaxModel(openaiBody.model);
 
@@ -113,6 +113,69 @@ const plugin: FastifyPluginCallback = (app) => {
 				reply.header('openai-version', '2020-10-01');
 
 				return reply.send(openaiResponse);
+			}
+
+			if (resolvedModel && String(resolvedModel.provider) === 'openai') {
+				const { response, context } = await proxyOpenAIRequest(
+					{
+						...openaiBody,
+						model: resolvedModel.upstreamModel,
+						...(resolvedModel.reasoningBudget ? { reasoning: { effort: resolvedModel.reasoningBudget } } : {})
+					},
+					'openai'
+				);
+
+				if (!response.ok) {
+					const errBody = await response.json().catch(() => ({ error: { message: `HTTP ${response.status}` } }));
+					const err = errBody as { error?: { message?: string; type?: string } };
+					const errorMessage = err?.error?.message ?? 'Unknown error';
+					const latencyMs = Date.now() - context.startTime;
+
+					Requests.record({
+						model: context.model,
+						source: 'error',
+						inputTokens: 0,
+						outputTokens: 0,
+						stream: false,
+						latencyMs,
+						error: errorMessage
+					});
+
+					reply.header('x-request-id', `req_${Date.now()}`);
+					reply.header('openai-processing-ms', latencyMs.toString());
+					reply.header('openai-version', '2020-10-01');
+
+					return reply.code(response.status).send({ error: { message: errorMessage, type: 'api_error' } });
+				}
+
+				if (openaiBody.stream) {
+					for (const [key, value] of response.headers.entries()) {
+						if (key.toLowerCase() !== 'content-encoding') {
+							reply.header(key, value);
+						}
+					}
+					reply.code(response.status);
+
+					return reply.send(response.body);
+				}
+
+				const responseJson = await response.json();
+				const latencyMs = Date.now() - context.startTime;
+
+				Requests.record({
+					model: context.model,
+					source: context.source,
+					inputTokens: context.inputTokens ?? 0,
+					outputTokens: context.outputTokens ?? 0,
+					stream: false,
+					latencyMs
+				});
+
+				reply.header('x-request-id', `req_${Date.now()}`);
+				reply.header('openai-processing-ms', latencyMs.toString());
+				reply.header('openai-version', '2020-10-01');
+
+				return reply.send(responseJson);
 			}
 
 			HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'OpenAI /v1/chat/completions');

@@ -5,6 +5,7 @@ import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
 import IconSave from 'virtual:icons/lucide/save';
 import IconTrash2 from 'virtual:icons/lucide/trash-2';
 
+import ChatGPTAuthSection from '../auth/ChatGPTAuthSection.svelte';
 import ClaudeAuthSection from '../auth/ClaudeAuthSection.svelte';
 import MiniMaxAuthSection from '../auth/MiniMaxAuthSection.svelte';
 import TunnelPanel from '../tunnel/TunnelPanel.svelte';
@@ -28,6 +29,10 @@ function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 
 		if (model.provider === 'minimax') {
 			provider = 'minimax';
+		}
+
+		if (model.provider === 'openai') {
+			provider = 'openai';
 		}
 
 		if (reasoningBudget !== 'low' && reasoningBudget !== 'medium' && reasoningBudget !== 'high') {
@@ -99,6 +104,7 @@ function handleSaveAndRestart() {
 <div class="space-y-6">
 	<div class="grid grid-cols-1 gap-4">
 		<ClaudeAuthSection />
+		<ChatGPTAuthSection />
 		<MiniMaxAuthSection />
 	</div>
 
@@ -203,6 +209,7 @@ function handleSaveAndRestart() {
 										bind:value={model.provider}>
 										<option value="claude">Claude</option>
 										<option value="minimax">MiniMax</option>
+										<option value="openai">OpenAI</option>
 									</select>
 								</label>
 

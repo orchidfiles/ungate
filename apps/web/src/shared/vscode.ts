@@ -1,5 +1,3 @@
-import type { WebviewToExtension } from '@ungate/shared/frontend';
-
 // acquireVsCodeApi() may only be called once — singleton
 const vscodeApi = (
 	window as Window & {
@@ -7,6 +5,6 @@ const vscodeApi = (
 	}
 ).acquireVsCodeApi?.();
 
-export function postExtensionMessage(message: WebviewToExtension): void {
+export function postExtensionMessage(message: { type: string; [key: string]: unknown }): void {
 	vscodeApi?.postMessage(message);
 }

@@ -1,10 +1,11 @@
-export type AIProviderName = 'claude' | 'minimax';
+export type AIProviderName = 'claude' | 'minimax' | 'openai';
 
 export interface OAuthCredentials {
 	accessToken: string;
-	refreshToken: string;
-	expiresAt: number;
-	email?: string;
+	refreshToken?: string | null;
+	expiresAt?: number | null;
+	email?: string | null;
+	accountId?: string | null;
 }
 
 export interface AIProvider {

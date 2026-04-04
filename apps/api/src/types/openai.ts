@@ -1,5 +1,5 @@
 export interface OpenAIMessage {
-	role: 'system' | 'user' | 'assistant' | 'tool';
+	role: 'system' | 'user' | 'assistant' | 'tool' | 'developer' | 'function';
 	content: string | OpenAIContentPart[] | null;
 	tool_calls?: OpenAIToolCall[];
 	tool_call_id?: string;
@@ -21,6 +21,7 @@ export interface OpenAITool {
 		name: string;
 		description?: string;
 		parameters?: Record<string, unknown>;
+		strict?: boolean;
 	};
 }
 
@@ -36,6 +37,8 @@ export interface OpenAIToolCall {
 export interface OpenAIChatRequest {
 	model: string;
 	messages: OpenAIMessage[];
+	/** Some clients send the thread as `input` (chat roles or Responses items) instead of `messages`. */
+	input?: unknown;
 	max_tokens?: number;
 	max_completion_tokens?: number;
 	temperature?: number;
@@ -47,6 +50,10 @@ export interface OpenAIChatRequest {
 	user?: string;
 	tools?: OpenAITool[];
 	tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
+	reasoning_effort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+	reasoning?: {
+		effort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+	};
 }
 
 export interface OpenAIChatResponse {

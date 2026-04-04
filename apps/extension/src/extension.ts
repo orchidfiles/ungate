@@ -42,7 +42,13 @@ function setStatus(state: 'running' | 'stopped' | 'error'): void {
 	statusBar.show();
 }
 
-function handleWebviewMessage(type: string): void {
+function handleWebviewMessage(message: { type: string; url?: string }): void {
+	if (message.type === 'open-external-url' && message.url) {
+		void vscode.env.openExternal(vscode.Uri.parse(message.url));
+
+		return;
+	}
+
 	const handlers: Record<string, () => void> = {
 		'webview-ready': () => dashboard.sendInitialState(tunnelManager.getState()),
 		'restart-server': () => apiServer.restart(),
@@ -75,7 +81,7 @@ function handleWebviewMessage(type: string): void {
 		}
 	};
 
-	handlers[type]?.();
+	handlers[message.type]?.();
 }
 
 export function activate(context: vscode.ExtensionContext): void {
