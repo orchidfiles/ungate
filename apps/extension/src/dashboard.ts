@@ -17,7 +17,7 @@ export class Dashboard {
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
-		private readonly onMessage: (type: string) => void
+		private readonly onMessage: (message: { type: string; url?: string }) => void
 	) {}
 
 	show(): void {
@@ -37,7 +37,7 @@ export class Dashboard {
 				return;
 			}
 
-			this.onMessage((message as { type: string }).type);
+			this.onMessage(message as { type: string; url?: string });
 		});
 
 		this.panel.webview.html = this.buildHtml();

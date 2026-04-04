@@ -103,6 +103,18 @@ export class Api {
 		return this.post('/auth/minimax/logout');
 	}
 
+	static authChatGPTStart(): Promise<{ authUrl: string; sessionId: string }> {
+		return this.get('/auth/openai/start');
+	}
+
+	static authChatGPTStatus(): Promise<{ authenticated: boolean; email?: string }> {
+		return this.get('/auth/openai/status');
+	}
+
+	static authChatGPTLogout(): Promise<{ ok: boolean }> {
+		return this.post('/auth/openai/logout');
+	}
+
 	static async healthCheck(): Promise<boolean> {
 		try {
 			const response = await fetch(`${this.baseUrl()}/health`, { signal: AbortSignal.timeout(1000) });

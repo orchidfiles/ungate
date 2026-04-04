@@ -16,6 +16,7 @@ export const providerSettings = sqliteTable('provider_settings', {
 	refreshToken: text(),
 	expiresAt: integer(),
 	email: text(),
+	accountId: text(),
 	createdAt: integer().notNull(),
 	baseUrl: text()
 });

@@ -1,6 +1,6 @@
 export type ClaudeReasoningBudget = 'low' | 'medium' | 'high';
 
-export type ModelMappingProvider = 'claude' | 'minimax';
+export type ModelMappingProvider = 'claude' | 'minimax' | 'openai';
 
 export interface ModelMappingConfig {
 	id: string;

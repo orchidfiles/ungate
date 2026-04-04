@@ -24,6 +24,22 @@ export const config = {
 	},
 	claudeCode: {
 		systemPrompt: "You are Claude Code, Anthropic's official CLI for Claude."
+	},
+	openai: {
+		oauth: {
+			authorizeUrl: 'https://auth.openai.com/oauth/authorize',
+			tokenUrl: 'https://auth.openai.com/oauth/token',
+			redirectUri: 'http://localhost:1455/auth/callback',
+			clientId: 'app_EMoamEEZ73f0CkXaXp7hrann',
+			scope: 'openid profile email offline_access',
+			codeChallengeMethod: 'S256',
+			extraParams: {
+				id_token_add_organizations: 'true',
+				codex_cli_simplified_flow: 'true',
+				originator: 'codex_cli_rs'
+			}
+		},
+		codexUrl: 'https://chatgpt.com/backend-api/codex'
 	}
 } as const;
 

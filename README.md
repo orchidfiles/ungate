@@ -5,7 +5,7 @@
 <h3 align="center">Ungate</h3>
 
 <p align="center">
-  Use Claude subscription and MiniMax in Cursor through a local proxy that translates OpenAI-style requests into provider-native APIs.
+  A Cursor-first extension for using Claude, ChatGPT, and MiniMax subscriptions in Cursor through a local proxy that translates OpenAI-style requests into provider-native APIs.
 </p>
 
 <p align="center">
@@ -16,7 +16,9 @@
 
 ## Why
 
-Cursor can connect to OpenAI-compatible APIs, but provider-specific flows still get in the way. Claude subscriptions work through OAuth, not Anthropic API keys. MiniMax works through its own API and has provider-specific streaming behavior. Ungate hides those differences behind one local proxy and one Cursor-compatible endpoint.
+Cursor can connect to OpenAI-compatible APIs, but each provider still has its own auth flow, model mapping, and streaming behavior. Claude and ChatGPT subscriptions use OAuth instead of direct API keys. MiniMax uses its own provider credentials. Ungate hides those differences behind one local proxy and one Cursor-compatible endpoint.
+
+Ungate is not a general-purpose AI gateway. It is a Cursor-first extension focused on one job: getting Claude, GPT, and MiniMax working in Cursor with less setup and less operational overhead than a standalone multi-provider router.
 
 ## How it works
 
@@ -28,17 +30,19 @@ Workaround: use custom model IDs from the Ungate `Models` section instead of Cur
 
 The extension starts the proxy as a child process and shows its settings in a Webview panel. From there you configure the provider, copy the public proxy URL, and copy the proxy API key that Cursor uses to authenticate to your local proxy.
 
+Ungate is about a shorter Cursor-specific setup path: install one extension, let it manage the local API lifecycle, configure providers in one place, and avoid running a separate gateway stack just to use Claude, GPT, or MiniMax in Cursor.
+
 ## Features
 
 - [x] OpenAI-to-provider request translation
 - [x] Streaming responses
 - [x] Tool calls mapping
 - [x] Image support
-- [x] OAuth authentication via Claude account
+- [x] OAuth authentication via Claude or ChatGPT account
 - [x] MiniMax API key authentication
 - [x] MiniMax `<think>...</think>` reasoning separation
 - [x] Request analytics
-- [x] Analytics split by provider: Claude and MiniMax
+- [x] Analytics split by provider: Claude, OpenAI, and MiniMax
 - [x] Built-in web UI panel
 
 ## Installation
@@ -59,13 +63,14 @@ Or search `@id:orchidfiles.ungate` in the Extensions panel.
 2. Click the `Ungate :<port>` item in the status bar to open the Ungate panel.
 3. Choose the provider you want to use.
 4. For Claude, sign in with your Claude account through OAuth.
-5. For MiniMax, enter your MiniMax API key and choose a Base URL: `Global`, `China`, or `Custom`.
-6. In the Tunnel section, click `Start tunnel`, then copy the public URL shown in the panel.
-7. Paste it into Cursor Settings → Models → OpenAI Base URL.
-8. Copy the proxy API key from the same panel and paste it into Cursor Settings → Models → OpenAI API Key.
-9. In the Ungate `Models` section, copy the model IDs you want and add them as custom models in Cursor.
-10. If you use MiniMax, add `MiniMax-M2.7` as a custom model in Cursor.
-11. Select one of your custom models in Cursor and start chatting.
+5. For ChatGPT, sign in with your ChatGPT account through OAuth.
+6. For MiniMax, enter your MiniMax API key and choose a Base URL: `Global`, `China`, or `Custom`.
+7. In the Tunnel section, click `Start tunnel`, then copy the public URL shown in the panel.
+8. Paste it into Cursor Settings → Models → OpenAI Base URL.
+9. Copy the proxy API key from the same panel and paste it into Cursor Settings → Models → OpenAI API Key.
+10. In the Ungate `Models` section, copy the model IDs you want and add them as custom models in Cursor.
+11. If you use MiniMax, add `MiniMax-M2.7` as a custom model in Cursor.
+12. Select one of your custom models in Cursor and start chatting.
 
 ## Development
 
