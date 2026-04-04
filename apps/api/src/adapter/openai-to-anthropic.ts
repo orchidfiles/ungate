@@ -2,8 +2,9 @@ import { logger } from 'src/utils/logger';
 
 import type { AnthropicRequest, AnthropicMessage, ContentBlock } from '../types';
 import type { OpenAIContentPart, OpenAIChatRequest } from '../types/openai';
+import type { ClaudeReasoningBudget } from '@ungate/shared';
 
-// Cursor model names: claude-4.6-{model}-{budget} or claude-4.6-{model}-{budget}-thinking
+// Legacy Cursor model names can include explicit budgets or the old "-thinking" suffix.
 // e.g. "claude-4.6-opus-high" → "claude-opus-4-6" with reasoningBudget="high"
 export function normalizeModelName(model: string): { model: string; reasoningBudget?: string } {
 	const match46 = /^claude-4\.6-(opus|sonnet)(?:-(high|medium|low))?(?:-thinking)?$/.exec(model);
@@ -29,6 +30,11 @@ export function normalizeModelName(model: string): { model: string; reasoningBud
 	}
 
 	return { model };
+}
+
+export interface AnthropicModelOverride {
+	model: string;
+	reasoningBudget?: ClaudeReasoningBudget | null;
 }
 
 function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]): string | ContentBlock[] {
@@ -80,7 +86,7 @@ function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]):
 	return blocks;
 }
 
-export function openaiToAnthropic(request: OpenAIChatRequest): AnthropicRequest {
+export function openaiToAnthropic(request: OpenAIChatRequest, override?: AnthropicModelOverride): AnthropicRequest {
 	const messages: AnthropicMessage[] = [];
 	let system: string | ContentBlock[] | undefined;
 
@@ -158,7 +164,18 @@ export function openaiToAnthropic(request: OpenAIChatRequest): AnthropicRequest 
 		messages.unshift({ role: 'user', content: 'Continue.' });
 	}
 
-	const normalized = normalizeModelName(request.model);
+	let normalized: { model: string; reasoningBudget?: string };
+
+	if (override) {
+		normalized = { model: override.model };
+
+		if (override.reasoningBudget) {
+			normalized.reasoningBudget = override.reasoningBudget;
+		}
+	} else {
+		normalized = normalizeModelName(request.model);
+	}
+
 	const maxTokens = request.max_tokens ?? request.max_completion_tokens ?? 4096;
 
 	logger.log(

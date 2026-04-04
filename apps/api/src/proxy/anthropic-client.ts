@@ -2,7 +2,7 @@ import { logger } from 'src/utils/logger';
 
 import { OAuth } from '../auth/oauth';
 import { config } from '../config';
-import { ProviderSettings } from '../database/settings';
+import { ProviderSettings } from '../database/provider-settings';
 
 import { RequestBuilder } from './request-builder';
 import { ToolMapper } from './tool-mapper';

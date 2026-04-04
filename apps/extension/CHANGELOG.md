@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 - 2026-04-04
+
+- Add custom model registry with editable model IDs
+- Add dedicated `model_mappings` storage and settings UI CRUD for model mappings
+- Document Cursor 3.0 bug where built-in model names can bypass `OpenAI Base URL` and hit the real provider API directly
+- Fix MiniMax streaming tool call argument assembly so tools and planning mode work correctly
+
 ## 1.1.0 — 2026-04-03
 
 - `MiniMax-M2.7` model support

@@ -1,4 +1,4 @@
-import { Settings } from '../database/settings';
+import { Settings } from '../database/app-settings';
 
 import type { AppSettings } from '@ungate/shared';
 import type { FastifyPluginCallback } from 'fastify';

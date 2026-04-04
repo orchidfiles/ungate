@@ -20,6 +20,16 @@ export const providerSettings = sqliteTable('provider_settings', {
 	baseUrl: text()
 });
 
+export const modelMappings = sqliteTable('model_mappings', {
+	id: text().primaryKey(),
+	label: text().notNull(),
+	provider: text().notNull(),
+	upstreamModel: text().notNull(),
+	enabled: integer({ mode: 'boolean' }).notNull().default(true),
+	sortOrder: integer().notNull().default(0),
+	reasoningBudget: text()
+});
+
 export const requests = sqliteTable('requests', {
 	id: integer().primaryKey({ autoIncrement: true }),
 	timestamp: integer().notNull(),
@@ -33,4 +43,4 @@ export const requests = sqliteTable('requests', {
 	error: text()
 });
 
-export const schema = { appSettings, requests, providerSettings };
+export const schema = { appSettings, requests, providerSettings, modelMappings };

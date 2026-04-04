@@ -3,7 +3,7 @@ import { platform, arch } from 'node:os';
 import { logger } from 'src/utils/logger';
 
 import { config } from '../config';
-import { Settings } from '../database/settings';
+import { Settings } from '../database/app-settings';
 
 import type { AnthropicRequest, ContentBlock } from '../types';
 

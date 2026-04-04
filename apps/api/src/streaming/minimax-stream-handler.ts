@@ -246,13 +246,25 @@ export class MiniMaxStreamHandler {
 								if (toolCallDeltas && toolCallDeltas.length > 0) {
 									for (const tc of toolCallDeltas) {
 										const toolCallChunk: Record<string, unknown> = { index: tc.index };
+										const toolFunction: Record<string, string> = {};
+
 										if (tc.id) {
 											toolCallChunk.id = tc.id;
-											toolCallChunk.type = 'function';
-											toolCallChunk.function = { name: tc.function?.name ?? '', arguments: '' };
-										} else if (tc.function?.arguments !== undefined) {
-											toolCallChunk.function = { arguments: tc.function.arguments };
+											toolCallChunk.type = tc.type ?? 'function';
 										}
+
+										if (tc.function?.name !== undefined) {
+											toolFunction.name = tc.function.name;
+										}
+
+										if (tc.function?.arguments !== undefined) {
+											toolFunction.arguments = tc.function.arguments;
+										}
+
+										if (Object.keys(toolFunction).length > 0) {
+											toolCallChunk.function = toolFunction;
+										}
+
 										safeEnqueue(buildChunk(streamId, modelName, { tool_calls: [toolCallChunk] }));
 									}
 									continue;

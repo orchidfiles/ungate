@@ -1,4 +1,4 @@
-import { ProviderSettings } from '../database/settings';
+import { ProviderSettings } from '../database/provider-settings';
 
 import type { AIProvider } from './base-provider';
 

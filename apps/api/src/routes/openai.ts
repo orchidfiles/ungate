@@ -2,6 +2,7 @@ import { logger } from 'src/utils/logger';
 
 import { AnthropicToOpenai } from '../adapter/anthropic-to-openai';
 import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
+import { Settings } from '../database/app-settings';
 import { Requests } from '../database/requests';
 import { HeadersExtractor } from '../handlers/headers-extractor';
 import { apiKeyAuth } from '../plugins/auth';
@@ -25,11 +26,17 @@ const plugin: FastifyPluginCallback = (app) => {
 	app.post('/v1/chat/completions', { preHandler: apiKeyAuth(config) }, async (request, reply) => {
 		try {
 			const openaiBody = request.body as OpenAIChatRequest;
-			// logger.log(`[openai] body: ${JSON.stringify(request.body)}`);
-			const minimaxRequest = isMiniMaxModel(openaiBody.model);
 
-			if (minimaxRequest) {
-				const { response, context } = await proxyMiniMaxRequest(openaiBody);
+			const settings = Settings.get();
+			const resolvedModel = settings.models.find((m) => m.id === openaiBody.model) ?? null;
+
+			const isMiniMax = resolvedModel?.provider === 'minimax' || isMiniMaxModel(openaiBody.model);
+
+			if (isMiniMax) {
+				const minimaxBody =
+					resolvedModel?.provider === 'minimax' ? { ...openaiBody, model: resolvedModel.upstreamModel } : openaiBody;
+
+				const { response, context } = await proxyMiniMaxRequest(minimaxBody);
 
 				if (!response.ok) {
 					let errorMessage = 'Unknown error';
@@ -47,7 +54,7 @@ const plugin: FastifyPluginCallback = (app) => {
 					const errorLatencyMs = Date.now() - context.startTime;
 
 					Requests.record({
-						model: String(context.model ?? openaiBody.model),
+						model: String(context.model ?? minimaxBody.model),
 						source: 'error',
 						inputTokens: 0,
 						outputTokens: 0,
@@ -65,7 +72,7 @@ const plugin: FastifyPluginCallback = (app) => {
 					});
 				}
 
-				if (openaiBody.stream) {
+				if (minimaxBody.stream) {
 					for (const [key, value] of response.headers.entries()) {
 						if (key.toLowerCase() !== 'content-encoding') {
 							reply.header(key, value);
@@ -77,7 +84,7 @@ const plugin: FastifyPluginCallback = (app) => {
 					const { stream, headers: streamHeaders } = MiniMaxStreamHandler.createStreamResponse(
 						response,
 						Date.now().toString(),
-						openaiBody.model,
+						minimaxBody.model,
 						context
 					);
 
@@ -93,7 +100,7 @@ const plugin: FastifyPluginCallback = (app) => {
 				const latencyMs = Date.now() - context.startTime;
 
 				Requests.record({
-					model: String(context.model ?? openaiBody.model),
+					model: String(context.model ?? minimaxBody.model),
 					source: context.source,
 					inputTokens: context.inputTokens ?? 0,
 					outputTokens: context.outputTokens ?? 0,
@@ -109,7 +116,18 @@ const plugin: FastifyPluginCallback = (app) => {
 			}
 
 			HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'OpenAI /v1/chat/completions');
-			const anthropicBody = openaiToAnthropic(openaiBody);
+
+			let anthropicBody: ReturnType<typeof openaiToAnthropic>;
+
+			if (resolvedModel?.provider === 'claude') {
+				anthropicBody = openaiToAnthropic(openaiBody, {
+					model: resolvedModel.upstreamModel,
+					reasoningBudget: resolvedModel.reasoningBudget
+				});
+			} else {
+				anthropicBody = openaiToAnthropic(openaiBody);
+			}
+
 			const headers = HeadersExtractor.extractAnthropicHeaders(request.headers);
 			const { response, context } = await proxyRequest('/v1/messages', anthropicBody, headers);
 

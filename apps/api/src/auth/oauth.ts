@@ -5,7 +5,7 @@ import { minutesToMilliseconds } from 'date-fns';
 import { logger } from 'src/utils/logger';
 
 import { config } from '../config';
-import { ProviderSettings } from '../database/settings';
+import { ProviderSettings } from '../database/provider-settings';
 
 import type { TokenInfo, TokenRefreshResponse, AuthStatus, LoginStart } from '../types/index';
 
