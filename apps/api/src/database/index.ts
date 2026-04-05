@@ -11,21 +11,36 @@ import { schema } from './schema';
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
 
 const MIGRATIONS_PATH = process.env.DRIZZLE_PATH ?? join(import.meta.dirname, '../../drizzle');
-const DB_PATH = process.env.DB_PATH ?? join(homedir(), '.ungate', 'data.db');
 
 let _db: DrizzleDb | null = null;
 let _sqlite: DatabaseType | null = null;
+let _dbPath: string | null = null;
+
+function resolveDbPath(): string {
+	return process.env.DB_PATH ?? join(homedir(), '.ungate', 'data.db');
+}
+
+export function getCurrentDbPath(): string {
+	return _dbPath ?? resolveDbPath();
+}
 
 export function getDb(): DrizzleDb {
-	if (!_db) {
-		mkdirSync(dirname(DB_PATH), { recursive: true });
+	const dbPath = resolveDbPath();
 
-		_sqlite = new BetterSqlite3(DB_PATH);
+	if (!_db) {
+		mkdirSync(dirname(dbPath), { recursive: true });
+
+		_sqlite = new BetterSqlite3(dbPath);
 		_sqlite.pragma('journal_mode = WAL');
 
 		_db = drizzle(_sqlite, { schema, casing: 'snake_case' });
+		_dbPath = dbPath;
 
 		migrate(_db, { migrationsFolder: MIGRATIONS_PATH });
+	} else if (_dbPath !== dbPath) {
+		throw new Error(
+			`Database already initialized with "${_dbPath}", but current DB_PATH is "${dbPath}". Restart process to switch database.`
+		);
 	}
 
 	return _db;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createResponsesStreamState, processResponsesChunk } from '../src/proxy/responses-stream-mapper';
+import { createResponsesStreamState, processResponsesChunk } from 'src/proxy/responses-stream-mapper';
 
 function encodeSse(events: Record<string, unknown>[]): string {
 	return events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
@@ -18,7 +18,8 @@ function collectChunks(events: Record<string, unknown>[]) {
 	return {
 		chunks,
 		finishReason: finish?.[0]?.finish_reason ?? null,
-		toolDeltas
+		toolDeltas,
+		doneCount: out.filter((x) => x.type === 'done').length
 	};
 }
 
@@ -33,6 +34,7 @@ describe('responses-stream-mapper replay', () => {
 
 		expect(got.finishReason).toBe('stop');
 		expect(got.toolDeltas).toBe(0);
+		expect(got.doneCount).toBe(1);
 	});
 
 	it('handles function_call added + arguments delta + done', () => {
@@ -124,5 +126,54 @@ describe('responses-stream-mapper replay', () => {
 
 		expect(got.finishReason).toBe('tool_calls');
 		expect(got.toolDeltas).toBeGreaterThan(0);
+	});
+
+	it('emits assistant text from output_text.done when delta never arrived', () => {
+		const events = [
+			{ type: 'response.created', response: { id: 'resp_done_only' } },
+			{ type: 'response.output_text.done', text: 'from-done' },
+			{ type: 'response.completed', response: {} }
+		];
+		const got = collectChunks(events);
+		const chunkWithText = got.chunks.find((chunk) => {
+			const delta = (chunk.choices as Array<Record<string, unknown>>)[0]?.delta as Record<string, unknown> | undefined;
+			return delta?.content === 'from-done';
+		});
+
+		expect(chunkWithText).toBeTruthy();
+		expect(got.finishReason).toBe('stop');
+	});
+
+	it('falls back to response.output assistant text on completion', () => {
+		const events = [
+			{ type: 'response.created', response: { id: 'resp_fallback' } },
+			{
+				type: 'response.completed',
+				response: {
+					output: [
+						{
+							type: 'message',
+							role: 'assistant',
+							content: [{ type: 'output_text', text: 'fallback-text' }]
+						}
+					],
+					usage: { input_tokens: 2, output_tokens: 4, total_tokens: 6 }
+				}
+			}
+		];
+		const got = collectChunks(events);
+		const chunkWithText = got.chunks.find((chunk) => {
+			const delta = (chunk.choices as Array<Record<string, unknown>>)[0]?.delta as Record<string, unknown> | undefined;
+			return delta?.content === 'fallback-text';
+		});
+		const usageChunk = got.chunks.find((chunk) => chunk.usage) as Record<string, unknown> | undefined;
+
+		expect(chunkWithText).toBeTruthy();
+		expect(usageChunk?.usage).toEqual({
+			prompt_tokens: 2,
+			completion_tokens: 4,
+			total_tokens: 6
+		});
+		expect(got.finishReason).toBe('stop');
 	});
 });

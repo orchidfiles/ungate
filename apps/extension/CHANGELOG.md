@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 - 2026-04-04
+
+- Add ChatGPT OAuth authentication
+- Add GPT and Codex model support through the model registry
+- Track OpenAI usage in analytics and provider settings alongside Claude and MiniMax
+
 ## 1.2.0 - 2026-04-04
 
 - Add custom model registry with editable model IDs

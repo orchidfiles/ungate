@@ -16,9 +16,7 @@
 
 ## Why
 
-Cursor can connect to OpenAI-compatible APIs, but each provider still has its own auth flow, model mapping, and streaming behavior. Claude and ChatGPT subscriptions use OAuth instead of direct API keys. MiniMax uses its own provider credentials. Ungate hides those differences behind one local proxy and one Cursor-compatible endpoint.
-
-Ungate is not a general-purpose AI gateway. It is a Cursor-first extension focused on one job: getting Claude, GPT, and MiniMax working in Cursor with less setup and less operational overhead than a standalone multi-provider router.
+Cursor can connect to OpenAI-compatible APIs, but each provider still has its own auth flow, model mapping, and streaming behavior. Claude and ChatGPT subscriptions use OAuth instead of direct API keys. MiniMax uses its own provider credentials. Ungate is a Cursor extension that hides those differences behind one local proxy and one Cursor-compatible endpoint.
 
 ## How it works
 
@@ -28,9 +26,7 @@ Cursor 3.0 introduced a bug: built-in model names can bypass `OpenAI Base URL` a
 
 Workaround: use custom model IDs from the Ungate `Models` section instead of Cursor's built-in Claude model names.
 
-The extension starts the proxy as a child process and shows its settings in a Webview panel. From there you configure the provider, copy the public proxy URL, and copy the proxy API key that Cursor uses to authenticate to your local proxy.
-
-Ungate is about a shorter Cursor-specific setup path: install one extension, let it manage the local API lifecycle, configure providers in one place, and avoid running a separate gateway stack just to use Claude, GPT, or MiniMax in Cursor.
+The extension starts the proxy as a child process, manages the tunnel that makes it reachable to Cursor's backend, and shows its settings in a Webview panel. From there you configure providers, copy the public proxy URL, and copy the proxy API key that Cursor uses to authenticate to your local proxy.
 
 ## Features
 
