@@ -42,7 +42,7 @@ export async function proxyOpenAIRequest(
 	}
 
 	if (resolved === 'minimax') {
-		return proxyMiniMaxRequest(openaiBody) as unknown as { response: Response; context: RequestContext };
+		return proxyMiniMaxRequest(openaiBody);
 	}
 
 	// Claude: convert OpenAI → Anthropic → proxy
