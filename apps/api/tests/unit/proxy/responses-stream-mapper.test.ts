@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { createResponsesStreamState, processResponsesChunk } from 'src/proxy/responses-stream-mapper';
+import { ResponsesSseProcessor, StreamStateFactory } from 'src/proxy/responses-stream-mapper';
 
 function encodeSse(events: Record<string, unknown>[]): string {
 	return events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
 }
 
 function collectChunks(events: Record<string, unknown>[]) {
-	const state = createResponsesStreamState('gpt-5.3-codex');
-	const out = processResponsesChunk(state, encodeSse(events));
+	const state = StreamStateFactory.create('gpt-5.3-codex');
+	const out = ResponsesSseProcessor.process(state, encodeSse(events));
 	const chunks = out.filter((x) => x.type === 'chunk').map((x) => x.data!);
 	const finish = chunks.at(-1)?.choices as { finish_reason?: string }[] | undefined;
 	const toolDeltas = chunks.flatMap(
@@ -136,7 +136,8 @@ describe('responses-stream-mapper replay', () => {
 		];
 		const got = collectChunks(events);
 		const chunkWithText = got.chunks.find((chunk) => {
-			const delta = (chunk.choices as Array<Record<string, unknown>>)[0]?.delta as Record<string, unknown> | undefined;
+			const delta = (chunk.choices as Record<string, unknown>[])[0]?.delta as Record<string, unknown> | undefined;
+
 			return delta?.content === 'from-done';
 		});
 
@@ -163,10 +164,11 @@ describe('responses-stream-mapper replay', () => {
 		];
 		const got = collectChunks(events);
 		const chunkWithText = got.chunks.find((chunk) => {
-			const delta = (chunk.choices as Array<Record<string, unknown>>)[0]?.delta as Record<string, unknown> | undefined;
+			const delta = (chunk.choices as Record<string, unknown>[])[0]?.delta as Record<string, unknown> | undefined;
+
 			return delta?.content === 'fallback-text';
 		});
-		const usageChunk = got.chunks.find((chunk) => chunk.usage) as Record<string, unknown> | undefined;
+		const usageChunk = got.chunks.find((chunk) => chunk.usage);
 
 		expect(chunkWithText).toBeTruthy();
 		expect(usageChunk?.usage).toEqual({
