@@ -1,5 +1,5 @@
 import { OAuth } from '../auth/oauth';
-import { OpenAIOAuth } from '../auth/openai-oauth';
+import { OpenAIOAuthService } from '../auth/openai/openai-oauth-service';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
 
@@ -62,7 +62,7 @@ const plugin: FastifyPluginCallback = (app) => {
 	});
 
 	app.get('/auth/openai/start', async (_request, reply) => {
-		const result = await OpenAIOAuth.startLogin();
+		const result = await OpenAIOAuthService.startLogin();
 
 		return reply.send(result);
 	});
@@ -74,7 +74,7 @@ const plugin: FastifyPluginCallback = (app) => {
 				.type('text/html')
 				.send('<html><body><h1>Missing code or session</h1><p>Please close this window and try again.</p></body></html>');
 		}
-		const result = await OpenAIOAuth.completeLogin(code, sessionId);
+		const result = await OpenAIOAuthService.completeLogin(code, sessionId);
 		if (result.ok) {
 			return reply
 				.type('text/html')
@@ -85,11 +85,11 @@ const plugin: FastifyPluginCallback = (app) => {
 	});
 
 	app.get('/auth/openai/status', (_request, reply) => {
-		return reply.send(OpenAIOAuth.getAuthStatus());
+		return reply.send(OpenAIOAuthService.getAuthStatus());
 	});
 
 	app.post('/auth/openai/logout', (_request, reply) => {
-		OpenAIOAuth.logout();
+		OpenAIOAuthService.logout();
 
 		return reply.send({ ok: true });
 	});

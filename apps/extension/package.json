@@ -2,7 +2,7 @@
 	"name": "ungate",
 	"displayName": "Ungate",
 	"description": "Use Claude, GPT, or MiniMax subscriptions in Cursor from one extension",
-	"version": "1.3.0",
+	"version": "1.3.1",
 	"publisher": "orchidfiles",
 	"license": "MIT",
 	"pricing": "Free",
@@ -50,7 +50,7 @@
 		]
 	},
 	"scripts": {
-		"build": "tsup",
+		"build": "rm -rf dist && tsup",
 		"publish": "ovsx publish out/ungate.vsix",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix"

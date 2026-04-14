@@ -5,18 +5,11 @@ import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
 
 import type { OpenAIChatRequest } from '../types/openai';
+import type { RequestContext } from '../types/proxy';
 
 export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
 	response: Response;
-	context: {
-		model: string;
-		startTime: number;
-		source: 'minimax';
-		reverseToolMapping: Record<string, string>;
-		inputTokens?: number;
-		outputTokens?: number;
-		bodyJson?: unknown;
-	};
+	context: RequestContext;
 }> {
 	const creds = ProviderSettings.get('minimax');
 	const minimaxUrl = creds?.baseUrl ?? config.minimax.baseUrlGlobal;

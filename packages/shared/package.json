@@ -16,9 +16,8 @@
 	],
 	"scripts": {
 		"build": "pnpm run clean && tsc -p tsconfig.build.json && pnpm run build:postbuild",
-		"build:watch": "tsc-watch -p tsconfig.build.json --onCompilationComplete \"pnpm run build:postbuild\"",
-		"build:compile": "tsc -p tsconfig.build.json",
-		"build:postbuild": "tsc-alias -p tsconfig.build.json && node node_modules/@ungate/dev-kit/src/fix-esm-imports.mjs lib",
+		"build:watch": "pnpm run clean && tsc-watch -p tsconfig.build.json --onCompilationComplete \"pnpm run build:postbuild\"",
+		"build:postbuild": "tsc-alias -p tsconfig.build.json --resolve-full-paths",
 		"clean": "rm -rf lib",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix"

@@ -2,7 +2,7 @@ import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
 
 import { proxyRequest as proxyAnthropicRequest } from './anthropic-client';
 import { proxyMiniMaxRequest } from './minimax-client';
-import { proxyOpenAIRequest as proxyCodexRequest } from './openai-client';
+import { OpenAiClient } from './openai-client';
 
 import type { AIProviderName } from '../auth/base-provider';
 import type { AnthropicRequest } from '../types';
@@ -38,11 +38,11 @@ export async function proxyOpenAIRequest(
 	const resolved = provider ?? detectProvider(openaiBody.model);
 
 	if (resolved === 'openai') {
-		return proxyCodexRequest(openaiBody);
+		return OpenAiClient.proxy(openaiBody);
 	}
 
 	if (resolved === 'minimax') {
-		return proxyMiniMaxRequest(openaiBody) as unknown as { response: Response; context: RequestContext };
+		return proxyMiniMaxRequest(openaiBody);
 	}
 
 	// Claude: convert OpenAI → Anthropic → proxy

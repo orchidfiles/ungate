@@ -46,7 +46,15 @@ export const config = {
 export type Config = ProxyConfig;
 
 export function getConfig(settings: AppSettings): ProxyConfig {
-	const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : undefined;
+	let envPort: number | undefined;
+
+	if (process.env.PORT) {
+		const parsed = parseInt(process.env.PORT, 10);
+
+		if (!Number.isNaN(parsed)) {
+			envPort = parsed;
+		}
+	}
 
 	return {
 		port: envPort ?? settings.port,
