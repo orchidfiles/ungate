@@ -39,7 +39,7 @@ export class ResponsesInputText {
 					continue;
 				}
 
-				const part = block as Record<string, unknown>;
+				const part = block as unknown as Record<string, unknown>;
 				const partType = typeof part.type === 'string' ? part.type : '';
 
 				if (partType === 'image_url' || partType === 'input_image') {
@@ -138,7 +138,7 @@ export class ResponsesInputText {
 						continue;
 					}
 
-					const part = block as Record<string, unknown>;
+					const part = block as unknown as Record<string, unknown>;
 					const partType = typeof part.type === 'string' ? part.type : '';
 
 					if ((partType === 'text' || partType === 'input_text') && typeof part.text === 'string' && part.text.trim()) {
