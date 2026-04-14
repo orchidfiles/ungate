@@ -27,8 +27,8 @@ vi.mock('src/auth/oauth', () => ({
 	}
 }));
 
-vi.mock('src/auth/openai-oauth', () => ({
-	OpenAIOAuth: {
+vi.mock('src/auth/openai/openai-oauth-service', () => ({
+	OpenAIOAuthService: {
 		startLogin: (...args: unknown[]) => openaiStartLoginMock(...args),
 		completeLogin: (...args: unknown[]) => openaiCompleteLoginMock(...args),
 		getAuthStatus: (...args: unknown[]) => openaiStatusMock(...args),

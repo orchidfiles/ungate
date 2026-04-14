@@ -1,6 +1,6 @@
 import { AnthropicToOpenai } from 'src/adapter/anthropic-to-openai';
 import { HeadersExtractor } from 'src/handlers/headers-extractor';
-import { CompletionRequestTelemetry, OpenAiProxyResponseHeaders, RequestRecorder } from 'src/metrics';
+import { CompletionRequestTelemetry } from 'src/metrics';
 import { CompletionErrorMapper, CompletionModelRouting, CompletionStreamingGateway } from 'src/orchestration/openai';
 import { proxyRequest } from 'src/proxy/anthropic-client';
 import { logger } from 'src/utils/logger';
@@ -58,7 +58,7 @@ export class ClaudeChatHandler {
 		const openaiResponse = AnthropicToOpenai.convert(anthropicResponse, openaiBody.model);
 		const latencyMs = Date.now() - context.startTime;
 
-		RequestRecorder.record({
+		CompletionRequestTelemetry.record({
 			model: context.model,
 			source: context.source,
 			inputTokens: context.inputTokens ?? 0,
@@ -71,7 +71,7 @@ export class ClaudeChatHandler {
 			`Recorded non-streaming request: ${context.model} | ${context.inputTokens ?? 0} in / ${context.outputTokens ?? 0} out`
 		);
 
-		OpenAiProxyResponseHeaders.apply(reply, latencyMs);
+		CompletionRequestTelemetry.applyProxyHeaders(reply, latencyMs);
 
 		return reply.send(openaiResponse);
 	}

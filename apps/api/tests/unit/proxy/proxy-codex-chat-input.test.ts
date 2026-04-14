@@ -1,15 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-	buildCodexInputFromOpenAIMessages,
-	coerceOpenAIMessagesFromRequestBody,
-	expandBodyInputToCodexItems,
-	normalizeCodexInputAssistantTextBlocks
-} from 'src/proxy/codex-chat-input';
+import { CodexInputUtils } from 'src/proxy/codex-input-utils';
 
 describe('proxy-codex-chat-input', () => {
 	it('converts mixed openai messages into codex input preserving order with developer first', () => {
-		const input = buildCodexInputFromOpenAIMessages([
+		const input = CodexInputUtils.buildFromMessages([
 			{ role: 'user', content: 'u1' },
 			{ role: 'system', content: 'sys' },
 			{ role: 'assistant', content: 'a1' },
@@ -27,7 +22,7 @@ describe('proxy-codex-chat-input', () => {
 	});
 
 	it('normalizes assistant text blocks into output_text', () => {
-		const normalized = normalizeCodexInputAssistantTextBlocks([
+		const normalized = CodexInputUtils.normalizeAssistantText([
 			{
 				type: 'message',
 				role: 'assistant',
@@ -41,7 +36,7 @@ describe('proxy-codex-chat-input', () => {
 	});
 
 	it('expands mixed body.input items and coerces chat shape', () => {
-		const expanded = expandBodyInputToCodexItems([
+		const expanded = CodexInputUtils.expandInput([
 			{ role: 'system', content: 's' },
 			{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'u' }] },
 			{ type: 'function_call', call_id: 'c1', name: 'Read', arguments: '{}' }
@@ -51,7 +46,7 @@ describe('proxy-codex-chat-input', () => {
 		expect(expanded?.[0]).toMatchObject({ type: 'message', role: 'developer' });
 		expect(expanded?.at(-1)).toMatchObject({ type: 'function_call' });
 
-		const coerced = coerceOpenAIMessagesFromRequestBody({
+		const coerced = CodexInputUtils.coerceMessages({
 			input: [{ role: 'user', content: 'hi' }]
 		});
 		expect(coerced).toHaveLength(1);

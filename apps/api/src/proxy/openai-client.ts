@@ -4,7 +4,8 @@ import { config } from '../config';
 import { Settings } from '../database/app-settings';
 import { ProviderSettings } from '../database/provider-settings';
 
-import { buildChatGptResponsesBody, resolveChatGptModel } from './responses-input-normalizer';
+import { ResponsesBodyBuilder } from './responses-input-normalizer/build-body';
+import { ResponsesModelResolver } from './responses-input-normalizer/resolve-model';
 import { ResponsesSseProcessor, StreamDiagnostics, StreamStateFactory } from './responses-stream-mapper';
 
 import type { OpenAIChatRequest } from '../types/openai';
@@ -25,7 +26,7 @@ export class OpenAiClient {
 	static async proxy(body: OpenAIChatRequest): Promise<ProxyOpenAiResult> {
 		const startTime = Date.now();
 		const model = body.model;
-		const resolvedModel = resolveChatGptModel(model);
+		const resolvedModel = ResponsesModelResolver.resolveModel(model);
 		const normalizedModel = resolvedModel.model;
 		const creds = ProviderSettings.get('openai');
 
@@ -67,8 +68,9 @@ export class OpenAiClient {
 		accessToken: string,
 		accountId: string
 	): Promise<Response> {
-		const extraInstruction = Settings.get().extraInstruction;
-		const buildResult = buildChatGptResponsesBody(body, model, {
+		const rawExtraInstruction = Settings.get().extraInstruction;
+		const extraInstruction = rawExtraInstruction ?? undefined;
+		const buildResult = ResponsesBodyBuilder.buildBody(body, model, {
 			extraInstruction,
 			envInstructions: ENV_CHATGPT_INSTRUCTIONS,
 			instructionsFallback: CODEX_INSTRUCTIONS_FALLBACK

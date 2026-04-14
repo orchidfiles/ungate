@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildChatGptResponsesBody, resolveChatGptModel } from 'src/proxy/responses-input-normalizer';
+import { ResponsesBodyBuilder } from 'src/proxy/responses-input-normalizer/build-body';
+import { ResponsesModelResolver } from 'src/proxy/responses-input-normalizer/resolve-model';
 
 describe('proxy-responses-input-normalizer', () => {
 	it('resolves model aliases and reasoning defaults', () => {
-		expect(resolveChatGptModel('')).toEqual({ model: 'gpt-5.4' });
-		expect(resolveChatGptModel('gpt-5.3-codex')).toEqual({ model: 'gpt-5.3-codex', reasoningEffort: 'medium' });
-		expect(resolveChatGptModel('gpt-5.4-high')).toEqual({ model: 'gpt-5.4', reasoningEffort: 'high' });
-		expect(resolveChatGptModel('gpt-5.1-any')).toEqual({ model: 'gpt-5.1-codex-mini', reasoningEffort: 'medium' });
+		expect(ResponsesModelResolver.resolveModel('')).toEqual({ model: 'gpt-5.4' });
+		expect(ResponsesModelResolver.resolveModel('gpt-5.3-codex')).toEqual({ model: 'gpt-5.3-codex', reasoningEffort: 'medium' });
+		expect(ResponsesModelResolver.resolveModel('gpt-5.4-high')).toEqual({ model: 'gpt-5.4', reasoningEffort: 'high' });
+		expect(ResponsesModelResolver.resolveModel('gpt-5.1-any')).toEqual({
+			model: 'gpt-5.1-codex-mini',
+			reasoningEffort: 'medium'
+		});
 	});
 
 	it('builds payload from chat messages and applies fallback instruction', () => {
-		const { payload, debug } = buildChatGptResponsesBody(
+		const { payload, debug } = ResponsesBodyBuilder.buildBody(
 			{
 				model: 'gpt-5.4',
 				messages: [
@@ -42,7 +46,7 @@ describe('proxy-responses-input-normalizer', () => {
 	});
 
 	it('uses input field, filters orphan outputs and maps tool_choice', () => {
-		const { payload } = buildChatGptResponsesBody(
+		const { payload } = ResponsesBodyBuilder.buildBody(
 			{
 				model: 'gpt-5.3-codex',
 				messages: [],
@@ -69,7 +73,7 @@ describe('proxy-responses-input-normalizer', () => {
 	});
 
 	it('prefers explicit reasoning over model-derived effort and keeps no tool_choice without tools', () => {
-		const { payload } = buildChatGptResponsesBody(
+		const { payload } = ResponsesBodyBuilder.buildBody(
 			{
 				model: 'gpt-5.4',
 				messages: [{ role: 'user', content: 'hello' }],
@@ -90,7 +94,7 @@ describe('proxy-responses-input-normalizer', () => {
 	});
 
 	it('adds fallback user message when prompt has no actionable user content', () => {
-		const { payload } = buildChatGptResponsesBody(
+		const { payload } = ResponsesBodyBuilder.buildBody(
 			{
 				model: 'gpt-5.4',
 				messages: [{ role: 'system', content: 'policy' }]
