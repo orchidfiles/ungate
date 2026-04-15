@@ -5,7 +5,7 @@
 <h3 align="center">Ungate</h3>
 
 <p align="center">
-  A Cursor-first extension for using Claude, ChatGPT, and MiniMax subscriptions in Cursor instead of paying for API tokens.
+  A Cursor-first extension for using Claude, ChatGPT, and MiniMax subscriptions in Cursor<br/> instead of paying for API tokens.
 </p>
 
 <p align="center">
