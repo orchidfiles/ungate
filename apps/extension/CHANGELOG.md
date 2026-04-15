@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.2 - 2026-04-15
+
+- Refactor API internals for auth, proxy helpers, stream mapping, and OpenAI chat orchestration
+- Add local build, install, and debug instructions to README
+
 ## 1.3.0 - 2026-04-04
 
 - Add ChatGPT OAuth authentication

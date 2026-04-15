@@ -5,7 +5,7 @@
 <h3 align="center">Ungate</h3>
 
 <p align="center">
-  A Cursor-first extension for using Claude, ChatGPT, and MiniMax subscriptions in Cursor through a local proxy that translates OpenAI-style requests into provider-native APIs.
+  A Cursor-first extension for using Claude, ChatGPT, and MiniMax subscriptions in Cursor instead of paying for API tokens.
 </p>
 
 <p align="center">
@@ -14,19 +14,15 @@
   <a href="https://github.com/orchidfiles/ungate"><img src="https://img.shields.io/github/last-commit/orchidfiles/ungate" alt="Last commit" /></a>
 </p>
 
-## Why
-
-Cursor can connect to OpenAI-compatible APIs, but each provider still has its own auth flow, model mapping, and streaming behavior. Claude and ChatGPT subscriptions use OAuth instead of direct API keys. MiniMax uses its own provider credentials. Ungate is a Cursor extension that hides those differences behind one local proxy and one Cursor-compatible endpoint.
-
 ## How it works
+
+Ungate lets you use Claude, ChatGPT, and MiniMax in Cursor through account subscriptions instead of direct API token billing. Claude and ChatGPT authenticate via OAuth; MiniMax uses provider API credentials.
 
 Cursor allows a custom OpenAI Base URL. Ungate listens on that URL and translates requests to the target provider API, including streaming, tool calls, and vision where supported.
 
-Cursor 3.0 introduced a bug: built-in model names can bypass `OpenAI Base URL` and go straight to the real provider API. In practice this means requests for standard Claude model names may skip Ungate entirely even when a proxy URL is configured. Ungate treats this as a bug because Cursor ignores the user's proxy setting for those models.
+The extension manages the tunnel that makes the proxy reachable to Cursor's backend and shows its settings in a Webview panel. From there you configure providers, copy the public proxy URL, and copy the proxy API key that Cursor uses to authenticate to your local proxy.
 
-Workaround: use custom model IDs from the Ungate `Models` section instead of Cursor's built-in Claude model names.
-
-The extension starts the proxy as a child process, manages the tunnel that makes it reachable to Cursor's backend, and shows its settings in a Webview panel. From there you configure providers, copy the public proxy URL, and copy the proxy API key that Cursor uses to authenticate to your local proxy.
+Note: Cursor has a known issue where built-in model names bypass `OpenAI Base URL` and go straight to the real provider API, ignoring your proxy setting. Use custom model IDs from the Ungate `Models` section instead of Cursor's built-in Claude model names.
 
 ## Features
 
@@ -68,30 +64,41 @@ Or search `@id:orchidfiles.ungate` in the Extensions panel.
 11. If you use MiniMax, add `MiniMax-M2.7` as a custom model in Cursor.
 12. Select one of your custom models in Cursor and start chatting.
 
-## Development
+## Local build and install in Cursor
 
 ```sh
 git clone https://github.com/orchidfiles/ungate.git
 cd ungate
 pnpm install
+pnpm run package:build
+cursor --install-extension "apps/extension/out/ungate.vsix"
 ```
 
-Build dev-kit (needed once, before other builds):
+## Development
+
+Run the build in watch mode in one step with `Command Palette -> Run Task -> build:watch all`.
+
+Or run it manually in the terminal:
 
 ```sh
 pnpm --filter @ungate/dev-kit build
+pnpm --filter @ungate/shared build:watch
+pnpm --filter @ungate/api build:watch
+pnpm --filter @ungate/web build:watch
 ```
 
-Build the API:
+After the build, press `F5` to test the extension in Cursor debug mode.
+
+You can also run the API separately from the extension on another port:
 
 ```sh
-pnpm --filter @ungate/api build
-```
+cd apps/api
 
-Build the extension:
+# use the default database:
+PORT=4784 node dist/main.js
 
-```sh
-pnpm --filter ungate build
+# use a separate dev database:
+DB_PATH=$HOME/.ungate/data-dev.db PORT=4784 node dist/main.js
 ```
 
 ## License
