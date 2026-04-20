@@ -28,11 +28,14 @@ The status bar item shows separate API and tunnel state. Hover it to inspect the
 
 ```mermaid
 graph LR
-  A[Cursor] --> B[Public tunnel URL]
-  B --> C[Ungate API]
-  C --> D[Claude API]
-  C --> E[OpenAI API]
-  C --> F[MiniMax API]
+  A[Chat request] --> B[Cursor backend]
+  B --> C[Cloudflare tunnel]
+  C --> D[Ungate proxy]
+  D --> E[Provider API]
+  E --> D
+  D --> C
+  C --> B
+  B --> F[Chat response]
 ```
 
 ## Features
