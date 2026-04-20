@@ -32,6 +32,8 @@ export class Dashboard {
 			localResourceRoots: [vscode.Uri.file(this.getWebDistPath())]
 		});
 
+		this.panel.iconPath = vscode.Uri.file(path.join(this.context.extensionPath, 'resources', 'icon.png'));
+
 		this.panel.webview.onDidReceiveMessage((message: unknown) => {
 			if (typeof message !== 'object' || message === null || !('type' in message)) {
 				return;

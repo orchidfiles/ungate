@@ -46,6 +46,14 @@
 			{
 				"command": "ungate.openDashboard",
 				"title": "Ungate: Open Dashboard"
+			},
+			{
+				"command": "ungate.copyTunnelUrl",
+				"title": "Ungate: Copy Tunnel URL"
+			},
+			{
+				"command": "ungate.restartTunnel",
+				"title": "Ungate: Restart Tunnel"
 			}
 		]
 	},
