@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 - 2026-04-20
+
+- Redesign provider settings and model management flow
+- Add status bar hover tooltip with API state, tunnel URL, and quick actions
+- Refactor extension module layout to simplify controller and lifecycle handling
+- Upgrade analytics with provider and model filters, improved OpenAI stream accounting, and aggregated token timelines
+
 ## 1.3.2 - 2026-04-15
 
 - Refactor API internals for auth, proxy helpers, stream mapping, and OpenAI chat orchestration
