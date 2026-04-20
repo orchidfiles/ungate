@@ -6,9 +6,9 @@ import * as path from 'node:path';
 
 import * as vscode from 'vscode';
 
-import { NodeResolver } from './node-resolver';
+import { NodeResolver } from './utils/node-resolver';
 
-import type { LogEntry } from './log-ring-buffer';
+import type { LogEntry } from './utils/log-ring-buffer';
 import type { Writable } from 'node:stream';
 
 const HEALTH_CHECK_INTERVAL_MS = 1000;

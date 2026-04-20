@@ -3,11 +3,15 @@ import * as path from 'node:path';
 
 import * as vscode from 'vscode';
 
-import { LogRingBuffer, type LogEntry } from './log-ring-buffer';
+import { LogRingBuffer, type LogEntry } from './utils/log-ring-buffer';
 
 import type { TunnelState } from './tunnel-manager';
 
 const LOG_BUFFER_SIZE = 500;
+
+const MSGS_SIMPLE = ['webview-ready', 'restart-server', 'start-tunnel', 'stop-tunnel', 'restart-tunnel'] as const;
+
+export type Msg = { type: 'open-external-url'; url: string } | { type: (typeof MSGS_SIMPLE)[number] };
 
 export class Dashboard {
 	private panel: vscode.WebviewPanel | null = null;
@@ -17,7 +21,7 @@ export class Dashboard {
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
-		private readonly onMessage: (message: { type: string; url?: string }) => void
+		private readonly onMessage: (message: Msg) => void
 	) {}
 
 	show(): void {
@@ -35,11 +39,13 @@ export class Dashboard {
 		this.panel.iconPath = vscode.Uri.file(path.join(this.context.extensionPath, 'resources', 'icon.png'));
 
 		this.panel.webview.onDidReceiveMessage((message: unknown) => {
-			if (typeof message !== 'object' || message === null || !('type' in message)) {
+			const parsed = Dashboard.parseIncomingMessage(message);
+
+			if (!parsed) {
 				return;
 			}
 
-			this.onMessage(message as { type: string; url?: string });
+			this.onMessage(parsed);
 		});
 
 		this.panel.webview.html = this.buildHtml();
@@ -84,6 +90,45 @@ export class Dashboard {
 		return this.panel !== null;
 	}
 
+	private static parseIncomingMessage(raw: unknown): Msg | null {
+		if (typeof raw !== 'object' || raw === null || !('type' in raw)) {
+			return null;
+		}
+
+		const record = raw as Record<string, unknown>;
+		const type = record.type;
+
+		if (typeof type !== 'string') {
+			return null;
+		}
+
+		if (type === 'open-external-url') {
+			const url = record.url;
+
+			if (typeof url !== 'string') {
+				return null;
+			}
+
+			return { type: 'open-external-url', url };
+		}
+
+		for (const allowed of MSGS_SIMPLE) {
+			if (allowed === type) {
+				return { type: allowed };
+			}
+		}
+
+		return null;
+	}
+
+	private getWebDistPath(): string {
+		if (this.context.extensionMode === vscode.ExtensionMode.Development) {
+			return path.join(this.context.extensionPath, '..', 'web', 'dist');
+		}
+
+		return path.join(this.context.extensionPath, 'bundled', 'web', 'dist');
+	}
+
 	private sendPort(): void {
 		this.panel?.webview.postMessage({ type: 'port', port: this.currentPort });
 	}
@@ -103,14 +148,6 @@ export class Dashboard {
 		if (entries.length > 0) {
 			this.panel?.webview.postMessage({ type: 'log-bulk', source, entries });
 		}
-	}
-
-	private getWebDistPath(): string {
-		if (this.context.extensionMode === vscode.ExtensionMode.Development) {
-			return path.join(this.context.extensionPath, '..', 'web', 'dist');
-		}
-
-		return path.join(this.context.extensionPath, 'bundled', 'web', 'dist');
 	}
 
 	private buildHtml(): string {
