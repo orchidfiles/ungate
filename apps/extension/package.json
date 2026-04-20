@@ -2,7 +2,7 @@
 	"name": "ungate",
 	"displayName": "Ungate",
 	"description": "Use Claude, GPT, or MiniMax subscriptions in Cursor from one extension",
-	"version": "1.3.2",
+	"version": "1.4.0",
 	"publisher": "orchidfiles",
 	"license": "MIT",
 	"pricing": "Free",
@@ -46,6 +46,14 @@
 			{
 				"command": "ungate.openDashboard",
 				"title": "Ungate: Open Dashboard"
+			},
+			{
+				"command": "ungate.copyTunnelUrl",
+				"title": "Ungate: Copy Tunnel URL"
+			},
+			{
+				"command": "ungate.restartTunnel",
+				"title": "Ungate: Restart Tunnel"
 			}
 		]
 	},

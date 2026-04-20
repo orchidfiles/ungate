@@ -4,7 +4,7 @@ import * as path from 'node:path';
 
 import { bin, install, use, Tunnel } from 'cloudflared';
 
-import type { LogEntry } from './log-ring-buffer';
+import type { LogEntry } from './utils/log-ring-buffer';
 
 export type TunnelStatus = 'stopped' | 'installing' | 'starting' | 'running' | 'error';
 

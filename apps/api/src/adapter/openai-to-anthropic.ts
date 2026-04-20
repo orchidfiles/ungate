@@ -2,7 +2,7 @@ import { logger } from 'src/utils/logger';
 
 import type { AnthropicRequest, AnthropicMessage, ContentBlock } from '../types';
 import type { OpenAIContentPart, OpenAIChatRequest } from '../types/openai';
-import type { ClaudeReasoningBudget } from '@ungate/shared';
+import type { ReasoningBudgetTier } from '@ungate/shared';
 
 // Legacy Cursor model names can include explicit budgets or the old "-thinking" suffix.
 // e.g. "claude-4.6-opus-high" → "claude-opus-4-6" with reasoningBudget="high"
@@ -34,7 +34,7 @@ export function normalizeModelName(model: string): { model: string; reasoningBud
 
 export interface AnthropicModelOverride {
 	model: string;
-	reasoningBudget?: ClaudeReasoningBudget | null;
+	reasoningBudget?: ReasoningBudgetTier | null;
 }
 
 function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]): string | ContentBlock[] {

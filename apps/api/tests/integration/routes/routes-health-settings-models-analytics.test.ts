@@ -66,11 +66,11 @@ describe('routes: health/settings/models/analytics', () => {
 		await app.close();
 	});
 
-	it('models returns only enabled models', async () => {
+	it('models returns all mappings', async () => {
 		settingsGetMock.mockReturnValueOnce({
 			models: [
-				{ id: 'm1', provider: 'claude', enabled: true },
-				{ id: 'm2', provider: 'openai', enabled: false }
+				{ id: 'm1', provider: 'claude' },
+				{ id: 'm2', provider: 'openai' }
 			]
 		});
 
@@ -79,7 +79,10 @@ describe('routes: health/settings/models/analytics', () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toEqual({
 			object: 'list',
-			data: [{ id: 'm1', object: 'model', created: 1700000000, owned_by: 'claude' }]
+			data: [
+				{ id: 'm1', object: 'model', created: 1700000000, owned_by: 'claude' },
+				{ id: 'm2', object: 'model', created: 1700000000, owned_by: 'openai' }
+			]
 		});
 		await app.close();
 	});

@@ -22,7 +22,21 @@ Cursor allows a custom OpenAI Base URL. Ungate listens on that URL and translate
 
 The extension manages the tunnel that makes the proxy reachable to Cursor's backend and shows its settings in a Webview panel. From there you configure providers, copy the public proxy URL, and copy the proxy API key that Cursor uses to authenticate to your local proxy.
 
-Note: Cursor has a known issue where built-in model names bypass `OpenAI Base URL` and go straight to the real provider API, ignoring your proxy setting. Use custom model IDs from the Ungate `Models` section instead of Cursor's built-in Claude model names.
+The status bar item shows separate API and tunnel state. Hover it to inspect the current tunnel URL and use quick actions for opening the dashboard, restarting the tunnel, and copying the tunnel URL.
+
+## Architecture
+
+```mermaid
+graph LR
+  A[Chat request] --> B[Cursor backend]
+  B --> C[Cloudflare tunnel]
+  C --> D[Ungate proxy]
+  D --> E[Provider API]
+  E --> D
+  D --> C
+  C --> B
+  B --> F[Chat response]
+```
 
 ## Features
 
@@ -36,6 +50,24 @@ Note: Cursor has a known issue where built-in model names bypass `OpenAI Base UR
 - [x] Request analytics
 - [x] Analytics split by provider: Claude, OpenAI, and MiniMax
 - [x] Built-in web UI panel
+
+## Provider support
+
+| Capability | Claude | OpenAI | MiniMax |
+| --- | --- | --- | --- |
+| Authentication | OAuth | OAuth | API key |
+| Streaming | Yes | Yes | Yes |
+| Tool calls | Yes | Yes | Yes |
+| Vision | Yes | No | Yes |
+| Reasoning tiers | Yes | No | No |
+| Analytics | Yes | Yes | Yes |
+
+## Prerequisites
+
+- Cursor with custom OpenAI provider support enabled.
+- Node.js 20+ for local development and manual API runs.
+- Outbound internet access for OAuth and provider APIs.
+- A reachable public tunnel URL because Cursor backend cannot call `localhost`.
 
 ## Installation
 
@@ -51,18 +83,43 @@ Or search `@id:orchidfiles.ungate` in the Extensions panel.
 
 ## Setup
 
-1. Install the extension. Ungate starts the local API automatically.
-2. Click the `Ungate :<port>` item in the status bar to open the Ungate panel.
-3. Choose the provider you want to use.
-4. For Claude, sign in with your Claude account through OAuth.
-5. For ChatGPT, sign in with your ChatGPT account through OAuth.
-6. For MiniMax, enter your MiniMax API key and choose a Base URL: `Global`, `China`, or `Custom`.
-7. In the Tunnel section, click `Start tunnel`, then copy the public URL shown in the panel.
-8. Paste it into Cursor Settings → Models → OpenAI Base URL.
-9. Copy the proxy API key from the same panel and paste it into Cursor Settings → Models → OpenAI API Key.
-10. In the Ungate `Models` section, copy the model IDs you want and add them as custom models in Cursor.
-11. If you use MiniMax, add `MiniMax-M2.7` as a custom model in Cursor.
-12. Select one of your custom models in Cursor and start chatting.
+Install the extension, then open the dashboard by clicking the `Ungate` item in the status bar.
+
+### Connect a Provider
+
+Choose the provider you want to use and authenticate with it.  
+For Claude and ChatGPT, sign in through OAuth.  
+For MiniMax, enter your API key and choose a Base URL: `Global`, `China`, or `Custom`.
+
+### Configure Cursor
+
+1. In the `Tunnel` section, click `Start tunnel`, then copy the public URL shown in the panel.
+2. Paste it into `Cursor Settings → Models → OpenAI Base URL`.
+3. Copy the proxy API key from the same panel and paste it into `Cursor Settings → Models → OpenAI API Key`.
+
+### Add Models
+
+1. In the `Models` section, copy the model IDs you want and add them as custom models in Cursor.
+2. If you use MiniMax, add `MiniMax-M2.7` as a custom model in Cursor.
+3. Select one of your custom models in Cursor and start chatting.
+
+## Quick verification
+
+After setup, then send one test message from Cursor using a custom model ID.
+
+## Known limitations
+
+- Cursor built-in model IDs can bypass `OpenAI Base URL` and go directly to provider APIs.
+- Use only custom model IDs copied from Ungate `Models` in Cursor settings.
+- If Cursor still bypasses base URL, restart Cursor and re-check model selection.
+
+## Security and privacy
+
+- OAuth and provider credentials are stored locally on your machine.
+- Request metadata for analytics is stored in the local SQLite database.
+- Tunnel URL and proxy API key are secrets and should be treated like credentials.
+- Anyone with both values can send requests through your proxy.
+- Rotate your proxy key from the dashboard when you suspect leakage.
 
 ## Local build and install in Cursor
 
@@ -100,6 +157,24 @@ PORT=4784 node dist/main.js
 # use a separate dev database:
 DB_PATH=$HOME/.ungate/data-dev.db PORT=4784 node dist/main.js
 ```
+
+## Troubleshooting
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| Cursor ignores base URL | Selected model is built-in | Switch to custom model ID from Ungate `Models` |
+| `401` from proxy | Cursor API key field | Paste proxy API key from Ungate dashboard |
+| `404` or timeout through tunnel | Tunnel status in Ungate panel | Restart tunnel from dashboard |
+| OAuth session expired | Provider connection status | Reconnect provider in dashboard |
+| Model missing in Cursor | Custom model list in Cursor | Add model ID manually from Ungate `Models` |
+
+## Quick facts
+
+- `localhost` does not work as `OpenAI Base URL` because Cursor calls the endpoint from its backend.
+- Tunnel is required for Cursor backend to reach your proxy.
+- Built-in provider model IDs can bypass custom base URL routing.
+- Provider switch flow: connect provider in Ungate, add its model ID in Cursor, then select that custom model.
+- Analytics data and API key is stored in local SQLite files under `$HOME/.ungate/`.
 
 ## License
 

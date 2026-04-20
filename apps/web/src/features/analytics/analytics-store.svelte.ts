@@ -1,17 +1,27 @@
+import {
+	detectProviderBySourceOrModel,
+	getProviderLabel,
+	type AnalyticsSummary,
+	type ModelMappingProvider,
+	type Period,
+	type RequestRecord,
+	type TokenSeriesPoint
+} from '@ungate/shared/frontend';
 import { SvelteSet } from 'svelte/reactivity';
 
 import { Api } from '$shared/api';
 import { DEFAULTS } from '$shared/constants';
 
-import type { AnalyticsSummary, Period, RequestRecord } from '@ungate/shared/frontend';
-
 interface AnalyticsStore {
 	readonly summary: AnalyticsSummary | null;
 	readonly requests: RequestRecord[];
 	readonly filteredRequests: RequestRecord[];
+	readonly tokenSeries: TokenSeriesPoint[];
+	readonly availableProviders: ProviderOption[];
 	readonly availableModels: ModelOption[];
 	period: Period;
 	requestLimit: number;
+	providerFilter: ProviderFilter;
 	modelFilter: string;
 	readonly loading: boolean;
 	readonly error: string | null;
@@ -19,13 +29,33 @@ interface AnalyticsStore {
 	reset(): Promise<void>;
 }
 
+export type ProviderFilter = 'all' | ModelMappingProvider;
+
+interface ConfiguredModelEntry {
+	id: string;
+	label: string;
+	upstreamModel: string;
+	provider: ModelMappingProvider;
+}
+
 let summary = $state<AnalyticsSummary | null>(null);
 let requests = $state<RequestRecord[]>([]);
+let tokenSeries = $state<TokenSeriesPoint[]>([]);
+let configuredModels = $state<ConfiguredModelEntry[]>([]);
 let period = $state<Period>(DEFAULTS.period);
 let requestLimit = $state(DEFAULTS.requestLimit);
+let providerFilter = $state<ProviderFilter>('all');
 let modelFilter = $state('');
 let loading = $state(false);
 let error = $state<string | null>(null);
+
+const detectProviderBySourceOrModelTyped = detectProviderBySourceOrModel as (
+	source: RequestRecord['source'],
+	model: string
+) => ModelMappingProvider;
+const apiTyped = Api as {
+	fetchTokenSeries(selectedPeriod: Period): Promise<{ period: Period; series: TokenSeriesPoint[] }>;
+};
 
 function extractError(e: unknown): string {
 	if (e instanceof Error) {
@@ -52,10 +82,35 @@ async function loadRequests(): Promise<void> {
 	}
 }
 
+async function loadTokenSeries(): Promise<void> {
+	try {
+		const data = await apiTyped.fetchTokenSeries(period);
+		tokenSeries = data.series;
+	} catch (e) {
+		error = extractError(e);
+	}
+}
+
+async function loadConfiguredModels(): Promise<void> {
+	try {
+		const settings = await Api.fetchSettings();
+		configuredModels = settings.models
+			.filter((model) => model.id.trim().length > 0)
+			.map((model) => ({
+				id: model.id,
+				label: model.label,
+				upstreamModel: model.upstreamModel,
+				provider: model.provider
+			}));
+	} catch {
+		configuredModels = [];
+	}
+}
+
 async function load(): Promise<void> {
 	loading = true;
 	error = null;
-	await Promise.all([loadSummary(), loadRequests()]);
+	await Promise.all([loadSummary(), loadRequests(), loadConfiguredModels(), loadTokenSeries()]);
 	loading = false;
 }
 
@@ -67,8 +122,27 @@ async function reset(): Promise<void> {
 function filteredRequests(): RequestRecord[] {
 	let result = requests;
 
+	if (providerFilter !== 'all') {
+		result = result.filter((r) => resolveProviderByRecord(r) === providerFilter);
+	}
+
 	if (modelFilter) {
-		result = result.filter((r) => r.model === modelFilter);
+		const configuredMatch = configuredModels.find((model) => model.id === modelFilter);
+
+		if (!configuredMatch) {
+			result = result.filter((r) => r.model === modelFilter);
+		} else if (configuredMatch.provider !== 'openai') {
+			result = result.filter((r) => r.model === modelFilter);
+		} else {
+			const candidateModels = new SvelteSet<string>();
+			candidateModels.add(modelFilter);
+
+			if (configuredMatch.upstreamModel.trim().length > 0) {
+				candidateModels.add(configuredMatch.upstreamModel);
+			}
+
+			result = result.filter((r) => candidateModels.has(r.model));
+		}
 	}
 
 	return result.slice(0, requestLimit);
@@ -78,6 +152,18 @@ export interface ModelOption {
 	value: string;
 	label: string;
 }
+
+export interface ProviderOption {
+	value: ProviderFilter;
+	label: string;
+}
+
+const PROVIDER_OPTIONS: ProviderOption[] = [
+	{ value: 'all', label: 'All Providers' },
+	{ value: 'claude', label: getProviderLabel('claude') },
+	{ value: 'openai', label: getProviderLabel('openai') },
+	{ value: 'minimax', label: getProviderLabel('minimax') }
+];
 
 // Labels map — exact model names from DB (after normalizeModelName).
 // Dated variants are the actual stored names for 4.5 models.
@@ -146,47 +232,52 @@ function availableModels(): ModelOption[] {
 	const seen = new SvelteSet<string>();
 	const models: ModelOption[] = [];
 
+	for (const model of configuredModels) {
+		if (providerFilter !== 'all' && model.provider !== providerFilter) {
+			continue;
+		}
+
+		if (!seen.has(model.id)) {
+			seen.add(model.id);
+			models.push({
+				value: model.id,
+				label: model.label.trim().length > 0 ? model.label : formatModelName(model.id)
+			});
+		}
+	}
+
 	for (const r of requests) {
+		if (providerFilter !== 'all' && resolveProviderByRecord(r) !== providerFilter) {
+			continue;
+		}
+
 		if (!seen.has(r.model)) {
 			seen.add(r.model);
 			models.push({ value: r.model, label: formatModelName(r.model) });
 		}
 	}
 
-	// Tier sort order: Opus=0, Sonnet=1, Haiku=2
-	function tierOrder(label: string): number {
-		if (label.toLowerCase().includes('opus')) return 0;
-		if (label.toLowerCase().includes('sonnet')) return 1;
-		if (label.toLowerCase().includes('haiku')) return 2;
+	return models;
+}
 
-		return 3;
+function resolveProviderByRecord(record: RequestRecord): ModelMappingProvider {
+	const configured = configuredModels.find((item) => item.id === record.model);
+	if (configured) {
+		return configured.provider;
 	}
 
-	function versionKey(label: string): string {
-		// Extract version number for sorting: "Claude Opus 4.6" → "4.6"
-		const match = /(\d+\.\d+)/.exec(label);
+	return detectProviderBySourceOrModelTyped(record.source, record.model);
+}
 
-		return match ? match[1] : label;
+function validateModelFilter(): void {
+	if (!modelFilter) {
+		return;
 	}
 
-	const claudeModels = models
-		.filter((m) => m.value.toLowerCase().startsWith('claude'))
-		.sort((a, b) => {
-			const tierDiff = tierOrder(a.label) - tierOrder(b.label);
-			if (tierDiff !== 0) return tierDiff;
-
-			return versionKey(b.label).localeCompare(versionKey(a.label)); // descending version
-		});
-
-	const minimaxModels = models
-		.filter((m) => {
-			const value = m.value.toLowerCase();
-
-			return value.startsWith('minimax') || value.startsWith('mini-max');
-		})
-		.sort((a, b) => a.label.localeCompare(b.label));
-
-	return [...claudeModels, ...minimaxModels];
+	const hasCurrentModel = availableModels().some((model) => model.value === modelFilter);
+	if (!hasCurrentModel) {
+		modelFilter = '';
+	}
 }
 
 export function getAnalyticsStore(): AnalyticsStore {
@@ -200,6 +291,9 @@ export function getAnalyticsStore(): AnalyticsStore {
 		get filteredRequests() {
 			return filteredRequests();
 		},
+		get availableProviders() {
+			return PROVIDER_OPTIONS;
+		},
 		get availableModels() {
 			return availableModels();
 		},
@@ -209,12 +303,23 @@ export function getAnalyticsStore(): AnalyticsStore {
 		set period(v: Period) {
 			period = v;
 			void loadSummary();
+			void loadTokenSeries();
+		},
+		get tokenSeries() {
+			return tokenSeries;
 		},
 		get requestLimit() {
 			return requestLimit;
 		},
 		set requestLimit(v: number) {
 			requestLimit = v;
+		},
+		get providerFilter() {
+			return providerFilter;
+		},
+		set providerFilter(v: ProviderFilter) {
+			providerFilter = v;
+			validateModelFilter();
 		},
 		get modelFilter() {
 			return modelFilter;

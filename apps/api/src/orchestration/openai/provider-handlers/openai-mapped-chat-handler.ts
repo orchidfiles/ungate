@@ -33,6 +33,17 @@ export class OpenAiMappedChatHandler {
 		}
 
 		if (openaiBody.stream) {
+			const latencyMs = Date.now() - context.startTime;
+
+			CompletionRequestTelemetry.record({
+				model: context.model,
+				source: context.source,
+				inputTokens: context.inputTokens ?? 0,
+				outputTokens: context.outputTokens ?? 0,
+				stream: true,
+				latencyMs
+			});
+
 			return CompletionStreamingGateway.sendOpenAiPassthroughStream(reply, response);
 		}
 

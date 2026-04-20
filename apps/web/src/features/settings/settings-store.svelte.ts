@@ -10,9 +10,12 @@ interface SettingsStore {
 	readonly saved: boolean;
 	readonly restarting: boolean;
 	readonly error: string | null;
+	readonly statusMessage: string | null;
 	load(): Promise<void>;
 	save(update: Partial<AppSettings>): Promise<void>;
 	saveAndRestart(update: Partial<AppSettings>): Promise<void>;
+	resetStatus(): void;
+	completeRestart(): void;
 }
 
 let settings = $state<AppSettings | null>(null);
@@ -21,7 +24,9 @@ let error = $state<string | null>(null);
 let saving = $state(false);
 let saved = $state(false);
 let restarting = $state(false);
+let statusMessage = $state<string | null>(null);
 let savedTimer: ReturnType<typeof setTimeout> | null = null;
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
 function extractError(e: unknown): string {
 	if (e instanceof Error) {
@@ -47,6 +52,8 @@ async function load(): Promise<void> {
 async function save(update: Partial<AppSettings>): Promise<void> {
 	saving = true;
 	error = null;
+	statusMessage = null;
+	saved = false;
 
 	try {
 		await Api.updateSettings(update);
@@ -56,9 +63,13 @@ async function save(update: Partial<AppSettings>): Promise<void> {
 		if (savedTimer) clearTimeout(savedTimer);
 		savedTimer = setTimeout(() => {
 			saved = false;
+			if (!restarting) {
+				statusMessage = null;
+			}
 		}, 2000);
 	} catch (e) {
 		error = extractError(e);
+		statusMessage = 'Failed to save settings';
 	}
 
 	saving = false;
@@ -72,7 +83,26 @@ async function saveAndRestart(update: Partial<AppSettings>): Promise<void> {
 	}
 
 	restarting = true;
+	statusMessage = 'Restarting server...';
 	postExtensionMessage({ type: 'restart-server' });
+
+	if (restartTimer) {
+		clearTimeout(restartTimer);
+	}
+
+	restartTimer = setTimeout(() => {
+		completeRestart();
+	}, 2500);
+}
+
+function resetStatus(): void {
+	statusMessage = null;
+	error = null;
+}
+
+function completeRestart(): void {
+	restarting = false;
+	statusMessage = 'Server restarted';
 }
 
 export function getSettingsStore(): SettingsStore {
@@ -95,9 +125,14 @@ export function getSettingsStore(): SettingsStore {
 		get error() {
 			return error;
 		},
+		get statusMessage() {
+			return statusMessage;
+		},
 		load,
 		save,
-		saveAndRestart
+		saveAndRestart,
+		resetStatus,
+		completeRestart
 	};
 
 	return store;

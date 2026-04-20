@@ -59,6 +59,19 @@ export class ProviderSettings {
 			.run();
 	}
 
+	static updateBaseUrl(provider: AIProviderName, baseUrl: string): boolean {
+		const db = getDb();
+		const existing = this.get(provider);
+
+		if (!existing) {
+			return false;
+		}
+
+		db.update(providerSettings).set({ baseUrl }).where(eq(providerSettings.provider, provider)).run();
+
+		return true;
+	}
+
 	static remove(provider: AIProviderName): void {
 		const db = getDb();
 

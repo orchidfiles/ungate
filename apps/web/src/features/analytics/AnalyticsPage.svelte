@@ -1,4 +1,5 @@
 <script lang="ts">
+import { getProviderLabel } from '@ungate/shared/frontend';
 import IconRefreshCw from 'virtual:icons/lucide/refresh-cw';
 import IconTrash2 from 'virtual:icons/lucide/trash-2';
 
@@ -65,17 +66,21 @@ function handleConfirmReset() {
 	{/if}
 
 	{#if store.summary}
-		<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+		<div class="grid grid-cols-2 md:grid-cols-5 gap-4">
 			<StatCard
 				label="Total Requests"
 				value={Formatter.number(store.summary.totalRequests)} />
 			<StatCard
-				label="Claude"
+				label={getProviderLabel('claude')}
 				value={Formatter.number(store.summary.claudeRequests)}
 				variant="success" />
 			<StatCard
-				label="MiniMax"
+				label={getProviderLabel('minimax')}
 				value={Formatter.number(store.summary.minimaxRequests)}
+				variant="success" />
+			<StatCard
+				label={getProviderLabel('openai')}
+				value={Formatter.number(store.summary.openaiRequests)}
 				variant="success" />
 			<StatCard
 				label="Errors"
@@ -83,16 +88,12 @@ function handleConfirmReset() {
 				variant="error" />
 		</div>
 
-		<TokenChart requests={store.requests} />
+		<TokenChart
+			series={store.tokenSeries}
+			period={store.period} />
 	{/if}
 
-	<RequestList
-		requests={store.filteredRequests}
-		models={store.availableModels}
-		modelFilter={store.modelFilter}
-		requestLimit={store.requestLimit}
-		onModelFilterChange={(v) => (store.modelFilter = v)}
-		onLimitChange={(v) => (store.requestLimit = v)} />
+	<RequestList />
 
 	{#if confirmReset}
 		<!-- Backdrop -->

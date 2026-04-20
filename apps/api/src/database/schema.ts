@@ -26,7 +26,6 @@ export const modelMappings = sqliteTable('model_mappings', {
 	label: text().notNull(),
 	provider: text().notNull(),
 	upstreamModel: text().notNull(),
-	enabled: integer({ mode: 'boolean' }).notNull().default(true),
 	sortOrder: integer().notNull().default(0),
 	reasoningBudget: text()
 });

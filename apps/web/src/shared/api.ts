@@ -1,4 +1,4 @@
-import type { AnalyticsSummary, AppSettings, Period, RequestRecord } from '@ungate/shared/frontend';
+import type { AnalyticsSummary, AppSettings, Period, RequestRecord, TokenSeriesPoint } from '@ungate/shared/frontend';
 
 export class Api {
 	private static port: number | null = (window as unknown as { __PORT__?: number | null }).__PORT__ ?? null;
@@ -63,6 +63,10 @@ export class Api {
 		return this.get(`/analytics/requests?limit=${limit}`);
 	}
 
+	static fetchTokenSeries(period: Period): Promise<{ period: Period; series: TokenSeriesPoint[] }> {
+		return this.get(`/analytics/tokens?period=${period}`);
+	}
+
 	static resetAnalytics(): Promise<{ success: boolean; deletedCount: number }> {
 		return this.post('/analytics/reset');
 	}
@@ -97,6 +101,10 @@ export class Api {
 
 	static authMinimaxLogin(apiKey: string, baseUrl: string): Promise<{ ok: boolean; error?: string }> {
 		return this.post('/auth/minimax/login', { apiKey, baseUrl });
+	}
+
+	static authMinimaxUpdateBaseUrl(baseUrl: string): Promise<{ ok: boolean; error?: string }> {
+		return this.post('/auth/minimax/base-url', { baseUrl });
 	}
 
 	static authMinimaxLogout(): Promise<{ ok: boolean }> {
