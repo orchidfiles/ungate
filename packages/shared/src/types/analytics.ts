@@ -28,3 +28,9 @@ export interface RequestRecord {
 	latencyMs: number | null;
 	error?: string | null;
 }
+
+export interface TokenSeriesPoint {
+	bucket: string;
+	inputTokens: number;
+	outputTokens: number;
+}

@@ -2,19 +2,29 @@ import { hoursToMilliseconds } from 'date-fns';
 
 import { Analytics } from '../database/analytics';
 
+import type { Period } from '@ungate/shared';
 import type { FastifyPluginCallback } from 'fastify';
+
+const PERIOD_OFFSETS: Record<Exclude<Period, 'all'>, number> = {
+	hour: hoursToMilliseconds(1),
+	day: hoursToMilliseconds(24),
+	week: hoursToMilliseconds(24 * 7),
+	month: hoursToMilliseconds(24 * 30)
+};
+
+function toPeriod(value: string | undefined): Period {
+	if (value === 'hour' || value === 'day' || value === 'week' || value === 'month' || value === 'all') {
+		return value;
+	}
+
+	return 'day';
+}
 
 const plugin: FastifyPluginCallback = (app) => {
 	app.get('/analytics', async (request, reply) => {
-		const period = (request.query as Record<string, string>).period ?? 'day';
+		const period = toPeriod((request.query as Record<string, string>).period);
 		const now = Date.now();
-		const periodOffsets: Record<string, number> = {
-			hour: hoursToMilliseconds(1),
-			day: hoursToMilliseconds(24),
-			week: hoursToMilliseconds(24 * 7),
-			month: hoursToMilliseconds(24 * 30)
-		};
-		const since = period === 'all' ? 0 : now - (periodOffsets[period] ?? periodOffsets.day);
+		const since = period === 'all' ? 0 : now - PERIOD_OFFSETS[period];
 
 		const analytics = Analytics.getSummary(since, now);
 
@@ -31,6 +41,15 @@ const plugin: FastifyPluginCallback = (app) => {
 		const requests = Analytics.getRecent(limit);
 
 		return reply.send({ requests });
+	});
+
+	app.get('/analytics/tokens', async (request, reply) => {
+		const period = toPeriod((request.query as Record<string, string>).period);
+		const now = Date.now();
+		const since = period === 'all' ? 0 : now - PERIOD_OFFSETS[period];
+		const series = Analytics.getTokenSeries(period, since, now);
+
+		return reply.send({ period, series });
 	});
 
 	app.post('/analytics/reset', async (_request, reply) => {

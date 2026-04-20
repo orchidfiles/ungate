@@ -15,7 +15,7 @@ const colorClass: Record<string, string> = {
 };
 </script>
 
-<div class="card preset-tonal-surface border border-surface-700/30 p-5">
-	<p class="text-surface-400 text-xs uppercase tracking-wide mb-2">{label}</p>
-	<p class="text-2xl font-semibold {colorClass[variant]}">{value}</p>
+<div class="card preset-tonal-surface border border-surface-700/30 p-5 min-h-28 flex flex-col">
+	<p class="text-surface-400 text-xs uppercase tracking-wide">{label}</p>
+	<p class="mt-auto text-2xl font-semibold {colorClass[variant]}">{value}</p>
 </div>

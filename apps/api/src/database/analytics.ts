@@ -6,7 +6,7 @@ import { requests } from './schema';
 
 import { getDb } from './index';
 
-import type { AnalyticsSummary } from '@ungate/shared';
+import type { AnalyticsSummary, Period, TokenSeriesPoint } from '@ungate/shared';
 
 export class Analytics {
 	static getSummary(since: number, until: number = Date.now()): AnalyticsSummary {
@@ -60,6 +60,43 @@ export class Analytics {
 				latencyMs: row.latencyMs,
 				error: row.error
 			}));
+	}
+
+	static getTokenSeries(period: Period, since: number, until: number = Date.now()): TokenSeriesPoint[] {
+		const db = getDb();
+		const bucketExpr = this.bucketExpression(period);
+
+		const rows = db
+			.select({
+				bucket: sql<string>`${bucketExpr}`,
+				inputTokens: sql<number>`SUM(${requests.inputTokens})`,
+				outputTokens: sql<number>`SUM(${requests.outputTokens})`
+			})
+			.from(requests)
+			.where(sql`${requests.timestamp} >= ${since} AND ${requests.timestamp} <= ${until}`)
+			.groupBy(sql`${bucketExpr}`)
+			.orderBy(sql`${bucketExpr} ASC`)
+			.all();
+
+		return rows.map((row) => ({
+			bucket: row.bucket,
+			inputTokens: row.inputTokens ?? 0,
+			outputTokens: row.outputTokens ?? 0
+		}));
+	}
+
+	private static bucketExpression(period: Period) {
+		const timestampSeconds = sql`(${requests.timestamp} / 1000)`;
+
+		if (period === 'hour') {
+			return sql`strftime('%Y-%m-%d %H:%M', datetime(${timestampSeconds}, 'unixepoch'))`;
+		}
+
+		if (period === 'day') {
+			return sql`strftime('%Y-%m-%d %H:00', datetime(${timestampSeconds}, 'unixepoch'))`;
+		}
+
+		return sql`strftime('%Y-%m-%d', datetime(${timestampSeconds}, 'unixepoch'))`;
 	}
 
 	static reset(): { deletedCount: number } {

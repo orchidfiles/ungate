@@ -10,7 +10,6 @@ function mapping(partial: Partial<ModelMappingConfig> & Pick<ModelMappingConfig,
 		label: partial.label ?? 'label',
 		provider: partial.provider,
 		upstreamModel: partial.upstreamModel,
-		enabled: partial.enabled ?? true,
 		sortOrder: partial.sortOrder ?? 0,
 		reasoningBudget: partial.reasoningBudget ?? null
 	};

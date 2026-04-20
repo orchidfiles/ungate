@@ -10,7 +10,6 @@ describe('database-model-mappings', () => {
 				label: ' A ',
 				provider: 'openai',
 				upstreamModel: ' gpt-5.4 ',
-				enabled: 1 as unknown as boolean,
 				sortOrder: 0,
 				reasoningBudget: 'high'
 			},
@@ -19,7 +18,6 @@ describe('database-model-mappings', () => {
 				label: 'skip',
 				provider: 'claude',
 				upstreamModel: 'x',
-				enabled: true,
 				sortOrder: 1,
 				reasoningBudget: null
 			}
@@ -31,29 +29,26 @@ describe('database-model-mappings', () => {
 			label: 'A',
 			provider: 'openai',
 			upstreamModel: 'gpt-5.4',
-			enabled: true,
 			sortOrder: 0,
 			reasoningBudget: 'high'
 		});
 	});
 
-	it('resolves by id/upstream/case-insensitive among enabled models', () => {
+	it('resolves by id/upstream/case-insensitive', () => {
 		ModelMappings.replace([
 			{
 				id: 'sonnet-4.6',
 				label: 'Sonnet',
 				provider: 'claude',
 				upstreamModel: 'claude-sonnet-4-6',
-				enabled: true,
 				sortOrder: 2,
 				reasoningBudget: null
 			},
 			{
-				id: 'disabled',
-				label: 'Disabled',
+				id: 'second',
+				label: 'Second',
 				provider: 'claude',
-				upstreamModel: 'claude-disabled',
-				enabled: false,
+				upstreamModel: 'claude-second',
 				sortOrder: 3,
 				reasoningBudget: null
 			}
@@ -61,6 +56,6 @@ describe('database-model-mappings', () => {
 
 		expect(ModelMappings.resolveForChatCompletion('sonnet-4.6')?.upstreamModel).toBe('claude-sonnet-4-6');
 		expect(ModelMappings.resolveForChatCompletion('CLAUDE-SONNET-4-6')?.id).toBe('sonnet-4.6');
-		expect(ModelMappings.resolveForChatCompletion('disabled')).toBeNull();
+		expect(ModelMappings.resolveForChatCompletion('second')?.upstreamModel).toBe('claude-second');
 	});
 });

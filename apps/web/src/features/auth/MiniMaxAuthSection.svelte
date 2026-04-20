@@ -8,6 +8,12 @@ import { Api } from '$shared/api';
 
 type UrlType = 'global' | 'china' | 'custom';
 
+interface Props {
+	onAuthStatusChange?: () => void;
+}
+
+let { onAuthStatusChange }: Props = $props();
+
 let authenticated = $state(false);
 let loading = $state(true);
 let apiKey = $state('');
@@ -15,6 +21,7 @@ let urlType = $state<UrlType>('global');
 let customUrl = $state('');
 let error = $state<string | null>(null);
 let saving = $state(false);
+let savingBaseUrl = $state(false);
 
 $effect(() => {
 	void loadStatus();
@@ -40,9 +47,10 @@ async function loadStatus() {
 
 	try {
 		const status = await Api.authMinimaxStatus();
+		const baseUrl = status.baseUrl ?? MINIMAX_BASE_URLS.global;
 		authenticated = status.authenticated;
-		urlType = detectUrlType(status.baseUrl);
-		if (urlType === 'custom') customUrl = status.baseUrl;
+		urlType = detectUrlType(baseUrl);
+		if (urlType === 'custom') customUrl = baseUrl;
 	} catch (e) {
 		error = e instanceof Error ? e.message : String(e);
 	}
@@ -66,11 +74,43 @@ async function handleSave() {
 
 		authenticated = true;
 		apiKey = '';
+		onAuthStatusChange?.();
 	} catch (e) {
 		error = e instanceof Error ? e.message : String(e);
 	}
 
 	saving = false;
+}
+
+async function saveBaseUrlImmediately(): Promise<void> {
+	if (!authenticated) {
+		return;
+	}
+
+	const resolvedBaseUrl = urlTypeToUrl(urlType, customUrl).trim();
+
+	if (!resolvedBaseUrl) {
+		error = 'Base URL is required';
+
+		return;
+	}
+
+	error = null;
+	savingBaseUrl = true;
+
+	try {
+		const result = await Api.authMinimaxUpdateBaseUrl(resolvedBaseUrl);
+
+		if (!result.ok) {
+			error = result.error ?? 'Failed to save base URL';
+
+			return;
+		}
+	} catch (e) {
+		error = e instanceof Error ? e.message : String(e);
+	} finally {
+		savingBaseUrl = false;
+	}
 }
 
 async function handleLogout() {
@@ -82,6 +122,7 @@ async function handleLogout() {
 		apiKey = '';
 		urlType = 'global';
 		customUrl = '';
+		onAuthStatusChange?.();
 	} catch (e) {
 		error = e instanceof Error ? e.message : String(e);
 	}
@@ -103,6 +144,14 @@ async function handleLogout() {
 					<IconCheck class="size-4 text-success-500" />
 					<span>API key configured</span>
 				</div>
+				<div class="flex gap-2">
+					<button
+						class="btn btn-sm preset-filled-surface-500 border border-surface-500/50 hover:preset-filled-surface-400"
+						onclick={handleLogout}>
+						<IconLogOut class="size-4" />
+						Logout
+					</button>
+				</div>
 			{:else}
 				<label class="label">
 					<span class="label-text text-xs">API Key</span>
@@ -122,7 +171,8 @@ async function handleLogout() {
 							type="radio"
 							bind:group={urlType}
 							value="global"
-							class="radio" />
+							class="radio"
+							onchange={() => void saveBaseUrlImmediately()} />
 						Global
 					</label>
 					<label class="flex items-center gap-1.5 text-sm cursor-pointer">
@@ -130,7 +180,8 @@ async function handleLogout() {
 							type="radio"
 							bind:group={urlType}
 							value="china"
-							class="radio" />
+							class="radio"
+							onchange={() => void saveBaseUrlImmediately()} />
 						China
 					</label>
 					<label class="flex items-center gap-1.5 text-sm cursor-pointer">
@@ -138,7 +189,8 @@ async function handleLogout() {
 							type="radio"
 							bind:group={urlType}
 							value="custom"
-							class="radio" />
+							class="radio"
+							onchange={() => void saveBaseUrlImmediately()} />
 						Custom
 					</label>
 				</div>
@@ -149,18 +201,16 @@ async function handleLogout() {
 					class="input text-sm"
 					type="text"
 					bind:value={customUrl}
+					onblur={() => void saveBaseUrlImmediately()}
 					placeholder="https://your-custom-url.com" />
 			{/if}
 
-			<div class="flex gap-2">
-				{#if authenticated}
-					<button
-						class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
-						onclick={handleLogout}>
-						<IconLogOut class="size-4" />
-						Remove
-					</button>
-				{:else}
+			{#if authenticated && savingBaseUrl}
+				<p class="text-xs text-surface-400">Saving base URL...</p>
+			{/if}
+
+			{#if !authenticated}
+				<div class="flex gap-2">
 					<button
 						class="btn btn-sm preset-filled-primary-500"
 						onclick={handleSave}
@@ -172,8 +222,8 @@ async function handleLogout() {
 							Save
 						{/if}
 					</button>
-				{/if}
-			</div>
+				</div>
+			{/if}
 		</div>
 	{/if}
 

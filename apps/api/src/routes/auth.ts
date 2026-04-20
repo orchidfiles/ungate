@@ -55,6 +55,23 @@ const plugin: FastifyPluginCallback = (app) => {
 		return reply.send({ ok: true });
 	});
 
+	app.post('/auth/minimax/base-url', async (request, reply) => {
+		const { baseUrl } = request.body as { baseUrl?: string };
+		const trimmedBaseUrl = baseUrl?.trim();
+
+		if (!trimmedBaseUrl) {
+			return reply.code(400).send({ ok: false, error: 'Base URL is required' });
+		}
+
+		const updated = ProviderSettings.updateBaseUrl('minimax', trimmedBaseUrl);
+
+		if (!updated) {
+			return reply.code(400).send({ ok: false, error: 'MiniMax is not configured yet' });
+		}
+
+		return reply.send({ ok: true });
+	});
+
 	app.post('/auth/minimax/logout', (_request, reply) => {
 		ProviderSettings.remove('minimax');
 

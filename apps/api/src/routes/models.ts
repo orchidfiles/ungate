@@ -5,8 +5,7 @@ import type { FastifyPluginCallback } from 'fastify';
 const plugin: FastifyPluginCallback = (app) => {
 	app.get('/v1/models', async (_request, reply) => {
 		const settings = Settings.get();
-		const models = settings.models.filter((m) => m.enabled);
-		const data = models.map((model) => ({
+		const data = settings.models.map((model) => ({
 			id: model.id,
 			object: 'model' as const,
 			created: 1700000000,

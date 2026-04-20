@@ -1,3 +1,5 @@
+import { detectProviderByModel } from '@ungate/shared';
+
 import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
 
 import { proxyRequest as proxyAnthropicRequest } from './anthropic-client';
@@ -9,18 +11,8 @@ import type { AnthropicRequest } from '../types';
 import type { OpenAIChatRequest } from '../types/openai';
 import type { ProxyResult, RequestContext } from '../types/proxy';
 
-const MINIMAX_MODEL_PREFIXES = ['MiniMax'] as const;
-
 function detectProvider(model: string): AIProviderName {
-	const normalized = model.trim().toLowerCase();
-
-	for (const prefix of MINIMAX_MODEL_PREFIXES) {
-		if (normalized.startsWith(prefix.toLowerCase())) {
-			return 'minimax';
-		}
-	}
-
-	return 'claude';
+	return detectProviderByModel(model);
 }
 
 export async function proxyRequest(

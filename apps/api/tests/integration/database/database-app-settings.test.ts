@@ -12,7 +12,6 @@ describe('database-app-settings', () => {
 				label: 'Test Default Model',
 				provider: 'claude' as const,
 				upstreamModel: 'claude-test-default-model',
-				enabled: true,
 				sortOrder: 0,
 				reasoningBudget: null
 			}
@@ -32,7 +31,6 @@ describe('database-app-settings', () => {
 			label: 'M',
 			provider: 'claude' as const,
 			upstreamModel: 'u',
-			enabled: true,
 			sortOrder: 0,
 			reasoningBudget: null
 		};

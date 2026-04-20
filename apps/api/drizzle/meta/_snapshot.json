@@ -141,14 +141,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "enabled": {
-          "name": "enabled",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
         "sort_order": {
           "name": "sort_order",
           "type": "integer",

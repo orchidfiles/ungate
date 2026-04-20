@@ -9,6 +9,12 @@ import { postExtensionMessage } from '$shared/vscode';
 
 type Phase = 'idle' | 'pending-code' | 'completing';
 
+interface Props {
+	onAuthStatusChange?: () => void;
+}
+
+let { onAuthStatusChange }: Props = $props();
+
 let authenticated = $state(false);
 let email = $state<string | undefined>(undefined);
 let loading = $state(true);
@@ -73,6 +79,7 @@ async function handleComplete() {
 		codeInput = '';
 		authUrl = '';
 		sessionId = '';
+		onAuthStatusChange?.();
 	} catch (e) {
 		error = e instanceof Error ? e.message : String(e);
 		phase = 'pending-code';
@@ -87,6 +94,7 @@ async function handleLogout() {
 		authenticated = false;
 		email = undefined;
 		phase = 'idle';
+		onAuthStatusChange?.();
 	} catch (e) {
 		error = e instanceof Error ? e.message : String(e);
 	}
@@ -102,7 +110,7 @@ function handleCancelLogin() {
 </script>
 
 <div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
-	<p class="text-sm font-semibold">Claude Authorization</p>
+	<p class="text-sm font-semibold">Claude</p>
 
 	{#if loading}
 		<div class="flex items-center gap-2 text-sm text-surface-400">
@@ -116,7 +124,7 @@ function handleCancelLogin() {
 				<span>Logged in{email ? ` as ${email}` : ''}</span>
 			</div>
 			<button
-				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500 w-fit"
+				class="btn btn-sm preset-filled-surface-500 border border-surface-500/50 hover:preset-filled-surface-400 w-fit"
 				onclick={handleLogout}>
 				<IconLogOut class="size-4" />
 				Logout
