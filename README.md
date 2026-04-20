@@ -27,15 +27,22 @@ The status bar item shows separate API and tunnel state. Hover it to inspect the
 ## Architecture
 
 ```mermaid
-graph LR
-  A[Chat request] --> B[Cursor backend]
-  B --> C[Cloudflare tunnel]
-  C --> D[Ungate proxy]
-  D --> E[Provider API]
-  E --> D
-  D --> C
-  C --> B
-  B --> F[Chat response]
+sequenceDiagram
+  participant U as Chat
+  participant B as Cursor backend
+  participant C as Cloudflare tunnel
+  participant D as Ungate proxy
+  participant P as Provider API
+
+  U->>B: Request
+  B->>C: Forward request
+  C->>D: Process request
+  D->>P: Provider call
+
+  P-->>D: Stream response
+  D-->>C: Process response
+  C-->>B: Forward response
+  B-->>U: Response
 ```
 
 ## Features
