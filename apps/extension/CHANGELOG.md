@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1 - 2026-04-22
+
+- Fix Node 24 startup by updating bundled `better-sqlite3` and packaged API dependencies
+
 ## 1.4.0 - 2026-04-20
 
 - Redesign provider settings and model management flow

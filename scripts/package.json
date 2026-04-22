@@ -11,9 +11,9 @@
 		"cloudflared": "~0.7.1"
 	},
 	"devDependencies": {
-		"@types/node": "~22.0.0",
+		"@types/node": "~22.15.35",
 		"@ungate/dev-kit": "workspace:*",
-		"tsx": "~4.19.3",
+		"tsx": "~4.21.0",
 		"typescript": "~5.7.0"
 	}
 }

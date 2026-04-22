@@ -13,7 +13,7 @@ import type { Writable } from 'node:stream';
 
 const HEALTH_CHECK_INTERVAL_MS = 1000;
 const HEALTH_CHECK_URL = (port: number) => `http://localhost:${port}/health`;
-const BETTER_SQLITE3_VERSION = '11.9.1';
+const BETTER_SQLITE3_VERSION = '12.9.0';
 
 type ServerStatus = 'running' | 'stopped' | 'error';
 
@@ -205,23 +205,75 @@ export class ApiServer {
 			return;
 		}
 
+		const apiDir = path.join(this.context.extensionPath, 'bundled', 'api');
 		const sqliteDir = path.join(this.context.extensionPath, 'bundled', 'api', 'node_modules', 'better-sqlite3');
 		const binaryPath = path.join(sqliteDir, 'build', 'Release', 'better_sqlite3.node');
+		const runtime = NodeResolver.resolve(process.env.UNGATE_NODE_BIN);
 
 		if (fs.existsSync(binaryPath)) {
-			return;
+			const isLoadable = await this.canLoadBetterSqlite3(runtime, apiDir);
+
+			if (isLoadable) {
+				return;
+			}
+
+			this.callbacks.onLog('warn', '[native] Existing better-sqlite3 binary is incompatible, reinstalling');
+			fs.rmSync(binaryPath, { force: true });
 		}
 
-		const runtime = NodeResolver.resolve(process.env.UNGATE_NODE_BIN);
 		const info = NodeResolver.inspect(runtime);
 		const tarName = `better-sqlite3-v${BETTER_SQLITE3_VERSION}-node-v${info.abi}-${info.platform}-${info.arch}.tar.gz`;
 		const url = `https://github.com/WiseLibs/better-sqlite3/releases/download/v${BETTER_SQLITE3_VERSION}/${tarName}`;
+		let installError: Error | null = null;
 
 		this.callbacks.onLog('info', `[native] Using runtime: ${runtime}`);
 		this.callbacks.onLog('info', `[native] Downloading ${tarName}...`);
 
+		// Ensure repeated starts are idempotent when tar refuses to overwrite.
+		fs.rmSync(binaryPath, { force: true });
+
+		try {
+			await this.installPrebuiltBinary(url, sqliteDir, binaryPath);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			installError = err instanceof Error ? err : new Error(message);
+
+			if (message.includes('HTTP 404')) {
+				this.callbacks.onLog('error', `[native] No prebuilt binary for ABI ${info.abi}`);
+			} else {
+				this.callbacks.onLog('error', `[native] Prebuilt install failed: ${message}`);
+			}
+		}
+
+		const prebuiltLoadable = await this.canLoadBetterSqlite3(runtime, apiDir);
+
+		if (prebuiltLoadable) {
+			this.callbacks.onLog('info', '[native] better-sqlite3 binary installed');
+
+			return;
+		}
+
+		if (installError?.message.includes('HTTP 404')) {
+			throw new Error(
+				`[native] No prebuilt better-sqlite3 binary for Node ABI ${info.abi} (${info.platform}-${info.arch}). ` +
+					'Use Node 22 runtime (ABI 127) or set UNGATE_NODE_BIN to a supported Node binary.'
+			);
+		}
+
+		const installErrorMessage = installError ? installError.message : 'unknown prebuilt install error';
+		throw new Error(`[native] better-sqlite3 prebuilt installation failed: ${installErrorMessage}`);
+	}
+
+	private async installPrebuiltBinary(url: string, sqliteDir: string, binaryPath: string): Promise<void> {
 		await new Promise<void>((resolve, reject) => {
 			const extract = cp.spawn('tar', ['xzf', '-', '-C', sqliteDir], { stdio: ['pipe', 'pipe', 'pipe'] });
+			const stdin = extract.stdin;
+
+			if (!stdin) {
+				reject(new Error('tar stdin is unavailable'));
+
+				return;
+			}
 
 			extract.stderr?.on('data', (data: Buffer) => {
 				this.callbacks.onLog('error', `[native] tar: ${data.toString().trim()}`);
@@ -229,20 +281,48 @@ export class ApiServer {
 
 			extract.on('exit', (code) => {
 				if (code === 0) {
-					this.callbacks.onLog('info', '[native] better-sqlite3 binary installed');
 					resolve();
-				} else {
-					reject(new Error(`tar exited with code ${code}`));
+
+					return;
 				}
+
+				if (fs.existsSync(binaryPath)) {
+					this.callbacks.onLog('warn', '[native] better-sqlite3 binary already present, continuing');
+					resolve();
+
+					return;
+				}
+
+				reject(new Error(`tar exited with code ${code}`));
 			});
 
 			extract.on('error', reject);
 
-			this.download(url, extract.stdin, reject);
+			this.download(url, stdin, reject);
 		});
 	}
 
-	private download(targetUrl: string, dest: Writable | null, reject: (err: Error) => void): void {
+	private async canLoadBetterSqlite3(runtime: string, apiDir: string): Promise<boolean> {
+		return await new Promise<boolean>((resolve) => {
+			const child = cp.spawn(runtime, ['-e', "require('better-sqlite3')"], {
+				cwd: apiDir,
+				stdio: ['ignore', 'ignore', 'pipe']
+			});
+
+			child.stderr?.on('data', (data: Buffer) => {
+				const text = data.toString().trim();
+
+				if (text) {
+					this.callbacks.onLog('warn', `[native] ${text}`);
+				}
+			});
+
+			child.on('error', () => resolve(false));
+			child.on('exit', (code) => resolve(code === 0));
+		});
+	}
+
+	private download(targetUrl: string, dest: Writable, reject: (err: Error) => void): void {
 		https
 			.get(targetUrl, { headers: { 'User-Agent': 'ungate-extension' } }, (res) => {
 				if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
