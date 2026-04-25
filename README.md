@@ -59,7 +59,7 @@ sequenceDiagram
 - [x] Request analytics
 - [x] Analytics split by provider: Claude, OpenAI, and MiniMax
 - [x] Built-in web UI panel
-- [x] Keeps `OpenAI API Key` enabled when Cursor turns it off
+- [x] Keeps `OpenAI API Key` enabled when Cursor turns it off on its own
 
 ## Provider support
 
@@ -118,6 +118,8 @@ If Cursor turns `OpenAI API Key` off on its own, Ungate can turn it back on auto
 ## Quick verification
 
 After setup, then send one test message from Cursor using a custom model ID.
+
+If Cursor turns `OpenAI API Key` off on its own, Ungate should turn it back on automatically.
 
 ## Known limitations
 
