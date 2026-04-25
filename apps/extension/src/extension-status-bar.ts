@@ -9,9 +9,9 @@ type ApiBarStatus = 'running' | 'stopped' | 'error';
 export class ExtensionStatusBar {
 	public static formatApiTip(apiState: ApiBarStatus): string {
 		const statusLine: Record<ApiBarStatus, string> = {
-			running: `$(check) API running`,
-			stopped: `$(circle-slash) API stopped`,
-			error: `$(error) API error`
+			running: '$(check) API: running',
+			stopped: '$(circle-slash) API: stopped',
+			error: '$(error) API: error'
 		};
 
 		return statusLine[apiState];
@@ -19,18 +19,26 @@ export class ExtensionStatusBar {
 
 	public static formatTunnelTip(tunnel: TunnelState, tunnelApiUrl: string | null): string {
 		if (tunnelApiUrl) {
-			return `\n\n$(globe) \`${tunnelApiUrl}\``;
+			return `$(globe) Tunnel: running\n\n\`${tunnelApiUrl}\``;
 		}
 
 		if (tunnel.status === 'starting' || tunnel.status === 'installing') {
-			return `\n\n$(sync~spin) tunnel is starting (${tunnel.status}…)`;
+			return `$(sync~spin) Tunnel: starting (${tunnel.status}...)`;
 		}
 
 		if (tunnel.status === 'error' && tunnel.error) {
-			return `\n\n$(error) tunnel failed to start (${tunnel.error})`;
+			return `$(error) Tunnel: failed (${tunnel.error})`;
 		}
 
-		return '\n\n_tunnel is not started yet_';
+		return '$(circle-slash) Tunnel: not started';
+	}
+
+	public static formatKeyFixTip(keyFixEnabled: boolean): string {
+		if (keyFixEnabled) {
+			return '$(check) OpenAI API Key: on';
+		}
+
+		return '$(circle-slash) OpenAI API Key: off';
 	}
 
 	public static tunnelRestartLabel(tunnel: TunnelState): string {
@@ -41,12 +49,19 @@ export class ExtensionStatusBar {
 		return 'Restart tunnel';
 	}
 
-	public static createTooltip(apiState: ApiBarStatus, tunnel: TunnelState, tunnelApiUrl: string | null): vscode.MarkdownString {
+	public static createTooltip(
+		apiState: ApiBarStatus,
+		tunnel: TunnelState,
+		tunnelApiUrl: string | null,
+		keyFixEnabled: boolean
+	): vscode.MarkdownString {
 		const tip = new vscode.MarkdownString('', true);
 		tip.isTrusted = true;
 
 		tip.appendMarkdown(this.formatApiTip(apiState));
-		tip.appendMarkdown('\n\nTunnel URL');
+		tip.appendMarkdown('\n\n');
+		tip.appendMarkdown(this.formatKeyFixTip(keyFixEnabled));
+		tip.appendMarkdown('\n\n');
 		tip.appendMarkdown(this.formatTunnelTip(tunnel, tunnelApiUrl));
 
 		tip.appendMarkdown('\n\n---\n\n');
@@ -60,6 +75,14 @@ export class ExtensionStatusBar {
 		if (tunnelApiUrl) {
 			actions.push(`[$(clippy) Copy URL](command:${extensionCommands.copyTunnelUrl})`);
 		}
+
+		let keyFixLabel = 'Turn on key auto-fix';
+
+		if (keyFixEnabled) {
+			keyFixLabel = 'Turn off key auto-fix';
+		}
+
+		actions.push(`[$(settings-gear) ${keyFixLabel}](command:${extensionCommands.toggleKeyFix})`);
 
 		tip.appendMarkdown(actions.join(' · '));
 

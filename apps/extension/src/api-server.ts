@@ -30,6 +30,7 @@ export class ApiServer {
 	private restartRequested = false;
 	private lastStatus: ServerStatus | null = null;
 	private port: number | null = null;
+	private runtimePath = '';
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -69,7 +70,8 @@ export class ApiServer {
 		this.stdoutBuffer = '';
 
 		const isDev = this.context.extensionMode === vscode.ExtensionMode.Development;
-		const runtime = isDev ? 'node' : NodeResolver.resolve(process.env.UNGATE_NODE_BIN);
+		const runtime = this.runtimePath || this.resolveRuntimePath(NodeResolver.resolve(process.env.UNGATE_NODE_BIN));
+		this.runtimePath = runtime;
 
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
@@ -119,6 +121,8 @@ export class ApiServer {
 	}
 
 	private onExit(code: number | null, signal: NodeJS.Signals | null): void {
+		this.process = null;
+
 		const level: LogEntry['level'] = this.restartRequested || code === 0 ? 'info' : 'error';
 		this.callbacks.onLog(level, `[process] exit code=${code} signal=${signal}`);
 
@@ -201,14 +205,16 @@ export class ApiServer {
 	}
 
 	private async ensureNativeDeps(): Promise<void> {
-		if (this.context.extensionMode === vscode.ExtensionMode.Development) {
+		const apiDir = this.getServerCwd();
+		const runtime = this.resolveRuntimePath(NodeResolver.resolve(process.env.UNGATE_NODE_BIN));
+		this.runtimePath = runtime;
+		const isLoadableBeforeInstall = await this.canLoadBetterSqlite3(runtime, apiDir);
+
+		if (isLoadableBeforeInstall) {
 			return;
 		}
-
-		const apiDir = path.join(this.context.extensionPath, 'bundled', 'api');
-		const sqliteDir = path.join(this.context.extensionPath, 'bundled', 'api', 'node_modules', 'better-sqlite3');
+		const sqliteDir = fs.realpathSync(path.join(apiDir, 'node_modules', 'better-sqlite3'));
 		const binaryPath = path.join(sqliteDir, 'build', 'Release', 'better_sqlite3.node');
-		const runtime = NodeResolver.resolve(process.env.UNGATE_NODE_BIN);
 
 		if (fs.existsSync(binaryPath)) {
 			const isLoadable = await this.canLoadBetterSqlite3(runtime, apiDir);
@@ -264,6 +270,22 @@ export class ApiServer {
 		throw new Error(`[native] better-sqlite3 prebuilt installation failed: ${installErrorMessage}`);
 	}
 
+	private resolveRuntimePath(runtime: string): string {
+		const inspected = cp.spawnSync(runtime, ['-p', 'process.execPath'], { encoding: 'utf8' });
+
+		if (inspected.error || inspected.status !== 0) {
+			return runtime;
+		}
+
+		const absolutePath = inspected.stdout.trim();
+
+		if (!absolutePath) {
+			return runtime;
+		}
+
+		return absolutePath;
+	}
+
 	private async installPrebuiltBinary(url: string, sqliteDir: string, binaryPath: string): Promise<void> {
 		await new Promise<void>((resolve, reject) => {
 			const extract = cp.spawn('tar', ['xzf', '-', '-C', sqliteDir], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -304,10 +326,17 @@ export class ApiServer {
 
 	private async canLoadBetterSqlite3(runtime: string, apiDir: string): Promise<boolean> {
 		return await new Promise<boolean>((resolve) => {
-			const child = cp.spawn(runtime, ['-e', "require('better-sqlite3')"], {
-				cwd: apiDir,
-				stdio: ['ignore', 'ignore', 'pipe']
-			});
+			const child = cp.spawn(
+				runtime,
+				[
+					'-e',
+					"const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.pragma('journal_mode = WAL'); db.close();"
+				],
+				{
+					cwd: apiDir,
+					stdio: ['ignore', 'ignore', 'pipe']
+				}
+			);
 
 			child.stderr?.on('data', (data: Buffer) => {
 				const text = data.toString().trim();

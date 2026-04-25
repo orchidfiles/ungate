@@ -5,6 +5,8 @@ interface LogsStore {
 	readonly tunnelLogs: LogEntry[];
 	clearApi(): void;
 	clearTunnel(): void;
+	copyApi(): Promise<void>;
+	copyTunnel(): Promise<void>;
 }
 
 let apiLogs = $state<LogEntry[]>([]);
@@ -40,6 +42,18 @@ function clearTunnel(): void {
 	tunnelLogs = [];
 }
 
+async function copyApi(): Promise<void> {
+	await navigator.clipboard.writeText(formatLogs(apiLogs));
+}
+
+async function copyTunnel(): Promise<void> {
+	await navigator.clipboard.writeText(formatLogs(tunnelLogs));
+}
+
+function formatLogs(entries: LogEntry[]): string {
+	return entries.map((entry) => `${new Date(entry.timestamp).toISOString()} [${entry.level}] ${entry.message}`).join('\n');
+}
+
 export function getLogsStore(): LogsStore {
 	const store: LogsStore = {
 		get apiLogs() {
@@ -49,7 +63,9 @@ export function getLogsStore(): LogsStore {
 			return tunnelLogs;
 		},
 		clearApi,
-		clearTunnel
+		clearTunnel,
+		copyApi,
+		copyTunnel
 	};
 
 	return store;

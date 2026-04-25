@@ -9,6 +9,7 @@ import type { LogEntry, TunnelState } from './types';
 export type ExtensionToWebview =
 	| { type: 'port'; port: number | null }
 	| { type: 'tunnel-status'; state: TunnelState }
+	| { type: 'key-fix-state'; enabled: boolean }
 	| { type: 'log'; source: 'api' | 'tunnel'; entry: LogEntry }
 	| { type: 'log-bulk'; source: 'api' | 'tunnel'; entries: LogEntry[] };
 
@@ -17,4 +18,5 @@ export type WebviewToExtension =
 	| { type: 'restart-server' }
 	| { type: 'start-tunnel' }
 	| { type: 'stop-tunnel' }
-	| { type: 'restart-tunnel' };
+	| { type: 'restart-tunnel' }
+	| { type: 'set-key-fix-enabled'; enabled: boolean };

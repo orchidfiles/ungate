@@ -27,7 +27,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       better-sqlite3:
-        specifier: ~12.9.0
+        specifier: 12.9.0
         version: 12.9.0
       date-fns:
         specifier: ~4.1.0

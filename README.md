@@ -24,6 +24,8 @@ The extension manages the tunnel that makes the proxy reachable to Cursor's back
 
 The status bar item shows separate API and tunnel state. Hover it to inspect the current tunnel URL and use quick actions for opening the dashboard, restarting the tunnel, and copying the tunnel URL.
 
+Cursor also has a bug where `OpenAI API Key` turns itself off in settings every few hours. Ungate can keep it enabled automatically and lets you control this behavior from the status bar tooltip and the dashboard.
+
 ## Architecture
 
 ```mermaid
@@ -57,6 +59,7 @@ sequenceDiagram
 - [x] Request analytics
 - [x] Analytics split by provider: Claude, OpenAI, and MiniMax
 - [x] Built-in web UI panel
+- [x] Keeps `OpenAI API Key` enabled when Cursor turns it off
 
 ## Provider support
 
@@ -103,6 +106,8 @@ For MiniMax, enter your API key and choose a Base URL: `Global`, `China`, or `Cu
 1. In the `Tunnel` section, click `Start tunnel`, then copy the public URL shown in the panel.
 2. Paste it into `Cursor Settings → Models → OpenAI Base URL`.
 3. Copy the proxy API key from the same panel and paste it into `Cursor Settings → Models → OpenAI API Key`.
+
+If Cursor turns `OpenAI API Key` off on its own, Ungate can turn it back on automatically. You can control this from the status bar tooltip and the dashboard.
 
 ### Add Models
 

@@ -11,7 +11,10 @@ const LOG_BUFFER_SIZE = 500;
 
 const MSGS_SIMPLE = ['webview-ready', 'restart-server', 'start-tunnel', 'stop-tunnel', 'restart-tunnel'] as const;
 
-export type Msg = { type: 'open-external-url'; url: string } | { type: (typeof MSGS_SIMPLE)[number] };
+export type Msg =
+	| { type: 'open-external-url'; url: string }
+	| { type: 'set-key-fix-enabled'; enabled: boolean }
+	| { type: (typeof MSGS_SIMPLE)[number] };
 
 export class Dashboard {
 	private panel: vscode.WebviewPanel | null = null;
@@ -82,6 +85,10 @@ export class Dashboard {
 		this.panel?.webview.postMessage({ type: 'tunnel-status', state: tunnelState });
 	}
 
+	sendKeyFixState(enabled: boolean): void {
+		this.panel?.webview.postMessage({ type: 'key-fix-state', enabled });
+	}
+
 	sendTunnelState(state: TunnelState): void {
 		this.panel?.webview.postMessage({ type: 'tunnel-status', state });
 	}
@@ -110,6 +117,16 @@ export class Dashboard {
 			}
 
 			return { type: 'open-external-url', url };
+		}
+
+		if (type === 'set-key-fix-enabled') {
+			const enabled = record.enabled;
+
+			if (typeof enabled !== 'boolean') {
+				return null;
+			}
+
+			return { type: 'set-key-fix-enabled', enabled };
 		}
 
 		for (const allowed of MSGS_SIMPLE) {

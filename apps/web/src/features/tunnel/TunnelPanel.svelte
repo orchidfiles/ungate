@@ -36,6 +36,11 @@ function handleCopy() {
 		}, 2000);
 	});
 }
+
+function handleKeyFixChange(event: Event): void {
+	const target = event.currentTarget as HTMLInputElement;
+	store.setKeyFixEnabled(target.checked);
+}
 </script>
 
 <div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
@@ -108,5 +113,20 @@ function handleCopy() {
 				Stop
 			</button>
 		{/if}
+	</div>
+
+	<div class="card preset-tonal-surface border border-surface-700/30 p-3 space-y-2">
+		<label class="flex items-start gap-3 cursor-pointer">
+			<input
+				class="checkbox mt-0.5"
+				type="checkbox"
+				checked={store.keyFixEnabled}
+				onchange={handleKeyFixChange} />
+			<span class="text-sm leading-5">Keep OpenAI API Key enabled in Cursor</span>
+		</label>
+		<p class="text-xs text-surface-400">
+			If Cursor turns off OpenAI API Key on its own, Ungate will turn it back on automatically. When you turn this off, Ungate
+			stops watching this setting and also turns OpenAI API Key off in Cursor.
+		</p>
 	</div>
 </div>

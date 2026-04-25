@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0 - 2026-04-25
+
+- Keep OpenAI API Key enabled when Cursor turns it off on its own
+- Add on/off controls for this behavior in the status bar tooltip and dashboard
+
 ## 1.4.1 - 2026-04-22
 
 - Fix Node 24 startup by updating bundled `better-sqlite3` and packaged API dependencies

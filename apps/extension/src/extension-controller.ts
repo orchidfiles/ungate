@@ -4,6 +4,7 @@ import { ApiServer } from './api-server';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar } from './extension-status-bar';
+import { OpenAiKeyFix } from './openai-key-fix';
 import { TunnelManager } from './tunnel-manager';
 
 import type { LogEntry } from './utils/log-ring-buffer';
@@ -16,6 +17,7 @@ export class ExtensionController {
 	private dashboard!: Dashboard;
 	private tunnelManager!: TunnelManager;
 	private apiServer!: ApiServer;
+	private keyFix!: OpenAiKeyFix;
 	private currentPort: number | null = null;
 	private lastApiStatus: ApiLifecycleStatus | null = null;
 
@@ -32,6 +34,16 @@ export class ExtensionController {
 		this.dashboard = new Dashboard(this.context, (message) => {
 			this.handleDashboardMessage(message);
 		});
+		this.keyFix = new OpenAiKeyFix(
+			this.context,
+			(enabled) => {
+				this.dashboard.sendKeyFixState(enabled);
+				this.updateStatusBar();
+			},
+			(message) => {
+				this.log(message);
+			}
+		);
 
 		this.tunnelManager = new TunnelManager(
 			(state) => {
@@ -68,14 +80,20 @@ export class ExtensionController {
 		const restartTunnel = vscode.commands.registerCommand(extensionCommands.restartTunnel, () => {
 			void this.restartTunnelFromStatusBar();
 		});
+		const toggleKeyFix = vscode.commands.registerCommand(extensionCommands.toggleKeyFix, () => {
+			void this.setKeyFixByUser(!this.keyFix.isEnabled());
+		});
 
-		this.context.subscriptions.push(openDashboard, copyTunnelUrl, restartTunnel);
+		this.context.subscriptions.push(openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix);
 
 		void this.apiServer.start().catch((err: unknown) => {
 			const message = this.formatError(err);
 			this.log(`[native] Failed to install native dependencies: ${message}`);
 			this.dashboard.pushLog('api', { timestamp: Date.now(), level: 'error', message });
 			this.applyApiServerStatus('error');
+		});
+		void this.keyFix.activate().catch((error: unknown) => {
+			this.log(`[openai-key-fix] activation failed: ${this.formatError(error)}`);
 		});
 
 		this.context.subscriptions.push({
@@ -86,6 +104,7 @@ export class ExtensionController {
 	}
 
 	public stopBackendServices(): void {
+		this.keyFix?.stop();
 		this.apiServer?.stop();
 		this.tunnelManager?.stop();
 	}
@@ -120,9 +139,14 @@ export class ExtensionController {
 		const apiState = this.lastApiStatus ?? 'stopped';
 		const tunnel = this.tunnelManager.getState();
 		const tunnelApiUrl = this.getTunnelApiUrl();
+		let keyFixEnabled = true;
+
+		if (this.keyFix) {
+			keyFixEnabled = this.keyFix.isEnabled();
+		}
 
 		this.statusBar.text = ExtensionStatusBar.barText(apiState, tunnel);
-		this.statusBar.tooltip = ExtensionStatusBar.createTooltip(apiState, tunnel, tunnelApiUrl);
+		this.statusBar.tooltip = ExtensionStatusBar.createTooltip(apiState, tunnel, tunnelApiUrl, keyFixEnabled);
 		this.statusBar.show();
 	}
 
@@ -239,32 +263,68 @@ export class ExtensionController {
 	}
 
 	private handleDashboardMessage(message: Msg): void {
-		switch (message.type) {
-			case 'open-external-url':
-				void vscode.env.openExternal(vscode.Uri.parse(message.url));
+		if (message.type === 'open-external-url') {
+			void vscode.env.openExternal(vscode.Uri.parse(message.url));
 
-				return;
-			case 'webview-ready':
-				this.dashboard.sendInitialState(this.tunnelManager.getState());
-
-				return;
-			case 'restart-server':
-				this.apiServer.restart();
-
-				return;
-			case 'start-tunnel':
-				this.handleDashboardStartTunnel();
-
-				return;
-			case 'stop-tunnel':
-				this.tunnelManager.stop();
-
-				return;
-			case 'restart-tunnel':
-				this.handleDashboardRestartTunnel();
-
-				return;
+			return;
 		}
+
+		if (message.type === 'webview-ready') {
+			this.dashboard.sendInitialState(this.tunnelManager.getState());
+			this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
+
+			return;
+		}
+
+		if (message.type === 'restart-server') {
+			this.apiServer.restart();
+
+			return;
+		}
+
+		if (message.type === 'start-tunnel') {
+			this.handleDashboardStartTunnel();
+
+			return;
+		}
+
+		if (message.type === 'stop-tunnel') {
+			this.tunnelManager.stop();
+
+			return;
+		}
+
+		if (message.type === 'restart-tunnel') {
+			this.handleDashboardRestartTunnel();
+
+			return;
+		}
+
+		if (message.type === 'set-key-fix-enabled') {
+			void this.setKeyFixByUser(message.enabled);
+		}
+	}
+
+	private async setKeyFixByUser(enabled: boolean): Promise<void> {
+		try {
+			await this.keyFix.setEnabledByUser(enabled);
+		} catch (error: unknown) {
+			void vscode.window.showErrorMessage(`OpenAI API Key auto-fix unavailable: ${this.formatError(error)}`);
+			this.dashboard.sendKeyFixState(false);
+			this.updateStatusBar();
+
+			return;
+		}
+
+		this.dashboard.sendKeyFixState(enabled);
+		this.updateStatusBar();
+		let message = 'OpenAI API Key auto-fix disabled.';
+
+		if (enabled) {
+			message = 'OpenAI API Key auto-fix enabled.';
+		}
+
+		void vscode.window.showInformationMessage(message);
 	}
 
 	private handleDashboardStartTunnel(): void {
