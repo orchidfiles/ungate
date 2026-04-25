@@ -96,7 +96,10 @@ export class TunnelManager {
 	}
 
 	private spawnTunnel(port: number): void {
-		const t = Tunnel.quick(`http://localhost:${port}`);
+		const t = Tunnel.quick(`http://localhost:${port}`, {
+			'--config': '/dev/null',
+			'--edge-ip-version': '4'
+		});
 		this.tunnel = t;
 
 		t.on('url', (url) => {

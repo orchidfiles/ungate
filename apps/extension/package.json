@@ -2,7 +2,7 @@
 	"name": "ungate",
 	"displayName": "Ungate",
 	"description": "Use Claude, GPT, or MiniMax subscriptions in Cursor from one extension",
-	"version": "1.5.0",
+	"version": "1.5.1",
 	"publisher": "orchidfiles",
 	"license": "MIT",
 	"pricing": "Free",

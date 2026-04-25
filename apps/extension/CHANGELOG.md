@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.1 - 2026-04-25
+
+- Start quick tunnel with `--config /dev/null` to avoid Cloudflare 404 from local `~/.cloudflared/config.yml` ingress rules
+
 ## 1.5.0 - 2026-04-25
 
 - Keep OpenAI API Key enabled when Cursor turns it off on its own
