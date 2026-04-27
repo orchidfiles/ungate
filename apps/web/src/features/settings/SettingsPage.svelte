@@ -32,7 +32,7 @@ function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 			provider = 'openai';
 		}
 
-		if (reasoningBudget !== 'low' && reasoningBudget !== 'medium' && reasoningBudget !== 'high') {
+		if (reasoningBudget !== 'low' && reasoningBudget !== 'medium' && reasoningBudget !== 'high' && reasoningBudget !== 'xhigh') {
 			reasoningBudget = null;
 		}
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.2 - 2026-04-27
+
+- Add GPT-5.5 and Opus-4.7 model support
+- Preserve user-defined model mappings when adding new default models
+- Support `xhigh` reasoning tier in model settings
+
 ## 1.5.1 - 2026-04-25
 
 - Start quick tunnel with `--config /dev/null` to avoid Cloudflare 404 from local `~/.cloudflared/config.yml` ingress rules

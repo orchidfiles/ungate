@@ -13,6 +13,13 @@ describe('proxy-responses-input-normalizer-modules', () => {
 			model: 'gpt-5.4',
 			reasoningEffort: 'high'
 		});
+		expect(ResponsesModelResolver.resolveModel('gpt-5.5')).toEqual({
+			model: 'gpt-5.5'
+		});
+		expect(ResponsesModelResolver.resolveModel('gpt-5.5-xhigh')).toEqual({
+			model: 'gpt-5.5',
+			reasoningEffort: 'xhigh'
+		});
 	});
 
 	it('maps function tool_choice and keeps passthrough object', () => {
