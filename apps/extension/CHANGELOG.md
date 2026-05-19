@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0 - 2026-05-19
+
+- Sync API, tunnel, and OpenAI key-fix settings across all open Cursor windows
+- Show the same API and tunnel logs in every dashboard window, with live updates and shared clear actions
+- OpenAI key-fix is off by default; enable it from the dashboard or status bar if you want Ungate to keep `OpenAI API Key` enabled in Cursor
+- Fix OpenAI key-fix so it turns the key back on after Cursor disables it, including when the extension starts with key-fix already enabled
+
 ## 1.5.2 - 2026-04-27
 
 - Add GPT-5.5 and Opus-4.7 model support
