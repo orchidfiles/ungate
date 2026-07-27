@@ -213,6 +213,7 @@ $effect(() => {
 			<ModelsSection
 				selectedProvider={uiStore.selectedProvider}
 				models={models}
+				error={store.error}
 				onSave={handleSaveWithoutRestart}
 				saving={store.saving}
 				saved={store.saved}

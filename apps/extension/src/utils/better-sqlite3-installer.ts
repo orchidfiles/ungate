@@ -47,6 +47,13 @@ export class BetterSqlite3Installer {
 		return installedBinaryPath;
 	}
 
+	static resolveBindingPath(apiDir: string): string {
+		const installed = this.getInstalledBinaryPath(apiDir);
+		if (fs.existsSync(installed)) return installed;
+
+		return this.getBinaryPath(apiDir);
+	}
+
 	static async ensureInstalled(apiDir: string, runtime: string, callbacks: InstallCallbacks): Promise<void> {
 		if (RuntimeStateStore.isApiStartSuppressed()) {
 			const runtimeState = RuntimeStateStore.read();

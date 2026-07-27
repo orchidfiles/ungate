@@ -195,7 +195,7 @@ export class ApiServer {
 
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
-			UNGATE_BETTER_SQLITE3_NATIVE_BINDING: BetterSqlite3Installer.getInstalledBinaryPath(cwd),
+			UNGATE_BETTER_SQLITE3_NATIVE_BINDING: BetterSqlite3Installer.resolveBindingPath(cwd),
 			...(isDev ? { DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
 		};
 

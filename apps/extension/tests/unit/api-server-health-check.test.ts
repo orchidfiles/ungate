@@ -67,6 +67,9 @@ vi.mock('../../src/utils/better-sqlite3-installer', () => {
 			ensureInstalled: (...args: unknown[]) => ensureInstalledMock(...args),
 			getInstalledBinaryPath: vi.fn(
 				() => '/tmp/ungate-extension/bundled/api/node_modules/better-sqlite3/build/Release/better_sqlite3.installed.node'
+			),
+			resolveBindingPath: vi.fn(
+				() => '/tmp/ungate-extension/bundled/api/node_modules/better-sqlite3/build/Release/better_sqlite3.installed.node'
 			)
 		}
 	};

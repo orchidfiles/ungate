@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isModelMappingProvider, isReasoningBudgetTier, type AppSettings } from '@ungate/shared';
 
 import { Settings } from '../database/app-settings';
+import { logger } from '../utils/logger';
 
 import type { FastifyPluginCallback } from 'fastify';
 
@@ -20,7 +21,7 @@ const ModelMappingUpdateSchema = z
 			z.string().refine((value) => isReasoningBudgetTier(value), { message: 'Invalid reasoningBudget' })
 		])
 	})
-	.strict();
+	.strip();
 
 const SettingsUpdateSchema = z
 	.object({
@@ -30,7 +31,7 @@ const SettingsUpdateSchema = z
 		extraInstruction: z.union([z.string(), z.null()]).optional(),
 		models: z.array(ModelMappingUpdateSchema).optional()
 	})
-	.strict();
+	.strip();
 
 function validateSettingsUpdate(payload: unknown): { ok: true; value: Partial<AppSettings> } | { ok: false; error: string } {
 	const result = SettingsUpdateSchema.safeParse(payload);
@@ -56,6 +57,8 @@ const plugin: FastifyPluginCallback = (app) => {
 		const validation = validateSettingsUpdate(request.body);
 
 		if (!validation.ok) {
+			logger.error(`Settings update failed: ${validation.error}`);
+
 			return reply.code(400).send({ ok: false, error: validation.error });
 		}
 
