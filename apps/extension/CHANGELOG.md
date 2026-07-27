@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.4 - 2026-07-27
+
+- Fix adding custom models from dashboard returning 400
+- Fix native binding loading failure on first run after upgrade
+- Show API error details in dashboard when saving settings fails
+
 ## 1.7.3 - 2026-06-25
 
 - Fix Anthropic provider errors with non-JSON bodies so upstream failures return a normal error response instead of crashing the API
