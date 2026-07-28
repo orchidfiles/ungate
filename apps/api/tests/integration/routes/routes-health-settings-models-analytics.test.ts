@@ -41,6 +41,43 @@ describe('routes: health/settings/models/analytics', () => {
 		await app.close();
 	});
 
+	it('strips unknown fields from model payload and saves successfully', async () => {
+		settingsUpdateMock.mockReturnValueOnce(undefined);
+
+		const app = await withPlugin(settingsPlugin);
+		const res = await app.inject({
+			method: 'POST',
+			url: '/settings',
+			payload: {
+				models: [
+					{
+						id: 'test-model',
+						label: 'Test Model',
+						provider: 'claude',
+						upstreamModel: 'claude-test-model',
+						sortOrder: 0,
+						reasoningBudget: null,
+						enabled: true
+					}
+				]
+			}
+		});
+		expect(res.statusCode).toBe(200);
+		expect(settingsUpdateMock).toHaveBeenCalledWith({
+			models: [
+				{
+					id: 'test-model',
+					label: 'Test Model',
+					provider: 'claude',
+					upstreamModel: 'claude-test-model',
+					sortOrder: 0,
+					reasoningBudget: null
+				}
+			]
+		});
+		await app.close();
+	});
+
 	it('settings get and post delegate to Settings', async () => {
 		settingsGetMock.mockReturnValueOnce({
 			port: 4783,

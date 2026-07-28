@@ -85,7 +85,13 @@ export class Api {
 		});
 
 		if (!response.ok) {
-			throw new Error(`POST ${path} failed: ${response.status}`);
+			let detail = '';
+			try {
+				const body = (await response.json()) as { error?: string };
+				detail = body.error ?? '';
+			} catch {}
+
+			throw new Error(`POST ${path} failed: ${response.status}${detail ? ` — ${detail}` : ''}`);
 		}
 
 		return response.json() as Promise<T>;

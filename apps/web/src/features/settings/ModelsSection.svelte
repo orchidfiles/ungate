@@ -18,9 +18,10 @@ interface Props {
 	saving: boolean;
 	saved: boolean;
 	restarting: boolean;
+	error: string | null;
 }
 
-let { selectedProvider, models, onModelsChange, onSave, saving, saved, restarting }: Props = $props();
+let { selectedProvider, models, onModelsChange, onSave, saving, saved, restarting, error }: Props = $props();
 
 let copiedId = $state<string | null>(null);
 let confirmDeleteModelId = $state<string | null>(null);
@@ -94,8 +95,7 @@ function addModel() {
 			provider: selectedProvider,
 			upstreamModel: '',
 			sortOrder: models.length,
-			reasoningBudget: null,
-			enabled: true
+			reasoningBudget: null
 		}
 	]);
 
@@ -216,6 +216,12 @@ $effect(() => {
 			</button>
 		</div>
 	</div>
+
+	{#if error}
+		<div class="card preset-tonal-error p-3 text-sm">
+			{error}
+		</div>
+	{/if}
 
 	<div class="space-y-3">
 		{#if visibleModels().length === 0}

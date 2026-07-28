@@ -15,7 +15,10 @@ import openaiPlugin from './routes/openai';
 import settingsPlugin from './routes/settings';
 
 export async function startServer(): Promise<void> {
+	globalThis.console.log('[startup] getDb...');
 	getDb();
+
+	globalThis.console.log('[startup] Settings.get...');
 	const settings = Settings.get();
 	const config = getConfig(settings);
 	setQuietMode(config.quietMode);
@@ -23,8 +26,10 @@ export async function startServer(): Promise<void> {
 	const app = Fastify({ logger: false });
 	app.decorate('config', config);
 
+	globalThis.console.log('[startup] register cors...');
 	await app.register(cors, { origin: '*' });
 
+	globalThis.console.log('[startup] register plugins...');
 	await app.register(healthPlugin);
 	await app.register(authPlugin);
 	await app.register(anthropicPlugin);
@@ -32,6 +37,8 @@ export async function startServer(): Promise<void> {
 	await app.register(modelsPlugin);
 	await app.register(analyticsPlugin);
 	await app.register(settingsPlugin);
+
+	globalThis.console.log(`[startup] listen ${config.port}...`);
 	await app.listen({ port: config.port, host: '0.0.0.0' });
 
 	// Always print port to stdout — extension parses this to detect the running port.
