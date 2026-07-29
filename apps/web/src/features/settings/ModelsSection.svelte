@@ -3,6 +3,8 @@ import { getProviderLabel, sleep } from '@ungate/shared/frontend';
 import IconCopy from 'virtual:icons/lucide/copy';
 import IconTrash2 from 'virtual:icons/lucide/trash-2';
 
+import { getSavedSettingsModelId, saveSettingsModelId } from '$shared/vscode';
+
 import type { ModelMappingConfig, ModelMappingProvider } from '@ungate/shared/frontend';
 
 interface VisibleModelItem {
@@ -29,11 +31,19 @@ let confirmDeleteIndex = $state<number | null>(null);
 let activeModelIndex = $state<number | null>(null);
 
 const reasoningOptions: { label: string; value: ModelMappingConfig['reasoningBudget'] }[] = [
-	{ label: 'None', value: null },
+	{ label: 'Default', value: null },
+	{ label: 'None', value: 'none' },
 	{ label: 'Low', value: 'low' },
 	{ label: 'Medium', value: 'medium' },
 	{ label: 'High', value: 'high' },
-	{ label: 'XHigh', value: 'xhigh' }
+	{ label: 'XHigh', value: 'xhigh' },
+	{ label: 'Max', value: 'max' }
+];
+
+const serviceTierOptions: { label: string; value: ModelMappingConfig['serviceTier'] }[] = [
+	{ label: 'Default', value: null },
+	{ label: 'Normal', value: 'default' },
+	{ label: 'Fast / Priority', value: 'priority' }
 ];
 
 function withSortOrder(items: ModelMappingConfig[]): ModelMappingConfig[] {
@@ -74,6 +84,14 @@ function modelTitle(item: VisibleModelItem): string {
 	return `Model ${item.index + 1}`;
 }
 
+function modelSelectionId(item: VisibleModelItem): string {
+	return item.model.id.trim() || `#row-${item.index}`;
+}
+
+function saveActiveModel(item: VisibleModelItem): void {
+	saveSettingsModelId(selectedProvider, modelSelectionId(item));
+}
+
 function setActiveModel(index: number) {
 	if (activeModelIndex === index) {
 		activeModelIndex = null;
@@ -82,6 +100,11 @@ function setActiveModel(index: number) {
 	}
 
 	activeModelIndex = index;
+	const active = visibleModels().find((item) => item.index === index);
+
+	if (active) {
+		saveActiveModel(active);
+	}
 }
 
 function addModel() {
@@ -95,11 +118,13 @@ function addModel() {
 			provider: selectedProvider,
 			upstreamModel: '',
 			sortOrder: models.length,
-			reasoningBudget: null
+			reasoningBudget: null,
+			serviceTier: null
 		}
 	]);
 
 	activeModelIndex = nextIndex;
+	saveSettingsModelId(selectedProvider, `#row-${nextIndex}`);
 }
 
 function inputValue(event: Event): string {
@@ -123,6 +148,11 @@ function selectValue(event: Event): string {
 }
 
 function updateModelAtIndex(index: number, key: keyof ModelMappingConfig, value: string | number | null) {
+	if (key === 'id' && activeModelIndex === index) {
+		const modelId = typeof value === 'string' ? value.trim() : '';
+		saveSettingsModelId(selectedProvider, modelId || `#row-${index}`);
+	}
+
 	commit(
 		models.map((model, modelIndex) => {
 			if (modelIndex !== index) {
@@ -130,11 +160,27 @@ function updateModelAtIndex(index: number, key: keyof ModelMappingConfig, value:
 			}
 
 			if (key === 'reasoningBudget') {
-				if (value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === null) {
+				if (
+					value === 'none' ||
+					value === 'low' ||
+					value === 'medium' ||
+					value === 'high' ||
+					value === 'xhigh' ||
+					value === 'max' ||
+					value === null
+				) {
 					return { ...model, reasoningBudget: value };
 				}
 
 				return { ...model, reasoningBudget: null };
+			}
+
+			if (key === 'serviceTier') {
+				if (value === 'default' || value === 'priority' || value === null) {
+					return { ...model, serviceTier: value };
+				}
+
+				return { ...model, serviceTier: null };
 			}
 
 			return { ...model, [key]: value };
@@ -189,7 +235,11 @@ $effect(() => {
 	const active = visible.find((item) => item.index === activeModelIndex);
 
 	if (!active) {
-		activeModelIndex = visible[0].index;
+		const savedModelId = getSavedSettingsModelId(selectedProvider);
+		const restored = visible.find((item) => modelSelectionId(item) === savedModelId) ?? visible[0];
+
+		activeModelIndex = restored.index;
+		saveActiveModel(restored);
 	}
 });
 </script>
@@ -270,7 +320,8 @@ $effect(() => {
 						</div>
 					</div>
 
-					<div class="grid grid-cols-1 gap-4 xl:grid-cols-4 md:grid-cols-2">
+					<div
+						class="grid grid-cols-1 gap-4 {selectedProvider === 'openai' ? 'xl:grid-cols-5' : 'xl:grid-cols-4'} md:grid-cols-2">
 						<label class="label">
 							<span class="label-text text-xs">Model ID</span>
 							<input
@@ -314,7 +365,34 @@ $effect(() => {
 									<option value={option.value ?? ''}>{option.label}</option>
 								{/each}
 							</select>
+							{#if model.reasoningBudget === null}
+								<span class="text-xs text-surface-400 mt-1">No reasoning_budget sent.</span>
+							{:else if model.reasoningBudget === 'none'}
+								<span class="text-xs text-surface-400 mt-1">Only supported by GPT-5.6 models.</span>
+							{/if}
 						</label>
+
+						{#if selectedProvider === 'openai'}
+							<label class="label">
+								<span class="label-text text-xs">Service Tier</span>
+								<select
+									class="select text-sm"
+									value={model.serviceTier ?? ''}
+									onchange={(event) => {
+										const value = selectValue(event);
+										updateModelAtIndex(index, 'serviceTier', value ? value : null);
+									}}>
+									{#each serviceTierOptions as option}
+										<option value={option.value ?? ''}>{option.label}</option>
+									{/each}
+								</select>
+								{#if model.serviceTier === null}
+									<span class="text-xs text-surface-400 mt-1">No service_tier sent.</span>
+								{:else}
+									<span class="text-xs text-surface-400 mt-1">Only supported by GPT-5.6 models.</span>
+								{/if}
+							</label>
+						{/if}
 					</div>
 				</div>
 			{/if}

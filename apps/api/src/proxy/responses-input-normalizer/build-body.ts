@@ -59,6 +59,10 @@ export class ResponsesBodyBuilder {
 			store: false
 		};
 
+		if (body.service_tier) {
+			payload.service_tier = body.service_tier;
+		}
+
 		if (options.extraInstruction?.trim()) {
 			payload.instructions = options.extraInstruction.trim();
 		} else if (options.envInstructions?.trim()) {

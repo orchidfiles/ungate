@@ -1,4 +1,4 @@
-export type CodexReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+export type CodexReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface ResolvedChatGptModel {
 	model: string;

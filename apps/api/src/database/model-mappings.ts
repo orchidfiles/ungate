@@ -2,9 +2,11 @@ import { cloneDeep, orderBy, trim } from 'lodash-es';
 
 import {
 	isModelMappingProvider,
+	isModelServiceTier,
 	isReasoningBudgetTier,
 	type ModelMappingConfig,
 	type ModelMappingProvider,
+	type ModelServiceTier,
 	type ReasoningBudgetTier
 } from '@ungate/shared';
 
@@ -25,6 +27,7 @@ export class ModelMappings {
 			const trimmedLabel = trim(model.label);
 			const trimmedUpstreamModel = trim(model.upstreamModel);
 			let reasoningBudget: ReasoningBudgetTier | null = null;
+			let serviceTier: ModelServiceTier | null = null;
 			let provider: ModelMappingProvider = 'claude';
 
 			if (isModelMappingProvider(model.provider)) {
@@ -33,6 +36,10 @@ export class ModelMappings {
 
 			if (isReasoningBudgetTier(model.reasoningBudget)) {
 				reasoningBudget = model.reasoningBudget;
+			}
+
+			if (isModelServiceTier(model.serviceTier)) {
+				serviceTier = model.serviceTier;
 			}
 
 			if (!trimmedId || !trimmedLabel || !trimmedUpstreamModel) {
@@ -45,7 +52,8 @@ export class ModelMappings {
 				provider,
 				upstreamModel: trimmedUpstreamModel,
 				sortOrder: index,
-				reasoningBudget
+				reasoningBudget,
+				serviceTier
 			});
 		}
 
@@ -63,7 +71,8 @@ export class ModelMappings {
 				provider: isModelMappingProvider(row.provider) ? row.provider : 'claude',
 				upstreamModel: row.upstreamModel,
 				sortOrder: row.sortOrder,
-				reasoningBudget: isReasoningBudgetTier(row.reasoningBudget) ? row.reasoningBudget : null
+				reasoningBudget: isReasoningBudgetTier(row.reasoningBudget) ? row.reasoningBudget : null,
+				serviceTier: isModelServiceTier(row.serviceTier) ? row.serviceTier : null
 			})),
 			['sortOrder'],
 			['asc']
@@ -122,7 +131,8 @@ export class ModelMappings {
 						provider: model.provider,
 						upstreamModel: model.upstreamModel,
 						sortOrder: model.sortOrder,
-						reasoningBudget: model.reasoningBudget
+						reasoningBudget: model.reasoningBudget,
+						serviceTier: model.serviceTier
 					})
 					.run();
 			}

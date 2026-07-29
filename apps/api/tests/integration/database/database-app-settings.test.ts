@@ -13,7 +13,8 @@ describe('database-app-settings', () => {
 				provider: 'claude' as const,
 				upstreamModel: 'claude-test-default-model',
 				sortOrder: 0,
-				reasoningBudget: null
+				reasoningBudget: null,
+				serviceTier: null
 			}
 		];
 		ModelMappings.replace(expectedModels);
@@ -32,7 +33,8 @@ describe('database-app-settings', () => {
 			provider: 'claude' as const,
 			upstreamModel: 'u',
 			sortOrder: 0,
-			reasoningBudget: null
+			reasoningBudget: null,
+			serviceTier: null
 		};
 
 		Settings.update({

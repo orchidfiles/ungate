@@ -51,17 +51,23 @@ export class CompletionModelRouting {
 			...openaiBody,
 			model: resolved.upstreamModel
 		};
+		const withServiceTier: OpenAIChatRequest = resolved.serviceTier
+			? {
+					...withModel,
+					service_tier: resolved.serviceTier
+				}
+			: withModel;
 
 		if (resolved.reasoningBudget) {
 			const withReasoning: OpenAIChatRequest = {
-				...withModel,
+				...withServiceTier,
 				reasoning: { effort: resolved.reasoningBudget }
 			};
 
 			return withReasoning;
 		}
 
-		return withModel;
+		return withServiceTier;
 	}
 
 	static toAnthropicRequest(

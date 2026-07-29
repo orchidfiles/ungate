@@ -27,7 +27,8 @@ export const modelMappings = sqliteTable('model_mappings', {
 	provider: text().notNull(),
 	upstreamModel: text().notNull(),
 	sortOrder: integer().notNull().default(0),
-	reasoningBudget: text()
+	reasoningBudget: text(),
+	serviceTier: text()
 });
 
 export const requests = sqliteTable('requests', {

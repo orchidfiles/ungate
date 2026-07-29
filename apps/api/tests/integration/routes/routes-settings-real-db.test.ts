@@ -21,6 +21,7 @@ describe('routes: settings (real database)', () => {
 						upstreamModel: 'claude-sonnet-4-7',
 						sortOrder: 0,
 						reasoningBudget: null,
+						serviceTier: null,
 						enabled: true
 					}
 				]
