@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.5 - 2026-07-29
+
+- Add GPT-5.6 Sol, Terra, and Luna support with configurable reasoning and OpenAI service tiers
+- Seed six focused medium-effort defaults covering normal and priority service
+- Preserve the selected dashboard page, settings provider/model, and per-page scroll position across webview reloads
+
 ## 1.7.4 - 2026-07-27
 
 - Fix adding custom models from dashboard returning 400
