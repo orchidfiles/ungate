@@ -320,7 +320,8 @@ $effect(() => {
 						</div>
 					</div>
 
-					<div class="grid grid-cols-1 gap-4 xl:grid-cols-5 md:grid-cols-2">
+					<div
+						class="grid grid-cols-1 gap-4 {selectedProvider === 'openai' ? 'xl:grid-cols-5' : 'xl:grid-cols-4'} md:grid-cols-2">
 						<label class="label">
 							<span class="label-text text-xs">Model ID</span>
 							<input
@@ -364,22 +365,34 @@ $effect(() => {
 									<option value={option.value ?? ''}>{option.label}</option>
 								{/each}
 							</select>
+							{#if model.reasoningBudget === null}
+								<span class="text-xs text-surface-400 mt-1">No reasoning_budget sent.</span>
+							{:else if model.reasoningBudget === 'none'}
+								<span class="text-xs text-surface-400 mt-1">Only supported by GPT-5.6 models.</span>
+							{/if}
 						</label>
 
-						<label class="label">
-							<span class="label-text text-xs">Service Tier</span>
-							<select
-								class="select text-sm"
-								value={model.serviceTier ?? ''}
-								onchange={(event) => {
-									const value = selectValue(event);
-									updateModelAtIndex(index, 'serviceTier', value ? value : null);
-								}}>
-								{#each serviceTierOptions as option}
-									<option value={option.value ?? ''}>{option.label}</option>
-								{/each}
-							</select>
-						</label>
+						{#if selectedProvider === 'openai'}
+							<label class="label">
+								<span class="label-text text-xs">Service Tier</span>
+								<select
+									class="select text-sm"
+									value={model.serviceTier ?? ''}
+									onchange={(event) => {
+										const value = selectValue(event);
+										updateModelAtIndex(index, 'serviceTier', value ? value : null);
+									}}>
+									{#each serviceTierOptions as option}
+										<option value={option.value ?? ''}>{option.label}</option>
+									{/each}
+								</select>
+								{#if model.serviceTier === null}
+									<span class="text-xs text-surface-400 mt-1">No service_tier sent.</span>
+								{:else}
+									<span class="text-xs text-surface-400 mt-1">Only supported by GPT-5.6 models.</span>
+								{/if}
+							</label>
+						{/if}
 					</div>
 				</div>
 			{/if}
