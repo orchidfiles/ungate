@@ -155,6 +155,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "service_tier": {
+          "name": "service_tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},

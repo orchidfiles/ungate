@@ -1,9 +1,11 @@
-export type ReasoningBudgetTier = 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningBudgetTier = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type ModelMappingProvider = 'claude' | 'minimax' | 'openai';
+export type ModelServiceTier = 'default' | 'priority';
 
 export const MODEL_MAPPING_PROVIDERS = ['claude', 'minimax', 'openai'] as const;
-export const REASONING_BUDGET_TIERS = ['low', 'medium', 'high', 'xhigh'] as const;
+export const MODEL_SERVICE_TIERS = ['default', 'priority'] as const;
+export const REASONING_BUDGET_TIERS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 export interface ModelMappingConfig {
 	id: string;
@@ -12,6 +14,7 @@ export interface ModelMappingConfig {
 	upstreamModel: string;
 	sortOrder: number;
 	reasoningBudget: ReasoningBudgetTier | null;
+	serviceTier: ModelServiceTier | null;
 }
 
 export interface AppSettings {

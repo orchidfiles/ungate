@@ -11,7 +11,8 @@ function mapping(partial: Partial<ModelMappingConfig> & Pick<ModelMappingConfig,
 		provider: partial.provider,
 		upstreamModel: partial.upstreamModel,
 		sortOrder: partial.sortOrder ?? 0,
-		reasoningBudget: partial.reasoningBudget ?? null
+		reasoningBudget: partial.reasoningBudget ?? null,
+		serviceTier: partial.serviceTier ?? null
 	};
 }
 
@@ -44,18 +45,25 @@ describe('CompletionModelRouting', () => {
 		expect(CompletionModelRouting.isOpenAiMapped(mapping({ provider: 'claude', upstreamModel: 'c' }))).toBe(false);
 	});
 
-	it('builds openai upstream body with optional reasoning effort', () => {
+	it('builds openai upstream body with optional reasoning effort and service tier', () => {
 		const body = { model: 'alias', messages: [], stream: false } as const;
-		const openai = mapping({ provider: 'openai', upstreamModel: 'gpt-real', reasoningBudget: 'high' });
+		const openai = mapping({
+			provider: 'openai',
+			upstreamModel: 'gpt-real',
+			reasoningBudget: 'max',
+			serviceTier: 'priority'
+		});
 		const upstream = CompletionModelRouting.buildOpenAiUpstreamBody(body as never, openai);
 
 		expect(upstream.model).toBe('gpt-real');
-		expect(upstream.reasoning).toEqual({ effort: 'high' });
+		expect(upstream.reasoning).toEqual({ effort: 'max' });
+		expect(upstream.service_tier).toBe('priority');
 
 		const noBudget = mapping({ provider: 'openai', upstreamModel: 'gpt-2', reasoningBudget: null });
 		const plain = CompletionModelRouting.buildOpenAiUpstreamBody(body as never, noBudget);
 
 		expect(plain.model).toBe('gpt-2');
 		expect('reasoning' in plain).toBe(false);
+		expect('service_tier' in plain).toBe(false);
 	});
 });

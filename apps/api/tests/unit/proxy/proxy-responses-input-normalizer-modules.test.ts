@@ -20,6 +20,21 @@ describe('proxy-responses-input-normalizer-modules', () => {
 			model: 'gpt-5.5',
 			reasoningEffort: 'xhigh'
 		});
+		expect(ResponsesModelResolver.resolveModel('gpt-5.6-sol')).toEqual({
+			model: 'gpt-5.6-sol'
+		});
+		expect(ResponsesModelResolver.resolveModel('gpt-5.6-terra-high')).toEqual({
+			model: 'gpt-5.6-terra',
+			reasoningEffort: 'high'
+		});
+		expect(ResponsesModelResolver.resolveModel('gpt-5.6-luna-xhigh')).toEqual({
+			model: 'gpt-5.6-luna',
+			reasoningEffort: 'xhigh'
+		});
+		expect(ResponsesModelResolver.resolveModel('gpt-5.6-sol-max')).toEqual({
+			model: 'gpt-5.6-sol',
+			reasoningEffort: 'max'
+		});
 	});
 
 	it('maps function tool_choice and keeps passthrough object', () => {

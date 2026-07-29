@@ -57,6 +57,7 @@ describe('routes: health/settings/models/analytics', () => {
 						upstreamModel: 'claude-test-model',
 						sortOrder: 0,
 						reasoningBudget: null,
+						serviceTier: null,
 						enabled: true
 					}
 				]
@@ -71,7 +72,8 @@ describe('routes: health/settings/models/analytics', () => {
 					provider: 'claude',
 					upstreamModel: 'claude-test-model',
 					sortOrder: 0,
-					reasoningBudget: null
+					reasoningBudget: null,
+					serviceTier: null
 				}
 			]
 		});

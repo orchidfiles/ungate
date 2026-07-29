@@ -50,7 +50,7 @@ export class ResponsesModelResolver {
 	}
 
 	private static resolveReasoningSuffix(model: string): ResolvedChatGptModel | null {
-		const effortLevels: CodexReasoningEffort[] = ['none', 'low', 'medium', 'high', 'xhigh'];
+		const effortLevels: CodexReasoningEffort[] = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 		for (const effort of effortLevels) {
 			if (model.endsWith(`-${effort}`)) {

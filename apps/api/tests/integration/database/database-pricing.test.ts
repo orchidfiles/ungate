@@ -4,6 +4,9 @@ import { Pricing } from 'src/database/pricing';
 
 describe('database-pricing', () => {
 	it('matches pricing by exact id and prefix', () => {
+		expect(Pricing.getModel('gpt-5.6-sol')).toEqual({ inputPerMTok: 5.0, outputPerMTok: 30.0 });
+		expect(Pricing.getModel('gpt-5.6-terra')).toEqual({ inputPerMTok: 2.5, outputPerMTok: 15.0 });
+		expect(Pricing.getModel('gpt-5.6-luna')).toEqual({ inputPerMTok: 1.0, outputPerMTok: 6.0 });
 		expect(Pricing.getModel('claude-sonnet-4-6')).toEqual({ inputPerMTok: 3.0, outputPerMTok: 15.0 });
 		expect(Pricing.getModel('claude-sonnet-4-6-20250514')).toEqual({ inputPerMTok: 3.0, outputPerMTok: 15.0 });
 		expect(Pricing.getModel('unknown-model')).toEqual({ inputPerMTok: 3.0, outputPerMTok: 15.0 });

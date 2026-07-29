@@ -78,6 +78,7 @@ describe('proxy-responses-input-normalizer', () => {
 			{
 				model: 'gpt-5.5',
 				messages: [{ role: 'user', content: 'hello' }],
+				service_tier: 'priority',
 				tools: [
 					{
 						type: 'function',
@@ -94,6 +95,7 @@ describe('proxy-responses-input-normalizer', () => {
 			{ instructionsFallback: 'fallback', extraInstruction: '', envInstructions: '' }
 		);
 
+		expect(payload.service_tier).toBe('priority');
 		expect(payload.tools).toEqual([
 			{
 				type: 'function',

@@ -168,6 +168,11 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
 // Labels map — exact model names from DB (after normalizeModelName).
 // Dated variants are the actual stored names for 4.5 models.
 const MODEL_LABELS: Record<string, string> = {
+	// GPT-5.6 OpenAI series
+	'gpt-5.6': 'GPT-5.6',
+	'gpt-5.6-sol': 'GPT-5.6 Sol',
+	'gpt-5.6-terra': 'GPT-5.6 Terra',
+	'gpt-5.6-luna': 'GPT-5.6 Luna',
 	// 4.8 series (used as-is)
 	'claude-opus-4-8': 'Claude Opus 4.8',
 	// 4.7 series (used as-is)

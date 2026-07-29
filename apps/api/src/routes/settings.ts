@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { isModelMappingProvider, isReasoningBudgetTier, type AppSettings } from '@ungate/shared';
+import { isModelMappingProvider, isModelServiceTier, isReasoningBudgetTier, type AppSettings } from '@ungate/shared';
 
 import { Settings } from '../database/app-settings';
 import { logger } from '../utils/logger';
@@ -19,7 +19,10 @@ const ModelMappingUpdateSchema = z
 		reasoningBudget: z.union([
 			z.null(),
 			z.string().refine((value) => isReasoningBudgetTier(value), { message: 'Invalid reasoningBudget' })
-		])
+		]),
+		serviceTier: z
+			.union([z.null(), z.string().refine((value) => isModelServiceTier(value), { message: 'Invalid serviceTier' })])
+			.default(null)
 	})
 	.strip();
 

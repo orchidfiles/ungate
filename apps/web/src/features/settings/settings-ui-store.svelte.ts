@@ -1,6 +1,7 @@
 import { getProviderLabel } from '@ungate/shared/frontend';
 
 import { Api } from '$shared/api';
+import { getSavedSettingsProvider, saveSettingsProvider } from '$shared/vscode';
 
 import type { ModelMappingConfig, ModelMappingProvider } from '@ungate/shared/frontend';
 
@@ -19,7 +20,7 @@ interface SettingsUiStore {
 	refreshAuthStates(): Promise<void>;
 }
 
-let selectedProvider = $state<ModelMappingProvider>('claude');
+let selectedProvider = $state<ModelMappingProvider>(getSavedSettingsProvider());
 
 function createAuthStates(state: ProviderAuthState): Record<ModelMappingProvider, ProviderAuthState> {
 	return {
@@ -39,6 +40,7 @@ const providerLabels: Record<ModelMappingProvider, string> = {
 
 function setSelectedProvider(provider: ModelMappingProvider): void {
 	selectedProvider = provider;
+	saveSettingsProvider(provider);
 }
 
 function getProviderModelsCount(models: ModelMappingConfig[]): (provider: ModelMappingProvider) => number {

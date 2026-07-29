@@ -22,6 +22,7 @@ let validationError = $state<string | null>(null);
 function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 	return items.map((model, index) => {
 		let reasoningBudget = model.reasoningBudget;
+		let serviceTier = model.serviceTier;
 		let provider: ModelMappingProvider = 'claude';
 
 		if (model.provider === 'minimax') {
@@ -32,11 +33,22 @@ function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 			provider = 'openai';
 		}
 
-		if (reasoningBudget !== 'low' && reasoningBudget !== 'medium' && reasoningBudget !== 'high' && reasoningBudget !== 'xhigh') {
+		if (
+			reasoningBudget !== 'none' &&
+			reasoningBudget !== 'low' &&
+			reasoningBudget !== 'medium' &&
+			reasoningBudget !== 'high' &&
+			reasoningBudget !== 'xhigh' &&
+			reasoningBudget !== 'max'
+		) {
 			reasoningBudget = null;
 		}
 
-		return { ...model, provider, reasoningBudget, sortOrder: index };
+		if (serviceTier !== 'default' && serviceTier !== 'priority') {
+			serviceTier = null;
+		}
+
+		return { ...model, provider, reasoningBudget, serviceTier, sortOrder: index };
 	});
 }
 

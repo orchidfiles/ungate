@@ -99,7 +99,8 @@ describe('routes-openai', () => {
 		resolveForChatCompletionMock.mockReturnValueOnce({
 			provider: 'openai',
 			upstreamModel: 'gpt-up',
-			reasoningBudget: null
+			reasoningBudget: null,
+			serviceTier: null
 		});
 		proxyOpenAIRequestMock.mockResolvedValueOnce({
 			response: new Response(JSON.stringify({ error: { message: 'upstream failed' } }), { status: 429 }),
@@ -124,7 +125,8 @@ describe('routes-openai', () => {
 		resolveForChatCompletionMock.mockReturnValueOnce({
 			provider: 'openai',
 			upstreamModel: 'gpt-up',
-			reasoningBudget: 'high'
+			reasoningBudget: 'high',
+			serviceTier: 'priority'
 		});
 		proxyOpenAIRequestMock.mockResolvedValueOnce({
 			response: new Response(JSON.stringify({ id: 'chatcmpl-ok', choices: [{ message: { content: 'done' } }] }), {
@@ -157,7 +159,8 @@ describe('routes-openai', () => {
 		expect(proxyOpenAIRequestMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				model: 'gpt-up',
-				reasoning: { effort: 'high' }
+				reasoning: { effort: 'high' },
+				service_tier: 'priority'
 			}),
 			'openai'
 		);
@@ -320,7 +323,8 @@ describe('routes-openai', () => {
 		resolveForChatCompletionMock.mockReturnValueOnce({
 			provider: 'openai',
 			upstreamModel: 'gpt-up',
-			reasoningBudget: null
+			reasoningBudget: null,
+			serviceTier: null
 		});
 		proxyOpenAIRequestMock.mockResolvedValueOnce({
 			response: new Response(stream, {

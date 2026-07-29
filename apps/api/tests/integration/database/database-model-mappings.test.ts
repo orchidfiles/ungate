@@ -11,7 +11,8 @@ describe('database-model-mappings', () => {
 				provider: 'openai',
 				upstreamModel: ' gpt-5.4 ',
 				sortOrder: 0,
-				reasoningBudget: 'high'
+				reasoningBudget: 'max',
+				serviceTier: 'priority'
 			},
 			{
 				id: ' ',
@@ -19,7 +20,8 @@ describe('database-model-mappings', () => {
 				provider: 'claude',
 				upstreamModel: 'x',
 				sortOrder: 1,
-				reasoningBudget: null
+				reasoningBudget: null,
+				serviceTier: null
 			}
 		]);
 
@@ -30,7 +32,8 @@ describe('database-model-mappings', () => {
 			provider: 'openai',
 			upstreamModel: 'gpt-5.4',
 			sortOrder: 0,
-			reasoningBudget: 'high'
+			reasoningBudget: 'max',
+			serviceTier: 'priority'
 		});
 	});
 
@@ -42,7 +45,8 @@ describe('database-model-mappings', () => {
 				provider: 'claude',
 				upstreamModel: 'claude-sonnet-4-6',
 				sortOrder: 2,
-				reasoningBudget: null
+				reasoningBudget: null,
+				serviceTier: null
 			},
 			{
 				id: 'second',
@@ -50,7 +54,8 @@ describe('database-model-mappings', () => {
 				provider: 'claude',
 				upstreamModel: 'claude-second',
 				sortOrder: 3,
-				reasoningBudget: null
+				reasoningBudget: null,
+				serviceTier: null
 			}
 		]);
 

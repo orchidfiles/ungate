@@ -48,11 +48,12 @@ export interface OpenAIChatRequest {
 	presence_penalty?: number;
 	frequency_penalty?: number;
 	user?: string;
+	service_tier?: 'default' | 'priority';
 	tools?: OpenAITool[];
 	tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
-	reasoning_effort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+	reasoning_effort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	reasoning?: {
-		effort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+		effort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	};
 }
 
