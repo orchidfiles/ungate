@@ -81,6 +81,24 @@ export class ModelMappings {
 		return this.clone(models);
 	}
 
+	// Cursor drops a trailing reasoning tier from the model id and sends the effort as a
+	// separate field, so a mapping saved as "gpt-5.6-sol-fast-medium" arrives as
+	// "gpt-5.6-sol-fast". Only re-attach a suffix that matches the row's own budget, and
+	// keep sortOrder precedence so the first matching mapping wins.
+	private static findByDroppedReasoningSuffix(mappings: ModelMappingConfig[], lowerRequested: string): ModelMappingConfig | null {
+		for (const mapping of mappings) {
+			if (!mapping.reasoningBudget) {
+				continue;
+			}
+
+			if (mapping.id.toLowerCase() === `${lowerRequested}-${mapping.reasoningBudget}`) {
+				return mapping;
+			}
+		}
+
+		return null;
+	}
+
 	static resolveForChatCompletion(requestedModel: string): ModelMappingConfig | null {
 		const mappings = this.list();
 		const t = requestedModel.trim();
@@ -89,29 +107,29 @@ export class ModelMappings {
 			return null;
 		}
 
-		const byId = mappings.find((m) => m.id === t);
+		const lower = t.toLowerCase();
+
+		// Ids are what users configure in Cursor, so every id match outranks upstream matches.
+		const byId = mappings.find((m) => m.id === t) ?? mappings.find((m) => m.id.toLowerCase() === lower);
 
 		if (byId) {
 			return byId;
 		}
 
-		const byUpstream = mappings.find((m) => m.upstreamModel === t);
+		// Must stay ahead of the upstream match: mappings that differ only by service tier
+		// share one upstream model, so matching upstream first collapses the priority-tier
+		// row onto the default-tier one.
+		const byDroppedSuffix = this.findByDroppedReasoningSuffix(mappings, lower);
+
+		if (byDroppedSuffix) {
+			return byDroppedSuffix;
+		}
+
+		const byUpstream =
+			mappings.find((m) => m.upstreamModel === t) ?? mappings.find((m) => m.upstreamModel.toLowerCase() === lower);
 
 		if (byUpstream) {
 			return byUpstream;
-		}
-
-		const lower = t.toLowerCase();
-		const byIdInsensitive = mappings.find((m) => m.id.toLowerCase() === lower);
-
-		if (byIdInsensitive) {
-			return byIdInsensitive;
-		}
-
-		const byUpstreamInsensitive = mappings.find((m) => m.upstreamModel.toLowerCase() === lower);
-
-		if (byUpstreamInsensitive) {
-			return byUpstreamInsensitive;
 		}
 
 		return null;
