@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.6 - 2026-08-06
+
+- Fix GPT-5.6 priority-tier models failing when Cursor strips the reasoning tier from the model id
+
 ## 1.7.5 - 2026-07-29
 
 - Add GPT-5.6 Sol, Terra, and Luna support with configurable reasoning and OpenAI service tiers
