@@ -4,6 +4,10 @@
 	"type": "module",
 	"scripts": {
 		"tunnel": "tsx tunnel/main.ts",
+		"build-package": "sh build-package/run.sh",
+		"check-tunnels": "sh check-tunnels/run.sh",
+		"reset-sqlite-binary": "sh reset-sqlite-binary/run.sh",
+		"update-node-version": "sh update-node-version/run.sh",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix"
 	},

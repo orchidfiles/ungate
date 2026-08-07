@@ -19,7 +19,7 @@
 	"dependencies": {
 		"@fastify/cors": "~11.2.0",
 		"@ungate/shared": "workspace:*",
-		"better-sqlite3": "12.9.0",
+		"better-sqlite3": "12.11.1",
 		"date-fns": "~4.1.0",
 		"drizzle-orm": "~0.43.1",
 		"fastify": "~5.8.5",

@@ -75,7 +75,7 @@ sequenceDiagram
 ## Prerequisites
 
 - Cursor with custom OpenAI provider support enabled.
-- System Node.js installed on the machine. Ungate starts its local API through the system Node runtime.
+- System Node.js installed on the machine. Ungate starts its local API through the system Node runtime. Supported versions: Node 22, 24, 26 (Node 20 and 23 are not supported).
 - Outbound internet access for OAuth and provider APIs.
 - A reachable public tunnel URL because Cursor backend cannot call `localhost`.
 
@@ -181,6 +181,7 @@ DB_PATH=$HOME/.ungate/data-dev.db PORT=4784 node dist/main.js
 | `404` or timeout through tunnel | Tunnel status in Ungate panel | Restart tunnel from dashboard |
 | OAuth session expired | Provider connection status | Reconnect provider in dashboard |
 | Model missing in Cursor | Custom model list in Cursor | Add model ID manually from Ungate `Models` |
+| API never starts, `[native] No prebuilt binary for ABI ...` in logs | Node.js version | Install a supported Node version (22, 24, 26) |
 
 ## Quick facts
 
