@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.7 - 2026-08-07
+
+- Fix API server failing to start on Node 26 by bumping better-sqlite3 to 12.11.1
+- Drop Node 20 and 23 support; supported runtimes: Node 22, 24, 26
+
 ## 1.7.6 - 2026-08-06
 
 - Fix GPT-5.6 priority-tier models failing when Cursor strips the reasoning tier from the model id
