@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
-import { isModelMappingProvider, isModelServiceTier, isReasoningBudgetTier, type AppSettings } from '@ungate/shared';
+import {
+	isModelMappingProvider,
+	isModelServiceTier,
+	isReasoningBudgetTier,
+	MAX_BODY_LIMIT_MB,
+	MIN_BODY_LIMIT_MB,
+	type AppSettings
+} from '@ungate/shared';
 
 import { Settings } from '../database/app-settings';
 import { logger } from '../utils/logger';
@@ -32,6 +39,7 @@ const SettingsUpdateSchema = z
 		apiKey: z.union([z.string(), z.null()]).optional(),
 		quiet: z.boolean().optional(),
 		extraInstruction: z.union([z.string(), z.null()]).optional(),
+		bodyLimitMb: z.number().int().min(MIN_BODY_LIMIT_MB).max(MAX_BODY_LIMIT_MB).optional(),
 		models: z.array(ModelMappingUpdateSchema).optional()
 	})
 	.strip();

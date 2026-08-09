@@ -1,7 +1,7 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 
-import { setQuietMode } from 'src/utils/logger';
+import { logger, setQuietMode } from 'src/utils/logger';
 
 import { getConfig } from './config';
 import { getDb } from './database/index';
@@ -23,8 +23,23 @@ export async function startServer(): Promise<void> {
 	const config = getConfig(settings);
 	setQuietMode(config.quietMode);
 
-	const app = Fastify({ logger: false });
+	const app = Fastify({ logger: false, bodyLimit: config.bodyLimitBytes });
 	app.decorate('config', config);
+
+	// Oversized bodies are rejected before any route runs. onError observes them without
+	// replacing Fastify's default handler, which preserves the standard 413 response.
+	app.addHook('onError', (request, _reply, error, done) => {
+		if (error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+			const contentLength = request.headers['content-length'] ?? 'unknown';
+
+			logger.error(
+				`Request body too large: ${contentLength} bytes exceeds the ${config.bodyLimitBytes}-byte limit. ` +
+					'Raise "Max request size" in settings if this is a legitimate request (e.g. several images).'
+			);
+		}
+
+		done();
+	});
 
 	globalThis.console.log('[startup] register cors...');
 	await app.register(cors, { origin: '*' });

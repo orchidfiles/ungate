@@ -2,6 +2,7 @@ export interface ProxyConfig {
 	port: number;
 	apiKey?: string;
 	quietMode: boolean;
+	bodyLimitBytes: number;
 }
 
 export * from './anthropic';

@@ -31,6 +31,7 @@ export class Settings {
 			apiKey: row.apiKey,
 			quiet: row.quiet,
 			extraInstruction: row.extraInstruction,
+			bodyLimitMb: row.bodyLimitMb,
 			models: ModelMappings.list()
 		};
 	}
@@ -46,7 +47,8 @@ export class Settings {
 					...(settings.port !== undefined && { port: settings.port }),
 					...(settings.apiKey !== undefined && { apiKey: settings.apiKey }),
 					...(settings.quiet !== undefined && { quiet: settings.quiet }),
-					...(settings.extraInstruction !== undefined && { extraInstruction: settings.extraInstruction })
+					...(settings.extraInstruction !== undefined && { extraInstruction: settings.extraInstruction }),
+					...(settings.bodyLimitMb !== undefined && { bodyLimitMb: settings.bodyLimitMb })
 				}
 			})
 			.run();
