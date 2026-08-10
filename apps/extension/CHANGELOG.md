@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.8 - 2026-08-10
+
+- Fix 413 on multi-image Cursor requests by raising the request body limit to 256 MiB
+- Check the API key before the body is parsed so unauthorized requests are not buffered
+
 ## 1.7.7 - 2026-08-07
 
 - Fix API server failing to start on Node 26 by bumping better-sqlite3 to 12.11.1
