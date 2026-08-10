@@ -1,4 +1,4 @@
-import { clampBodyLimitMb, MINIMAX_BASE_URLS, type AppSettings } from '@ungate/shared';
+import { MINIMAX_BASE_URLS, type AppSettings } from '@ungate/shared';
 
 import type { ProxyConfig } from './types';
 
@@ -56,14 +56,9 @@ export function getConfig(settings: AppSettings): ProxyConfig {
 		}
 	}
 
-	// Clamped rather than trusted: Fastify throws at construction on a non-positive
-	// bodyLimit, which would leave the proxy dead instead of merely misconfigured.
-	const bodyLimitMb = clampBodyLimitMb(settings.bodyLimitMb);
-
 	return {
 		port: envPort ?? settings.port,
 		apiKey: settings.apiKey ?? undefined,
-		quietMode: settings.quiet,
-		bodyLimitBytes: bodyLimitMb * 1024 * 1024
+		quietMode: settings.quiet
 	};
 }

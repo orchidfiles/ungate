@@ -1,7 +1,5 @@
 import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
-import { DEFAULT_BODY_LIMIT_MB } from '@ungate/shared';
-
 export const appSettings = sqliteTable('app_settings', {
 	id: integer()
 		.primaryKey({ autoIncrement: false })
@@ -9,8 +7,7 @@ export const appSettings = sqliteTable('app_settings', {
 	port: integer().notNull().default(47821),
 	apiKey: text(),
 	quiet: integer({ mode: 'boolean' }).notNull().default(false),
-	extraInstruction: text(),
-	bodyLimitMb: integer().notNull().default(DEFAULT_BODY_LIMIT_MB)
+	extraInstruction: text()
 });
 
 export const providerSettings = sqliteTable('provider_settings', {

@@ -1,6 +1,4 @@
 <script lang="ts">
-import { isValidBodyLimitMb, MAX_BODY_LIMIT_MB, MIN_BODY_LIMIT_MB } from '@ungate/shared/frontend';
-
 import TunnelPanel from '../tunnel/TunnelPanel.svelte';
 
 import ModelsSection from './ModelsSection.svelte';
@@ -15,8 +13,8 @@ const uiStore = getSettingsUiStore();
 
 let port = $state('');
 let apiKey = $state('');
+let quiet = $state(false);
 let extraInstruction = $state('');
-let bodyLimitMb = $state('');
 let models = $state<ModelMappingConfig[]>([]);
 let showAdvanced = $state(false);
 let validationError = $state<string | null>(null);
@@ -58,20 +56,17 @@ function withSortOrder(items: ModelMappingConfig[]): ModelMappingConfig[] {
 	return items.map((model, index) => ({ ...model, sortOrder: index }));
 }
 
-function serverValues(): Partial<AppSettings> {
-	return {
+function currentValues(): Partial<AppSettings> {
+	const values: Partial<AppSettings> = {
 		port: parseInt(port, 10),
-		apiKey: apiKey.trim() || null,
-		bodyLimitMb: parseInt(bodyLimitMb, 10)
+		quiet,
+		models: cloneModels(models)
 	};
-}
 
-function instructionValues(): Partial<AppSettings> {
-	return { extraInstruction: extraInstruction.trim() || null };
-}
+	values.apiKey = apiKey.trim() || null;
+	values.extraInstruction = extraInstruction.trim() || null;
 
-function modelValues(): Partial<AppSettings> {
-	return { models: cloneModels(models) };
+	return values;
 }
 
 function validateBeforeSave(): string | null {
@@ -79,10 +74,6 @@ function validateBeforeSave(): string | null {
 
 	if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
 		return 'Port must be an integer between 1 and 65535.';
-	}
-
-	if (!isValidBodyLimitMb(parseInt(bodyLimitMb, 10))) {
-		return `Max request size must be an integer between ${MIN_BODY_LIMIT_MB} and ${MAX_BODY_LIMIT_MB} MB.`;
 	}
 
 	for (const model of models) {
@@ -109,7 +100,7 @@ function handleSaveAndRestart() {
 		return;
 	}
 
-	void store.saveAndRestart(serverValues());
+	void store.saveAndRestart(currentValues());
 }
 
 function handleSaveWithoutRestart() {
@@ -123,17 +114,7 @@ function handleSaveWithoutRestart() {
 		store.completeRestart();
 	}
 
-	void store.save(instructionValues());
-}
-
-function handleModelsSave() {
-	validationError = validateBeforeSave();
-
-	if (validationError) {
-		return;
-	}
-
-	void store.save(modelValues());
+	void store.save(currentValues());
 }
 
 $effect(() => {
@@ -147,8 +128,8 @@ $effect(() => {
 
 	port = String(store.settings.port);
 	apiKey = store.settings.apiKey ?? '';
+	quiet = store.settings.quiet;
 	extraInstruction = store.settings.extraInstruction ?? '';
-	bodyLimitMb = String(store.settings.bodyLimitMb);
 	models = cloneModels(store.settings.models);
 });
 
@@ -202,19 +183,6 @@ $effect(() => {
 						bind:value={apiKey}
 						placeholder="No key (open access)" />
 				</label>
-				<label class="label">
-					<span class="label-text text-xs">Max request size (MB)</span>
-					<input
-						class="input text-sm"
-						type="number"
-						min={MIN_BODY_LIMIT_MB}
-						max={MAX_BODY_LIMIT_MB}
-						bind:value={bodyLimitMb} />
-					<span class="text-xs text-surface-400">
-						Requests larger than this are rejected. Images are sent inline, so a few attachments can add several MB. The new limit
-						takes effect after the server restarts.
-					</span>
-				</label>
 			</div>
 		</div>
 
@@ -258,7 +226,7 @@ $effect(() => {
 				selectedProvider={uiStore.selectedProvider}
 				models={models}
 				error={store.error}
-				onSave={handleModelsSave}
+				onSave={handleSaveWithoutRestart}
 				saving={store.saving}
 				saved={store.saved}
 				restarting={store.restarting}

@@ -1,7 +1,4 @@
 import {
-	DEFAULT_BODY_LIMIT_MB,
-	MAX_BODY_LIMIT_MB,
-	MIN_BODY_LIMIT_MB,
 	MODEL_MAPPING_PROVIDERS,
 	MODEL_SERVICE_TIERS,
 	REASONING_BUDGET_TIERS,
@@ -20,16 +17,4 @@ export function isReasoningBudgetTier(value: unknown): value is ReasoningBudgetT
 
 export function isModelServiceTier(value: unknown): value is ModelServiceTier {
 	return typeof value === 'string' && MODEL_SERVICE_TIERS.includes(value as ModelServiceTier);
-}
-
-export function isValidBodyLimitMb(value: unknown): value is number {
-	return typeof value === 'number' && Number.isInteger(value) && value >= MIN_BODY_LIMIT_MB && value <= MAX_BODY_LIMIT_MB;
-}
-
-export function clampBodyLimitMb(value: unknown): number {
-	if (!isValidBodyLimitMb(value)) {
-		return DEFAULT_BODY_LIMIT_MB;
-	}
-
-	return value;
 }

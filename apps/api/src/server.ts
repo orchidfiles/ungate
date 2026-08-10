@@ -3,6 +3,8 @@ import Fastify from 'fastify';
 
 import { logger, setQuietMode } from 'src/utils/logger';
 
+const BODY_LIMIT_BYTES = 256 * 1024 * 1024;
+
 import { getConfig } from './config';
 import { getDb } from './database/index';
 import { Settings } from './database/settings';
@@ -23,7 +25,7 @@ export async function startServer(): Promise<void> {
 	const config = getConfig(settings);
 	setQuietMode(config.quietMode);
 
-	const app = Fastify({ logger: false, bodyLimit: config.bodyLimitBytes });
+	const app = Fastify({ logger: false, bodyLimit: BODY_LIMIT_BYTES });
 	app.decorate('config', config);
 
 	// Oversized bodies are rejected before any route runs. onError observes them without
@@ -32,10 +34,7 @@ export async function startServer(): Promise<void> {
 		if (error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
 			const contentLength = request.headers['content-length'] ?? 'unknown';
 
-			logger.error(
-				`Request body too large: ${contentLength} bytes exceeds the ${config.bodyLimitBytes}-byte limit. ` +
-					'Raise "Max request size" in settings if this is a legitimate request (e.g. several images).'
-			);
+			logger.error(`Request body too large: ${contentLength} bytes exceeds the ${BODY_LIMIT_BYTES}-byte limit.`);
 		}
 
 		done();
