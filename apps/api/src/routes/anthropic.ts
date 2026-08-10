@@ -10,7 +10,7 @@ import type { FastifyPluginCallback } from 'fastify';
 const plugin: FastifyPluginCallback = (app) => {
 	const { config } = app;
 
-	app.post('/v1/messages', { preHandler: apiKeyAuth(config) }, async (request, reply) => {
+	app.post('/v1/messages', { onRequest: apiKeyAuth(config) }, async (request, reply) => {
 		try {
 			HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'Anthropic /v1/messages');
 

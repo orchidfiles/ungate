@@ -1,7 +1,7 @@
 import type { Config } from '../config';
-import type { preHandlerAsyncHookHandler } from 'fastify';
+import type { onRequestAsyncHookHandler } from 'fastify';
 
-export function apiKeyAuth(config: Config): preHandlerAsyncHookHandler {
+export function apiKeyAuth(config: Config): onRequestAsyncHookHandler {
 	return async (request, reply) => {
 		if (!config.apiKey) return;
 		const bearer = request.headers.authorization?.slice(7);
