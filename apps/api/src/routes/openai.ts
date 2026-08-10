@@ -10,7 +10,7 @@ import type { OpenAIChatRequest } from 'src/types/openai';
 const plugin: FastifyPluginCallback = (app) => {
 	const { config } = app;
 
-	app.post('/v1/chat/completions', { preHandler: apiKeyAuth(config) }, async (request, reply) => {
+	app.post('/v1/chat/completions', { onRequest: apiKeyAuth(config) }, async (request, reply) => {
 		try {
 			const openaiBody = request.body as OpenAIChatRequest;
 			const resolvedModel = ModelMappings.resolveForChatCompletion(openaiBody.model);
