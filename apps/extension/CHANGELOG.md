@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.9 - 2026-08-13
+
+- Fix 400 on accepting a Cursor plan with Claude models by sanitizing tool ids from plan history (`functions.X:1` → `functions_X_1`)
+
 ## 1.7.8 - 2026-08-10
 
 - Fix 413 on multi-image Cursor requests by raising the request body limit to 256 MiB
