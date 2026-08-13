@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import { normalizeModelName, openaiToAnthropic } from 'src/adapter/openai-to-anthropic';
 
+import type { AnthropicRequest, ContentBlock } from 'src/types';
+import type { OpenAIChatRequest } from 'src/types/openai';
+
+function findBlock(request: AnthropicRequest, role: 'user' | 'assistant', type: ContentBlock['type']): ContentBlock | undefined {
+	return request.messages
+		.filter((message) => message.role === role)
+		.flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+		.find((block) => block.type === type);
+}
+
 describe('openai-to-anthropic', () => {
 	it('normalizes legacy model names with reasoning budget', () => {
 		expect(normalizeModelName('claude-4.6-opus-high')).toEqual({
@@ -125,6 +135,67 @@ describe('openai-to-anthropic', () => {
 		expect(toolResults).toHaveLength(2);
 		expect(toolResults[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'call_1', content: 'ok1' });
 		expect(toolResults[1]).toMatchObject({ type: 'tool_result', tool_use_id: 'call_2', content: 'ok2' });
+	});
+
+	it('sanitizes tool ids that anthropic rejects and keeps the pair matched', () => {
+		const request: OpenAIChatRequest = {
+			model: 'claude-opus-4-6',
+			messages: [
+				{
+					role: 'assistant',
+					content: 'planning',
+					tool_calls: [
+						{
+							id: 'functions.AskUserQuestion:1',
+							type: 'function',
+							function: { name: 'AskUserQuestion', arguments: '{}' }
+						}
+					]
+				},
+				{ role: 'tool', tool_call_id: 'functions.AskUserQuestion:1', content: 'answered' }
+			]
+		};
+
+		const result = openaiToAnthropic(request);
+
+		const toolUse = findBlock(result, 'assistant', 'tool_use');
+		const toolResult = findBlock(result, 'user', 'tool_result');
+
+		expect(toolUse?.id).toBe('functions_AskUserQuestion_1');
+		expect(toolResult?.tool_use_id).toBe(toolUse?.id);
+		expect(request.messages[0].tool_calls?.[0].id).toBe('functions.AskUserQuestion:1');
+	});
+
+	it('sanitizes tool ids on pass-through anthropic blocks', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-opus-4-6',
+			messages: [
+				{ role: 'assistant', content: [{ type: 'tool_use', id: 'functions.Read:2', name: 'Read', input: { path: 'a' } }] },
+				{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'functions.Read:2', content: 'ok' }] }
+			]
+		} as unknown as OpenAIChatRequest);
+
+		expect(findBlock(result, 'assistant', 'tool_use')?.id).toBe('functions_Read_2');
+		expect(findBlock(result, 'user', 'tool_result')?.tool_use_id).toBe('functions_Read_2');
+	});
+
+	it('leaves already valid tool ids untouched', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-opus-4-6',
+			messages: [
+				{
+					role: 'assistant',
+					content: 'calling',
+					tool_calls: [
+						{ id: 'toolu_01ABC-xyz', type: 'function', function: { name: 'read_file', arguments: '{}' } }
+					]
+				},
+				{ role: 'tool', tool_call_id: 'toolu_01ABC-xyz', content: 'ok' }
+			]
+		});
+
+		expect(findBlock(result, 'assistant', 'tool_use')?.id).toBe('toolu_01ABC-xyz');
+		expect(findBlock(result, 'user', 'tool_result')?.tool_use_id).toBe('toolu_01ABC-xyz');
 	});
 
 	it('uses max_completion_tokens when max_tokens is absent', () => {

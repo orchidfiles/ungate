@@ -37,6 +37,27 @@ export interface AnthropicModelOverride {
 	reasoningBudget?: ReasoningBudgetTier | null;
 }
 
+// Anthropic rejects tool ids that don't match ^[a-zA-Z0-9_-]+$, and Cursor's plan mode sends
+// ids like "functions.AskUserQuestion:1". The remap has to be deterministic: a tool_use and
+// its tool_result are paired by id, and both arrive on every subsequent turn.
+const ILLEGAL_TOOL_ID_CHARS = /[^a-zA-Z0-9_-]/g;
+
+function sanitizeToolId(id: string): string {
+	return id.replace(ILLEGAL_TOOL_ID_CHARS, '_');
+}
+
+function sanitizeToolBlockId(block: ContentBlock): ContentBlock {
+	if (block.type === 'tool_use' && block.id) {
+		return { ...block, id: sanitizeToolId(block.id) };
+	}
+
+	if (block.type === 'tool_result' && block.tool_use_id) {
+		return { ...block, tool_use_id: sanitizeToolId(block.tool_use_id) };
+	}
+
+	return block;
+}
+
 function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]): string | ContentBlock[] {
 	if (typeof content === 'string') {
 		return content;
@@ -46,13 +67,8 @@ function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]):
 
 	for (const part of content) {
 		// Pass through Anthropic-format blocks directly (Cursor sends these)
-		if ((part as ContentBlock).type === 'tool_use') {
-			blocks.push(part as ContentBlock);
-			continue;
-		}
-
-		if ((part as ContentBlock).type === 'tool_result') {
-			blocks.push(part as ContentBlock);
+		if ((part as ContentBlock).type === 'tool_use' || (part as ContentBlock).type === 'tool_result') {
+			blocks.push(sanitizeToolBlockId(part as ContentBlock));
 			continue;
 		}
 
@@ -120,7 +136,7 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 					}
 					contentBlocks.push({
 						type: 'tool_use',
-						id: toolCall.id,
+						id: sanitizeToolId(toolCall.id),
 						name: toolCall.function.name,
 						input
 					});
@@ -136,7 +152,7 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 			const toolResultContent: ContentBlock[] = [
 				{
 					type: 'tool_result',
-					tool_use_id: msg.tool_call_id ?? '',
+					tool_use_id: sanitizeToolId(msg.tool_call_id ?? ''),
 					content: resultContent
 				}
 			];
