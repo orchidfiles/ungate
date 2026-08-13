@@ -5,13 +5,27 @@ import { Requests } from '../database/requests';
 import { ToolNormalizer } from '../tools/normalizer';
 import { type ToolUseBlock, type StreamResult, type RequestContext } from '../types/proxy';
 
-import type { AnthropicStreamEvent } from '../types/anthropic-stream';
+import type { AnthropicStopReason, AnthropicStreamEvent } from '../types/anthropic-stream';
 
 interface StreamHandlerOptions {
 	reader: ReadableStreamDefaultReader<Uint8Array>;
 	streamId: string;
 	modelName: string;
 	context: RequestContext;
+}
+
+interface ActiveToolCall {
+	id: string;
+	name: string;
+	inputJson: string;
+	index: number;
+}
+
+interface StreamUsage {
+	input_tokens: number;
+	output_tokens: number;
+	cache_read_input_tokens: number;
+	cache_creation_input_tokens: number;
 }
 
 export class OpenAIStreamHandler {
@@ -40,6 +54,7 @@ export class OpenAIStreamHandler {
 		const { reader, streamId, modelName, context } = options;
 
 		let cancelled = false;
+		let currentToolCall: ActiveToolCall | null = null;
 
 		return new ReadableStream({
 			async start(controller) {
@@ -47,18 +62,10 @@ export class OpenAIStreamHandler {
 				let buffer = '';
 				let sentStart = false;
 				let toolCallIndex = 0;
-				let currentToolCall: {
-					id: string;
-					name: string;
-					inputJson: string;
-				} | null = null;
-
-				let finalUsage: {
-					input_tokens: number;
-					output_tokens: number;
-					cache_read_input_tokens: number;
-					cache_creation_input_tokens: number;
-				} | null = null;
+				let completedToolCalls = 0;
+				let finalized = false;
+				let stopReason: AnthropicStopReason | null = null;
+				let finalUsage: StreamUsage | null = null;
 
 				const safeEnqueue = (data: Uint8Array) => {
 					try {
@@ -70,6 +77,137 @@ export class OpenAIStreamHandler {
 					}
 				};
 
+				const describeOpenTool = (): string => {
+					if (!currentToolCall) {
+						return 'tool=none';
+					}
+
+					return `tool=${currentToolCall.name} toolId=${currentToolCall.id} argsLength=${currentToolCall.inputJson.length}`;
+				};
+
+				const flushToolCall = (mode: 'complete' | 'salvage'): boolean => {
+					if (!currentToolCall) {
+						return false;
+					}
+
+					if (mode === 'salvage') {
+						const raw = currentToolCall.inputJson;
+
+						if (!raw) {
+							logger.error(`Incomplete tool call ${describeOpenTool()}`);
+							currentToolCall = null;
+
+							return false;
+						}
+
+						try {
+							JSON.parse(raw);
+						} catch {
+							logger.error(`Incomplete tool call JSON ${describeOpenTool()}`);
+							currentToolCall = null;
+
+							return false;
+						}
+					}
+
+					let finalJson = currentToolCall.inputJson || '{}';
+
+					try {
+						const parsedArgs = JSON.parse(finalJson);
+						const toolUse: ToolUseBlock = {
+							type: 'tool_use',
+							id: currentToolCall.id,
+							name: currentToolCall.name,
+							input: parsedArgs
+						};
+
+						const normalized = ToolNormalizer.normalize(toolUse);
+						if (ToolNormalizer.hasChanged(toolUse, normalized)) {
+							finalJson = JSON.stringify(normalized.input);
+						}
+					} catch {
+						logger.error(`Failed to parse tool args for ${currentToolCall.name}`);
+
+						if (mode === 'salvage') {
+							currentToolCall = null;
+
+							return false;
+						}
+					}
+
+					safeEnqueue(
+						new TextEncoder().encode(
+							AnthropicToOpenai.toolCallChunk(streamId, modelName, toolCallIndex, undefined, undefined, finalJson, null)
+						)
+					);
+
+					toolCallIndex++;
+					completedToolCalls++;
+					currentToolCall = null;
+
+					return true;
+				};
+
+				const mapFinishReason = (unexpectedEof: boolean): 'stop' | 'length' | 'tool_calls' => {
+					if (unexpectedEof || stopReason === 'max_tokens' || stopReason === 'model_context_window_exceeded') {
+						return 'length';
+					}
+
+					if (completedToolCalls > 0) {
+						return 'tool_calls';
+					}
+
+					return 'stop';
+				};
+
+				const finalizeStream = (unexpectedEof: boolean) => {
+					if (finalized || cancelled) {
+						return;
+					}
+
+					finalized = true;
+
+					logger.log(
+						`Stream stop_reason=${stopReason ?? 'none'} unexpectedEof=${unexpectedEof} completedToolCalls=${completedToolCalls}`
+					);
+
+					if (unexpectedEof && currentToolCall) {
+						logger.error(`Unexpected EOF with open tool call ${describeOpenTool()}`);
+						currentToolCall = null;
+					}
+
+					const finishReason = mapFinishReason(unexpectedEof);
+
+					safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamChunk(streamId, modelName, undefined, finishReason)));
+
+					if (finalUsage) {
+						safeEnqueue(
+							new TextEncoder().encode(
+								AnthropicToOpenai.streamChunk(streamId, modelName, undefined, undefined, {
+									prompt_tokens: finalUsage.input_tokens,
+									completion_tokens: finalUsage.output_tokens,
+									total_tokens: finalUsage.input_tokens + finalUsage.output_tokens
+								})
+							)
+						);
+
+						Requests.record(
+							{
+								model: context.model,
+								source: context.source,
+								inputTokens: finalUsage.input_tokens,
+								outputTokens: finalUsage.output_tokens,
+								stream: true,
+								latencyMs: Date.now() - context.startTime
+							},
+							finalUsage.cache_read_input_tokens,
+							finalUsage.cache_creation_input_tokens
+						);
+					}
+
+					safeEnqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+				};
+
 				try {
 					while (true) {
 						if (cancelled) break;
@@ -77,7 +215,10 @@ export class OpenAIStreamHandler {
 						const { done, value } = await reader.read();
 
 						if (cancelled) break;
-						if (done) break;
+						if (done) {
+							finalizeStream(true);
+							break;
+						}
 
 						buffer += decoder.decode(value, { stream: true });
 						const lines = buffer.split('\n');
@@ -89,7 +230,7 @@ export class OpenAIStreamHandler {
 
 							const data = line.slice(6);
 							if (data === '[DONE]') {
-								safeEnqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+								finalizeStream(false);
 								continue;
 							}
 
@@ -112,7 +253,7 @@ export class OpenAIStreamHandler {
 									if (block?.type === 'tool_use') {
 										const originalName = context.reverseToolMapping[block.name] ?? block.name;
 
-										currentToolCall = { id: block.id, name: originalName, inputJson: '' };
+										currentToolCall = { id: block.id, name: originalName, inputJson: '', index: event.index };
 
 										safeEnqueue(
 											new TextEncoder().encode(
@@ -130,37 +271,16 @@ export class OpenAIStreamHandler {
 									}
 								}
 
-								if (event.type === 'content_block_stop' && currentToolCall) {
-									let finalJson = currentToolCall.inputJson || '{}';
-
-									try {
-										const parsedArgs = JSON.parse(finalJson);
-										const toolUse: ToolUseBlock = {
-											type: 'tool_use',
-											id: currentToolCall.id,
-											name: currentToolCall.name,
-											input: parsedArgs
-										};
-
-										const normalized = ToolNormalizer.normalize(toolUse);
-										if (ToolNormalizer.hasChanged(toolUse, normalized)) {
-											finalJson = JSON.stringify(normalized.input);
-										}
-									} catch {
-										logger.error(`Failed to parse tool args for ${currentToolCall.name}`);
-									}
-
-									safeEnqueue(
-										new TextEncoder().encode(
-											AnthropicToOpenai.toolCallChunk(streamId, modelName, toolCallIndex, undefined, undefined, finalJson, null)
-										)
-									);
-
-									toolCallIndex++;
-									currentToolCall = null;
+								if (event.type === 'content_block_stop' && event.index === currentToolCall?.index) {
+									flushToolCall('complete');
 								}
 
-								if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && currentToolCall) {
+								if (
+									currentToolCall &&
+									event.type === 'content_block_delta' &&
+									event.delta?.type === 'input_json_delta' &&
+									event.index === currentToolCall.index
+								) {
 									currentToolCall.inputJson += event.delta.partial_json ?? '';
 									continue;
 								}
@@ -188,43 +308,25 @@ export class OpenAIStreamHandler {
 									};
 								}
 
-								if (event.type === 'message_delta' && event.usage && finalUsage) {
-									finalUsage.output_tokens = event.usage.output_tokens ?? 0;
+								if (event.type === 'message_delta') {
+									if (event.delta?.stop_reason) {
+										stopReason = event.delta.stop_reason;
+									}
+
+									if (event.usage && finalUsage) {
+										finalUsage.output_tokens = event.usage.output_tokens ?? 0;
+									}
 								}
 
 								if (event.type === 'message_stop') {
-									const finishReason = toolCallIndex > 0 ? 'tool_calls' : 'stop';
-
-									safeEnqueue(
-										new TextEncoder().encode(AnthropicToOpenai.streamChunk(streamId, modelName, undefined, finishReason))
-									);
-
-									if (finalUsage) {
-										safeEnqueue(
-											new TextEncoder().encode(
-												AnthropicToOpenai.streamChunk(streamId, modelName, undefined, undefined, {
-													prompt_tokens: finalUsage.input_tokens,
-													completion_tokens: finalUsage.output_tokens,
-													total_tokens: finalUsage.input_tokens + finalUsage.output_tokens
-												})
-											)
-										);
-
-										Requests.record(
-											{
-												model: context.model,
-												source: context.source,
-												inputTokens: finalUsage.input_tokens,
-												outputTokens: finalUsage.output_tokens,
-												stream: true,
-												latencyMs: Date.now() - context.startTime
-											},
-											finalUsage.cache_read_input_tokens,
-											finalUsage.cache_creation_input_tokens
-										);
+									if (currentToolCall && stopReason === 'tool_use') {
+										flushToolCall('salvage');
+									} else if (currentToolCall) {
+										logger.error(`Open tool call at message_stop stop_reason=${stopReason ?? 'none'} ${describeOpenTool()}`);
+										currentToolCall = null;
 									}
 
-									safeEnqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+									finalizeStream(false);
 								}
 							} catch (parseError) {
 								if (!cancelled) {
@@ -268,6 +370,13 @@ export class OpenAIStreamHandler {
 			},
 			cancel(reason) {
 				cancelled = true;
+				logger.error(
+					`Downstream cancelled stream id=${streamId} reason=${String(reason)} ${
+						currentToolCall
+							? `tool=${currentToolCall.name} toolId=${currentToolCall.id} argsLength=${currentToolCall.inputJson.length}`
+							: 'tool=none'
+					}`
+				);
 				reader.cancel(reason).catch(() => {});
 			}
 		});

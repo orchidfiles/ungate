@@ -77,13 +77,22 @@ export interface ToolChoice {
 	name?: string;
 }
 
+export type AnthropicStopReason =
+	| 'end_turn'
+	| 'max_tokens'
+	| 'stop_sequence'
+	| 'tool_use'
+	| 'pause_turn'
+	| 'refusal'
+	| 'model_context_window_exceeded';
+
 export interface AnthropicResponse {
 	id: string;
 	type: 'message';
 	role: 'assistant';
 	content: ContentBlock[];
 	model: string;
-	stop_reason: 'end_turn' | 'max_tokens' | 'stop_sequence' | 'tool_use' | null;
+	stop_reason: AnthropicStopReason | null;
 	stop_sequence: string | null;
 	usage: {
 		input_tokens: number;

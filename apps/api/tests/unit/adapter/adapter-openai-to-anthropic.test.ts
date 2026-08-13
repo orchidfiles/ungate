@@ -207,4 +207,34 @@ describe('openai-to-anthropic', () => {
 
 		expect(result.max_tokens).toBe(777);
 	});
+
+	it('uses a 32000-token fallback for adaptive-thinking requests without a client limit', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-4.6-opus-high',
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.reasoning_budget).toBe('high');
+		expect(result.max_tokens).toBe(32_000);
+	});
+
+	it('keeps the 4096-token fallback when there is no reasoning budget', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-opus-4-6',
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.reasoning_budget).toBeUndefined();
+		expect(result.max_tokens).toBe(4096);
+	});
+
+	it('preserves an explicit max_tokens over the thinking fallback', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-4.6-opus-high',
+			max_tokens: 1024,
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.max_tokens).toBe(1024);
+	});
 });

@@ -192,7 +192,7 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 		normalized = normalizeModelName(request.model);
 	}
 
-	const maxTokens = request.max_tokens ?? request.max_completion_tokens ?? 4096;
+	const maxTokens = request.max_tokens ?? request.max_completion_tokens ?? (normalized.reasoningBudget ? 32_000 : 4096);
 
 	logger.log(
 		`[OpenAI→Anthropic] "${request.model}" → "${normalized.model}"${normalized.reasoningBudget ? ` (reasoning_budget: ${normalized.reasoningBudget})` : ''} | max_tokens=${maxTokens}`
