@@ -156,6 +156,33 @@ describe('streaming-openai-stream-handler', () => {
 		expect(output).toContain('"finish_reason":"tool_calls"');
 	});
 
+	it('finishes as length when a tool_use salvage cannot parse the arguments', async () => {
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const response = createResponseWithSse([
+			'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}',
+			'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu10","name":"Write"}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":\\"a.ts\\""}}',
+			'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}',
+			'data: {"type":"message_stop"}'
+		]);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st10', 'model10', {
+			model: 'model10',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: {}
+		});
+
+		const output = await readStream(stream);
+		errorSpy.mockRestore();
+
+		expect(output).toContain('"name":"Write"');
+		expect(output).not.toContain('\\"path\\":\\"a.ts\\"');
+		expect(output).toContain('"finish_reason":"length"');
+		expect(output).not.toContain('"finish_reason":"stop"');
+		expect(output).not.toContain('"finish_reason":"tool_calls"');
+	});
+
 	it('does not emit truncated JSON and finishes as length on max_tokens', async () => {
 		const response = createResponseWithSse([
 			'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}',

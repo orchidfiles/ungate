@@ -66,6 +66,7 @@ export class OpenAIStreamHandler {
 				let finalized = false;
 				let stopReason: AnthropicStopReason | null = null;
 				let finalUsage: StreamUsage | null = null;
+				let salvageFailed = false;
 
 				const safeEnqueue = (data: Uint8Array) => {
 					try {
@@ -90,24 +91,11 @@ export class OpenAIStreamHandler {
 						return false;
 					}
 
-					if (mode === 'salvage') {
-						const raw = currentToolCall.inputJson;
+					if (mode === 'salvage' && !currentToolCall.inputJson) {
+						logger.error(`Incomplete tool call ${describeOpenTool()}`);
+						currentToolCall = null;
 
-						if (!raw) {
-							logger.error(`Incomplete tool call ${describeOpenTool()}`);
-							currentToolCall = null;
-
-							return false;
-						}
-
-						try {
-							JSON.parse(raw);
-						} catch {
-							logger.error(`Incomplete tool call JSON ${describeOpenTool()}`);
-							currentToolCall = null;
-
-							return false;
-						}
+						return false;
 					}
 
 					let finalJson = currentToolCall.inputJson || '{}';
@@ -149,7 +137,7 @@ export class OpenAIStreamHandler {
 				};
 
 				const mapFinishReason = (unexpectedEof: boolean): 'stop' | 'length' | 'tool_calls' => {
-					if (unexpectedEof || stopReason === 'max_tokens' || stopReason === 'model_context_window_exceeded') {
+					if (unexpectedEof || salvageFailed || stopReason === 'max_tokens' || stopReason === 'model_context_window_exceeded') {
 						return 'length';
 					}
 
@@ -320,7 +308,7 @@ export class OpenAIStreamHandler {
 
 								if (event.type === 'message_stop') {
 									if (currentToolCall && stopReason === 'tool_use') {
-										flushToolCall('salvage');
+										salvageFailed = !flushToolCall('salvage');
 									} else if (currentToolCall) {
 										logger.error(`Open tool call at message_stop stop_reason=${stopReason ?? 'none'} ${describeOpenTool()}`);
 										currentToolCall = null;
