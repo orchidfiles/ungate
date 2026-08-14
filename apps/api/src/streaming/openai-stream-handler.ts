@@ -56,13 +56,20 @@ export class OpenAIStreamHandler {
 		let cancelled = false;
 		let currentToolCall: ActiveToolCall | null = null;
 
+		const describeOpenTool = (): string => {
+			if (!currentToolCall) {
+				return 'tool=none';
+			}
+
+			return `tool=${currentToolCall.name} toolId=${currentToolCall.id} argsLength=${currentToolCall.inputJson.length}`;
+		};
+
 		return new ReadableStream({
 			async start(controller) {
 				const decoder = new TextDecoder();
 				let buffer = '';
 				let sentStart = false;
 				let toolCallIndex = 0;
-				let completedToolCalls = 0;
 				let finalized = false;
 				let stopReason: AnthropicStopReason | null = null;
 				let finalUsage: StreamUsage | null = null;
@@ -76,14 +83,6 @@ export class OpenAIStreamHandler {
 					} catch {
 						cancelled = true;
 					}
-				};
-
-				const describeOpenTool = (): string => {
-					if (!currentToolCall) {
-						return 'tool=none';
-					}
-
-					return `tool=${currentToolCall.name} toolId=${currentToolCall.id} argsLength=${currentToolCall.inputJson.length}`;
 				};
 
 				const flushToolCall = (mode: 'complete' | 'salvage'): boolean => {
@@ -130,7 +129,6 @@ export class OpenAIStreamHandler {
 					);
 
 					toolCallIndex++;
-					completedToolCalls++;
 					currentToolCall = null;
 
 					return true;
@@ -141,7 +139,7 @@ export class OpenAIStreamHandler {
 						return 'length';
 					}
 
-					if (completedToolCalls > 0) {
+					if (toolCallIndex > 0) {
 						return 'tool_calls';
 					}
 
@@ -156,7 +154,7 @@ export class OpenAIStreamHandler {
 					finalized = true;
 
 					logger.log(
-						`Stream stop_reason=${stopReason ?? 'none'} unexpectedEof=${unexpectedEof} completedToolCalls=${completedToolCalls}`
+						`Stream stop_reason=${stopReason ?? 'none'} unexpectedEof=${unexpectedEof} completedToolCalls=${toolCallIndex}`
 					);
 
 					if (unexpectedEof && currentToolCall) {
@@ -358,13 +356,7 @@ export class OpenAIStreamHandler {
 			},
 			cancel(reason) {
 				cancelled = true;
-				logger.error(
-					`Downstream cancelled stream id=${streamId} reason=${String(reason)} ${
-						currentToolCall
-							? `tool=${currentToolCall.name} toolId=${currentToolCall.id} argsLength=${currentToolCall.inputJson.length}`
-							: 'tool=none'
-					}`
-				);
+				logger.error(`Downstream cancelled stream id=${streamId} reason=${String(reason)} ${describeOpenTool()}`);
 				reader.cancel(reason).catch(() => {});
 			}
 		});
