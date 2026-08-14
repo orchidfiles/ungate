@@ -3,6 +3,10 @@
  * Used for SSE parsing in openai-stream-handler.ts.
  */
 
+import type { AnthropicStopReason } from './anthropic';
+
+export type { AnthropicStopReason };
+
 export interface AnthropicUsage {
 	input_tokens: number;
 	output_tokens: number;
@@ -40,5 +44,9 @@ export type AnthropicStreamEvent =
 	| { type: 'content_block_start'; index: number; content_block: AnthropicStreamBlock }
 	| { type: 'content_block_delta'; index: number; delta: AnthropicStreamDelta }
 	| { type: 'content_block_stop'; index: number }
-	| { type: 'message_delta'; usage: { output_tokens: number } }
+	| {
+			type: 'message_delta';
+			delta?: { stop_reason?: AnthropicStopReason | null };
+			usage?: { output_tokens: number };
+	  }
 	| { type: 'message_stop' };

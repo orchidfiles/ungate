@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { normalizeModelName, openaiToAnthropic } from 'src/adapter/openai-to-anthropic';
+import { logger } from 'src/utils/logger';
 
 import type { AnthropicRequest, ContentBlock } from 'src/types';
 import type { OpenAIChatRequest } from 'src/types/openai';
@@ -12,7 +13,24 @@ function findBlock(request: AnthropicRequest, role: 'user' | 'assistant', type: 
 		.find((block) => block.type === type);
 }
 
+function conversionLog(): string {
+	return (
+		vi
+			.mocked(logger.log)
+			.mock.calls.map((call) => String(call[0]))
+			.find((line) => line.includes('[OpenAI→Anthropic]')) ?? ''
+	);
+}
+
 describe('openai-to-anthropic', () => {
+	beforeEach(() => {
+		vi.spyOn(logger, 'log').mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	it('normalizes legacy model names with reasoning budget', () => {
 		expect(normalizeModelName('claude-4.6-opus-high')).toEqual({
 			model: 'claude-opus-4-6',
@@ -206,5 +224,87 @@ describe('openai-to-anthropic', () => {
 		});
 
 		expect(result.max_tokens).toBe(777);
+		expect(conversionLog()).toContain('max_tokens_source=max_completion_tokens');
+	});
+
+	it('uses a 32000-token fallback for adaptive-thinking requests without a client limit', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-4.6-opus-high',
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.reasoning_budget).toBe('high');
+		expect(result.max_tokens).toBe(32_000);
+		expect(conversionLog()).toContain('max_tokens_source=thinking-default');
+	});
+
+	it('treats a null max_tokens as absent for adaptive thinking', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-4.6-opus-high',
+			max_tokens: null,
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.max_tokens).toBe(32_000);
+		expect(conversionLog()).toContain('max_tokens_source=thinking-default');
+	});
+
+	it('uses max_completion_tokens when max_tokens is null', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-opus-4-6',
+			max_tokens: null,
+			max_completion_tokens: 8000,
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.max_tokens).toBe(8000);
+		expect(conversionLog()).toContain('max_tokens_source=max_completion_tokens');
+	});
+
+	it('keeps the 4096-token fallback when there is no reasoning budget', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-opus-4-6',
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.reasoning_budget).toBeUndefined();
+		expect(result.max_tokens).toBe(4096);
+		expect(conversionLog()).toContain('max_tokens_source=default');
+	});
+
+	it('preserves an explicit 4096 max_tokens over the thinking fallback', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-4.6-opus-high',
+			max_tokens: 4096,
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.max_tokens).toBe(4096);
+		expect(conversionLog()).toContain('max_tokens_source=max_tokens');
+	});
+
+	it('preserves an explicit high max_tokens over the thinking fallback', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-4.6-opus-high',
+			max_tokens: 64_000,
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.max_tokens).toBe(64_000);
+		expect(conversionLog()).toContain('max_tokens_source=max_tokens');
+	});
+
+	it('treats a none reasoning budget as no adaptive thinking', () => {
+		const result = openaiToAnthropic(
+			{
+				model: 'mapped-opus',
+				messages: [{ role: 'user', content: 'hello' }]
+			},
+			{ model: 'claude-opus-4-6', reasoningBudget: 'none' }
+		);
+
+		expect(result.reasoning_budget).toBeUndefined();
+		expect(result.max_tokens).toBe(4096);
+		expect(conversionLog()).toContain('max_tokens_source=default');
 	});
 });
