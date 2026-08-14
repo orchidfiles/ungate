@@ -185,17 +185,26 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 	if (override) {
 		normalized = { model: override.model };
 
-		if (override.reasoningBudget) {
+		if (override.reasoningBudget && override.reasoningBudget !== 'none') {
 			normalized.reasoningBudget = override.reasoningBudget;
 		}
 	} else {
 		normalized = normalizeModelName(request.model);
 	}
 
-	const maxTokens = request.max_tokens ?? request.max_completion_tokens ?? (normalized.reasoningBudget ? 32_000 : 4096);
+	const requestedMaxTokens = request.max_tokens ?? request.max_completion_tokens;
+	const maxTokens = requestedMaxTokens ?? (normalized.reasoningBudget ? 32_000 : 4096);
+	const maxTokensSource =
+		request.max_tokens !== undefined
+			? 'max_tokens'
+			: request.max_completion_tokens !== undefined
+				? 'max_completion_tokens'
+				: normalized.reasoningBudget
+					? 'thinking-default'
+					: 'default';
 
 	logger.log(
-		`[OpenAI→Anthropic] "${request.model}" → "${normalized.model}"${normalized.reasoningBudget ? ` (reasoning_budget: ${normalized.reasoningBudget})` : ''} | max_tokens=${maxTokens}`
+		`[OpenAI→Anthropic] "${request.model}" → "${normalized.model}"${normalized.reasoningBudget ? ` (reasoning_budget: ${normalized.reasoningBudget})` : ''} | max_tokens=${maxTokens} max_tokens_source=${maxTokensSource}`
 	);
 
 	const result: AnthropicRequest = {
