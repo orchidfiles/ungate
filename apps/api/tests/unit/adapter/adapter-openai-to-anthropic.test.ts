@@ -238,6 +238,29 @@ describe('openai-to-anthropic', () => {
 		expect(conversionLog()).toContain('max_tokens_source=thinking-default');
 	});
 
+	it('treats a null max_tokens as absent for adaptive thinking', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-4.6-opus-high',
+			max_tokens: null,
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.max_tokens).toBe(32_000);
+		expect(conversionLog()).toContain('max_tokens_source=thinking-default');
+	});
+
+	it('uses max_completion_tokens when max_tokens is null', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-opus-4-6',
+			max_tokens: null,
+			max_completion_tokens: 8000,
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(result.max_tokens).toBe(8000);
+		expect(conversionLog()).toContain('max_tokens_source=max_completion_tokens');
+	});
+
 	it('keeps the 4096-token fallback when there is no reasoning budget', () => {
 		const result = openaiToAnthropic({
 			model: 'claude-opus-4-6',

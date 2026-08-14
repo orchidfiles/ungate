@@ -39,8 +39,8 @@ export interface OpenAIChatRequest {
 	messages: OpenAIMessage[];
 	/** Some clients send the thread as `input` (chat roles or Responses items) instead of `messages`. */
 	input?: unknown;
-	max_tokens?: number;
-	max_completion_tokens?: number;
+	max_tokens?: number | null;
+	max_completion_tokens?: number | null;
 	temperature?: number;
 	top_p?: number;
 	stream?: boolean;

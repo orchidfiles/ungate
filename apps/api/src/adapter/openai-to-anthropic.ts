@@ -195,9 +195,9 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 	const requestedMaxTokens = request.max_tokens ?? request.max_completion_tokens;
 	const maxTokens = requestedMaxTokens ?? (normalized.reasoningBudget ? 32_000 : 4096);
 	const maxTokensSource =
-		request.max_tokens !== undefined
+		request.max_tokens != null
 			? 'max_tokens'
-			: request.max_completion_tokens !== undefined
+			: request.max_completion_tokens != null
 				? 'max_completion_tokens'
 				: normalized.reasoningBudget
 					? 'thinking-default'
