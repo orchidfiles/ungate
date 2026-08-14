@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.10 - 2026-08-14
+
+- Fix interrupted Claude tool streams being truncated or partially executed; raise thinking default to 32k tokens
+
 ## 1.7.9 - 2026-08-13
 
 - Fix 400 on accepting a Cursor plan with Claude models by sanitizing tool ids from plan history (`functions.X:1` → `functions_X_1`)
