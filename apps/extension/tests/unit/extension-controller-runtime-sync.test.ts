@@ -599,4 +599,27 @@ describe('ExtensionController', () => {
 		expect(tunnelManager.stop).toHaveBeenCalledTimes(isLeader ? 1 : 0);
 		expect(runtimeRemoveCommandMock.mock.calls).toEqual(isLeader ? [[command.id]] : []);
 	});
+
+	it('does not handle a tunnel command when a different live window owns the tunnel', async () => {
+		const { controller, tunnelManager } = createController('window-b');
+		const internals = getInternals(controller);
+		const runtimeState = createRuntimeState(['window-a', 'window-b']);
+		runtimeState.tunnel.status = 'running';
+		runtimeState.tunnel.ownerWindowId = 'window-a';
+		const command: RuntimeCommand = {
+			id: 'cmd-stop-tunnel',
+			action: 'stop-tunnel',
+			createdAt: Date.now(),
+			originWindowId: 'window-c'
+		};
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a', 'window-b']);
+		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
+		runtimePeekCommandMock.mockReturnValue(command);
+
+		await internals.syncFromRuntimeState();
+
+		expect(tunnelManager.stop).not.toHaveBeenCalled();
+		expect(runtimeRemoveCommandMock).not.toHaveBeenCalled();
+	});
 });
