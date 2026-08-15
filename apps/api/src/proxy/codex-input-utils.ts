@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { OpenAIContentPart, OpenAIMessage, OpenAIToolCall } from 'src/types/openai';
 
 export class CodexInputUtils {
@@ -82,7 +84,13 @@ export class CodexInputUtils {
 				itemType === 'custom_tool_call' ||
 				itemType === 'custom_tool_call_output'
 			) {
-				mainItems.push({ ...itemRecord });
+				const nextItem = { ...itemRecord };
+
+				if (typeof nextItem.call_id === 'string') {
+					nextItem.call_id = this.normalizeCallId(nextItem.call_id);
+				}
+
+				mainItems.push(nextItem);
 				continue;
 			}
 
@@ -209,7 +217,7 @@ export class CodexInputUtils {
 			if (callId) {
 				items.push({
 					type: 'function_call_output',
-					call_id: callId,
+					call_id: this.normalizeCallId(callId),
 					output
 				});
 			}
@@ -223,7 +231,7 @@ export class CodexInputUtils {
 
 			items.push({
 				type: 'function_call_output',
-				call_id: callReference,
+				call_id: this.normalizeCallId(callReference),
 				output
 			});
 
@@ -367,11 +375,19 @@ export class CodexInputUtils {
 				type: 'function_call',
 				name: callName,
 				arguments: typeof callArguments === 'string' ? callArguments : JSON.stringify(callArguments),
-				call_id: callId
+				call_id: this.normalizeCallId(callId)
 			});
 		}
 
 		return outputItems;
+	}
+
+	private static normalizeCallId(id: string): string {
+		if (id.length <= 64) {
+			return id;
+		}
+
+		return `${id.slice(0, 47)}_${createHash('sha256').update(id).digest('hex').slice(0, 16)}`;
 	}
 
 	private static toText(value: unknown): string {
