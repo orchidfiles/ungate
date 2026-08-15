@@ -63,6 +63,28 @@ export class RuntimeStateStore {
 		return live[0];
 	}
 
+	public static async reconcileOrphanedTunnel(state: RuntimeState = this.read()): Promise<RuntimeState> {
+		if (!this.isOrphanedTunnel(state)) {
+			return state;
+		}
+
+		return await this.mutate((current) => {
+			if (!this.isOrphanedTunnel(current)) {
+				return current;
+			}
+
+			const now = Date.now();
+
+			current.tunnel.status = 'stopped';
+			current.tunnel.url = null;
+			current.tunnel.lastError = null;
+			current.tunnel.ownerWindowId = null;
+			current.tunnel.lastSeenAt = now;
+
+			return current;
+		});
+	}
+
 	public static getFilePath(): string {
 		return RuntimeStateFileStore.getFilePath();
 	}
@@ -152,6 +174,22 @@ export class RuntimeStateStore {
 
 			return current;
 		});
+	}
+
+	private static isActiveTunnel(state: RuntimeState): boolean {
+		const status = state.tunnel.status;
+
+		return status === 'running' || status === 'starting' || status === 'installing';
+	}
+
+	private static isOrphanedTunnel(state: RuntimeState, now = Date.now()): boolean {
+		if (!this.isActiveTunnel(state)) {
+			return false;
+		}
+
+		const ownerId = state.tunnel.ownerWindowId;
+
+		return ownerId === null || !this.getLiveClientIds(state, now).includes(ownerId);
 	}
 
 	private static async isApiPortHealthy(port: number): Promise<boolean> {

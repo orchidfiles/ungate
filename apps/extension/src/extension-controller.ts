@@ -451,6 +451,8 @@ export class ExtensionController {
 			runtimeState = await RuntimeStateStore.touchClient(this.windowId);
 		}
 
+		runtimeState = await RuntimeStateStore.reconcileOrphanedTunnel(runtimeState);
+
 		await this.keyFix.applySharedState(runtimeState.keyFix.enabled);
 		this.applyRuntimeState(runtimeState);
 		this.apiServer.syncLeaderHealthMonitor(this.isLeaderWindow(runtimeState));
@@ -502,8 +504,8 @@ export class ExtensionController {
 		}
 
 		const tunnelOwner = runtimeState.tunnel.ownerWindowId;
-		const shouldHandleTunnelCommand =
-			!tunnelOwner || tunnelOwner === this.windowId || !RuntimeStateStore.getLiveClientIds(runtimeState).includes(tunnelOwner);
+		const ownerIsLive = tunnelOwner !== null && RuntimeStateStore.getLiveClientIds(runtimeState).includes(tunnelOwner);
+		const shouldHandleTunnelCommand = ownerIsLive ? tunnelOwner === this.windowId : this.isLeaderWindow(runtimeState);
 
 		if (command.action === 'restart-api') {
 			if (!this.isLeaderWindow(runtimeState)) {
