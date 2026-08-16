@@ -1,3 +1,5 @@
+import { remapCodexCallIds } from 'src/proxy/codex-call-id';
+
 import type { OpenAIContentPart, OpenAIMessage, OpenAIToolCall } from 'src/types/openai';
 
 export class CodexInputUtils {
@@ -17,7 +19,7 @@ export class CodexInputUtils {
 			}
 		}
 
-		return [...developerItems, ...mainItems];
+		return remapCodexCallIds([...developerItems, ...mainItems]);
 	}
 
 	public static normalizeAssistantText(input: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -82,7 +84,9 @@ export class CodexInputUtils {
 				itemType === 'custom_tool_call' ||
 				itemType === 'custom_tool_call_output'
 			) {
-				mainItems.push({ ...itemRecord });
+				const nextItem = { ...itemRecord };
+
+				mainItems.push(nextItem);
 				continue;
 			}
 
@@ -100,7 +104,7 @@ export class CodexInputUtils {
 			return null;
 		}
 
-		return [...developerItems, ...mainItems];
+		return remapCodexCallIds([...developerItems, ...mainItems]);
 	}
 
 	public static coerceMessages(body: { messages?: OpenAIMessage[]; input?: unknown }): OpenAIMessage[] {
@@ -218,7 +222,7 @@ export class CodexInputUtils {
 		}
 
 		if (normalizedRole === 'function') {
-			const callReference = message.name ?? `func_${Date.now()}`;
+			const callReference = message.name?.length ? message.name : `func_${Date.now()}`;
 			const output = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? '');
 
 			items.push({
