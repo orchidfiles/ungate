@@ -161,6 +161,81 @@ describe('proxy-codex-chat-input', () => {
 		expect(input.find((item) => item.type === 'function_call_output')?.call_id).toBe(normalizedId);
 		expect(expanded?.map((item) => item.call_id)).toEqual([normalizedId, normalizedId]);
 	});
+
+	it('passes through verified-charset call ids byte-for-byte in both shapes', () => {
+		const probeIds = ['call.probe', 'call:probe', 'call probe', 'call_žluť', '_call_probe', 'call_probe-'];
+
+		for (const probeId of probeIds) {
+			const input = CodexInputUtils.buildFromMessages([
+				{
+					role: 'assistant',
+					content: null,
+					tool_calls: [{ id: probeId, type: 'function', function: { name: 'Read', arguments: '{}' } }]
+				},
+				{ role: 'tool', tool_call_id: probeId, content: 'result' }
+			]);
+			const expanded = CodexInputUtils.expandInput([
+				{ type: 'function_call', call_id: probeId, name: 'Read', arguments: '{}' },
+				{ type: 'function_call_output', call_id: probeId, output: 'result' }
+			]);
+
+			expect(input.find((item) => item.type === 'function_call')?.call_id).toBe(probeId);
+			expect(input.find((item) => item.type === 'function_call_output')?.call_id).toBe(probeId);
+			expect(expanded?.map((item) => item.call_id)).toEqual([probeId, probeId]);
+			expect(ResponsesInputShape.filterOrphans(input)).toEqual(input);
+			expect(ResponsesInputShape.filterOrphans(expanded ?? [])).toEqual(expanded);
+		}
+	});
+
+	it('passes through a 64-char id and remaps a 65-char id in both shapes', () => {
+		const exactId = 'e'.repeat(64);
+		const overId = 'f'.repeat(65);
+		const remappedId = expectedNormalizedCallId(overId);
+		const input = CodexInputUtils.buildFromMessages([
+			{
+				role: 'assistant',
+				content: null,
+				tool_calls: [
+					{ id: exactId, type: 'function', function: { name: 'Read', arguments: '{}' } },
+					{ id: overId, type: 'function', function: { name: 'Write', arguments: '{}' } }
+				]
+			},
+			{ role: 'tool', tool_call_id: exactId, content: 'exact' },
+			{ role: 'tool', tool_call_id: overId, content: 'over' }
+		]);
+		const expanded = CodexInputUtils.expandInput([
+			{ type: 'function_call', call_id: exactId, name: 'Read', arguments: '{}' },
+			{ type: 'function_call_output', call_id: exactId, output: 'exact' },
+			{ type: 'function_call', call_id: overId, name: 'Write', arguments: '{}' },
+			{ type: 'function_call_output', call_id: overId, output: 'over' }
+		]);
+
+		expect(exactId).toHaveLength(64);
+		expect(overId).toHaveLength(65);
+		expect(remappedId).toHaveLength(64);
+		expect(remappedId).not.toBe(overId);
+		expect(input.find((item) => item.type === 'function_call' && item.name === 'Read')?.call_id).toBe(exactId);
+		expect(input.find((item) => item.type === 'function_call' && item.name === 'Write')?.call_id).toBe(remappedId);
+		expect(input.filter((item) => item.type === 'function_call_output').map((item) => item.call_id)).toEqual([exactId, remappedId]);
+		expect(expanded?.map((item) => item.call_id)).toEqual([exactId, exactId, remappedId, remappedId]);
+	});
+
+	it('drops empty Responses call ids and synthesizes a non-empty id for an empty function name', () => {
+		const expanded = CodexInputUtils.expandInput([
+			{ type: 'function_call', call_id: '', name: 'Read', arguments: '{}' },
+			{ type: 'function_call_output', call_id: '', output: 'ok' }
+		]);
+		const functionOutput = CodexInputUtils.buildFromMessages([{ role: 'function', name: '', content: 'x' }]);
+		const synthesizedId = functionOutput.find((item) => item.type === 'function_call_output')?.call_id;
+
+		expect(expanded).toEqual([]);
+		expect(expanded?.some((item) => item.call_id === '')).toBe(false);
+		expect(functionOutput.some((item) => item.type === 'function_call_output')).toBe(true);
+		expect(typeof synthesizedId).toBe('string');
+		expect(synthesizedId).not.toBe('');
+		expect((synthesizedId as string).length).toBeGreaterThanOrEqual(1);
+		expect((synthesizedId as string).length).toBeLessThanOrEqual(64);
+	});
 });
 
 function expectedNormalizedCallId(id: string): string {

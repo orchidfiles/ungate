@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { remapCodexCallIds } from 'src/proxy/codex-call-id';
 
 import type { OpenAIContentPart, OpenAIMessage, OpenAIToolCall } from 'src/types/openai';
 
@@ -19,7 +19,7 @@ export class CodexInputUtils {
 			}
 		}
 
-		return [...developerItems, ...mainItems];
+		return remapCodexCallIds([...developerItems, ...mainItems]);
 	}
 
 	public static normalizeAssistantText(input: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -86,10 +86,6 @@ export class CodexInputUtils {
 			) {
 				const nextItem = { ...itemRecord };
 
-				if (typeof nextItem.call_id === 'string') {
-					nextItem.call_id = this.normalizeCallId(nextItem.call_id);
-				}
-
 				mainItems.push(nextItem);
 				continue;
 			}
@@ -108,7 +104,7 @@ export class CodexInputUtils {
 			return null;
 		}
 
-		return [...developerItems, ...mainItems];
+		return remapCodexCallIds([...developerItems, ...mainItems]);
 	}
 
 	public static coerceMessages(body: { messages?: OpenAIMessage[]; input?: unknown }): OpenAIMessage[] {
@@ -217,7 +213,7 @@ export class CodexInputUtils {
 			if (callId) {
 				items.push({
 					type: 'function_call_output',
-					call_id: this.normalizeCallId(callId),
+					call_id: callId,
 					output
 				});
 			}
@@ -226,12 +222,12 @@ export class CodexInputUtils {
 		}
 
 		if (normalizedRole === 'function') {
-			const callReference = message.name ?? `func_${Date.now()}`;
+			const callReference = message.name?.length ? message.name : `func_${Date.now()}`;
 			const output = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? '');
 
 			items.push({
 				type: 'function_call_output',
-				call_id: this.normalizeCallId(callReference),
+				call_id: callReference,
 				output
 			});
 
@@ -375,19 +371,11 @@ export class CodexInputUtils {
 				type: 'function_call',
 				name: callName,
 				arguments: typeof callArguments === 'string' ? callArguments : JSON.stringify(callArguments),
-				call_id: this.normalizeCallId(callId)
+				call_id: callId
 			});
 		}
 
 		return outputItems;
-	}
-
-	private static normalizeCallId(id: string): string {
-		if (id.length <= 64) {
-			return id;
-		}
-
-		return `${id.slice(0, 47)}_${createHash('sha256').update(id).digest('hex').slice(0, 16)}`;
 	}
 
 	private static toText(value: unknown): string {
