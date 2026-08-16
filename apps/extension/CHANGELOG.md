@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.11 - 2026-08-16
+
+- Fix 400 on long chats by clamping Codex tool call IDs to 64 characters and keeping call/output pairs paired
+- Recover tunnel state orphaned by a window that died without shutting the tunnel down
+
 ## 1.7.10 - 2026-08-14
 
 - Fix interrupted Claude tool streams being truncated or partially executed; raise thinking default to 32k tokens
