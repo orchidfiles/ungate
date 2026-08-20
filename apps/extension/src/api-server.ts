@@ -2,7 +2,7 @@ import * as cp from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { sleep, type ApiStatus as ServerStatus, type LogEntry } from '@ungate/shared';
+import { ADMIN_KEY_ENV, sleep, type ApiStatus as ServerStatus, type LogEntry } from '@ungate/shared';
 import * as vscode from 'vscode';
 
 import { RuntimeStateStore } from './runtime-state';
@@ -38,6 +38,7 @@ export class ApiServer {
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
+		private readonly adminApiKey: string,
 		private readonly callbacks: ApiServerCallbacks
 	) {}
 
@@ -196,6 +197,8 @@ export class ApiServer {
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
 			UNGATE_BETTER_SQLITE3_NATIVE_BINDING: BetterSqlite3Installer.resolveBindingPath(cwd),
+			// Administrative routes are gated by this key; it never reaches SQLite or the log.
+			[ADMIN_KEY_ENV]: this.adminApiKey,
 			...(isDev ? { DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
 		};
 

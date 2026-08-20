@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isModelMappingProvider, isModelServiceTier, isReasoningBudgetTier, type AppSettings } from '@ungate/shared';
 
 import { Settings } from '../database/app-settings';
+import { adminKeyAuth } from '../plugins/auth';
 import { logger } from '../utils/logger';
 
 import type { FastifyPluginCallback } from 'fastify';
@@ -50,6 +51,9 @@ function validateSettingsUpdate(payload: unknown): { ok: true; value: Partial<Ap
 }
 
 const plugin: FastifyPluginCallback = (app) => {
+	// Encapsulated hook: covers every route this plugin registers, present and future.
+	app.addHook('onRequest', adminKeyAuth(app.config));
+
 	app.get('/settings', async (_request, reply) => {
 		const settings = Settings.get();
 

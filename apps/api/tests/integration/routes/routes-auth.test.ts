@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import authPlugin from 'src/routes/auth';
 
-import { withPlugin } from '../test-harness';
+import { ADMIN_HEADERS, withPlugin } from '../test-harness';
 
 const oauthStartLoginMock = vi.fn();
 const oauthCompleteLoginMock = vi.fn();
@@ -56,24 +56,30 @@ describe('routes-auth', () => {
 
 		const app = await withPlugin(authPlugin);
 
-		const start = await app.inject({ method: 'POST', url: '/auth/claude/start' });
+		const start = await app.inject({ method: 'POST', url: '/auth/claude/start', headers: ADMIN_HEADERS });
 		expect(start.statusCode).toBe(200);
 		expect(start.json()).toEqual({ authUrl: 'u', sessionId: 's' });
 
-		const bad = await app.inject({ method: 'POST', url: '/auth/claude/complete', payload: { code: 'x' } });
+		const bad = await app.inject({
+			method: 'POST',
+			url: '/auth/claude/complete',
+			headers: ADMIN_HEADERS,
+			payload: { code: 'x' }
+		});
 		expect(bad.statusCode).toBe(400);
 
 		const complete = await app.inject({
 			method: 'POST',
 			url: '/auth/claude/complete',
+			headers: ADMIN_HEADERS,
 			payload: { code: 'x', sessionId: 'sid' }
 		});
 		expect(complete.json()).toEqual({ ok: true, email: 'e@e.com' });
 
-		const status = await app.inject({ method: 'GET', url: '/auth/claude/status' });
+		const status = await app.inject({ method: 'GET', url: '/auth/claude/status', headers: ADMIN_HEADERS });
 		expect(status.json()).toEqual({ authenticated: true });
 
-		const logout = await app.inject({ method: 'POST', url: '/auth/claude/logout' });
+		const logout = await app.inject({ method: 'POST', url: '/auth/claude/logout', headers: ADMIN_HEADERS });
 		expect(logout.json()).toEqual({ ok: true });
 		expect(oauthLogoutMock).toHaveBeenCalled();
 		await app.close();
@@ -83,12 +89,13 @@ describe('routes-auth', () => {
 		providerGetMock.mockReturnValueOnce({ accessToken: 'k', baseUrl: 'https://x' });
 		const app = await withPlugin(authPlugin);
 
-		const status = await app.inject({ method: 'GET', url: '/auth/minimax/status' });
+		const status = await app.inject({ method: 'GET', url: '/auth/minimax/status', headers: ADMIN_HEADERS });
 		expect(status.json()).toEqual({ authenticated: true, baseUrl: 'https://x' });
 
 		const badLogin = await app.inject({
 			method: 'POST',
 			url: '/auth/minimax/login',
+			headers: ADMIN_HEADERS,
 			payload: { apiKey: '   ' }
 		});
 		expect(badLogin.statusCode).toBe(400);
@@ -96,12 +103,13 @@ describe('routes-auth', () => {
 		const login = await app.inject({
 			method: 'POST',
 			url: '/auth/minimax/login',
+			headers: ADMIN_HEADERS,
 			payload: { apiKey: ' key ', baseUrl: ' https://m ' }
 		});
 		expect(login.json()).toEqual({ ok: true });
 		expect(providerUpsertApiKeyMock).toHaveBeenCalledWith('minimax', 'key', 'https://m');
 
-		const logout = await app.inject({ method: 'POST', url: '/auth/minimax/logout' });
+		const logout = await app.inject({ method: 'POST', url: '/auth/minimax/logout', headers: ADMIN_HEADERS });
 		expect(logout.json()).toEqual({ ok: true });
 		expect(providerRemoveMock).toHaveBeenCalledWith('minimax');
 		await app.close();
@@ -113,26 +121,60 @@ describe('routes-auth', () => {
 		openaiCompleteLoginMock.mockResolvedValueOnce({ ok: true });
 		const app = await withPlugin(authPlugin);
 
-		const start = await app.inject({ method: 'GET', url: '/auth/openai/start' });
+		const start = await app.inject({ method: 'GET', url: '/auth/openai/start', headers: ADMIN_HEADERS });
 		expect(start.json().authUrl).toBe('openai-url');
 
-		const missing = await app.inject({ method: 'GET', url: '/auth/openai/callback' });
+		const missing = await app.inject({ method: 'GET', url: '/auth/openai/callback', headers: ADMIN_HEADERS });
 		expect(missing.statusCode).toBe(200);
 		expect(missing.body).toContain('Missing code or session');
 
-		const success = await app.inject({ method: 'GET', url: '/auth/openai/callback?code=abc&state=state1' });
+		const success = await app.inject({
+			method: 'GET',
+			url: '/auth/openai/callback?code=abc&state=state1',
+			headers: ADMIN_HEADERS
+		});
 		expect(success.body).toContain('Connected!');
 
 		openaiCompleteLoginMock.mockResolvedValueOnce({ ok: false, error: 'boom' });
-		const failure = await app.inject({ method: 'GET', url: '/auth/openai/callback?code=abc&state=state2' });
+		const failure = await app.inject({
+			method: 'GET',
+			url: '/auth/openai/callback?code=abc&state=state2',
+			headers: ADMIN_HEADERS
+		});
 		expect(failure.body).toContain('Error');
 		expect(failure.body).toContain('boom');
 
-		const status = await app.inject({ method: 'GET', url: '/auth/openai/status' });
+		const status = await app.inject({ method: 'GET', url: '/auth/openai/status', headers: ADMIN_HEADERS });
 		expect(status.json()).toEqual({ authenticated: false });
 
-		await app.inject({ method: 'POST', url: '/auth/openai/logout' });
+		await app.inject({ method: 'POST', url: '/auth/openai/logout', headers: ADMIN_HEADERS });
 		expect(openaiLogoutMock).toHaveBeenCalled();
+		await app.close();
+	});
+
+	it('refuses provider auth routes without the admin key', async () => {
+		const app = await withPlugin(authPlugin);
+
+		const start = await app.inject({ method: 'POST', url: '/auth/claude/start' });
+		expect(start.statusCode).toBe(403);
+
+		const login = await app.inject({
+			method: 'POST',
+			url: '/auth/minimax/login',
+			payload: { apiKey: 'stolen', baseUrl: 'https://m' }
+		});
+		expect(login.statusCode).toBe(403);
+
+		const callback = await app.inject({ method: 'GET', url: '/auth/openai/callback?code=abc&state=s' });
+		expect(callback.statusCode).toBe(403);
+
+		const logout = await app.inject({ method: 'POST', url: '/auth/claude/logout' });
+		expect(logout.statusCode).toBe(403);
+
+		expect(oauthStartLoginMock).not.toHaveBeenCalled();
+		expect(providerUpsertApiKeyMock).not.toHaveBeenCalled();
+		expect(openaiCompleteLoginMock).not.toHaveBeenCalled();
+		expect(oauthLogoutMock).not.toHaveBeenCalled();
 		await app.close();
 	});
 });

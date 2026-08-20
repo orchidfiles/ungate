@@ -77,7 +77,8 @@ vi.mock('../../src/utils/better-sqlite3-installer', () => {
 
 vi.mock('@ungate/shared', () => {
 	return {
-		sleep: sleepMock
+		sleep: sleepMock,
+		ADMIN_KEY_ENV: 'UNGATE_ADMIN_KEY'
 	};
 });
 
@@ -124,6 +125,9 @@ interface ApiServerInternals {
 	shouldRespawn(): boolean;
 }
 
+/** Stand-in for the base64url 256-bit key AdminKey mints. */
+const TEST_ADMIN_KEY = 'a'.repeat(43);
+
 function createRuntimeState(): RuntimeState {
 	const runtimeState = TestHelper.createRuntimeState([], 4783);
 
@@ -153,6 +157,7 @@ function createServer(options?: { isLeaderWindow?: boolean; isExtensionHostActiv
 			extensionMode: 1,
 			extensionPath: '/tmp/ungate-extension'
 		} as never,
+		TEST_ADMIN_KEY,
 		{
 			onLog,
 			onPortDetected,
@@ -298,7 +303,8 @@ describe('ApiServer.runHealthCheckCycle', () => {
 			expect.any(Array),
 			expect.objectContaining({
 				env: expect.objectContaining({
-					UNGATE_BETTER_SQLITE3_NATIVE_BINDING: expect.stringContaining('better_sqlite3.installed.node')
+					UNGATE_BETTER_SQLITE3_NATIVE_BINDING: expect.stringContaining('better_sqlite3.installed.node'),
+					UNGATE_ADMIN_KEY: TEST_ADMIN_KEY
 				})
 			})
 		);

@@ -27,17 +27,19 @@ Cursor → Cloudflare Tunnel → Ungate API → Provider API. Cursor cannot call
 Fastify server, spawned by the extension as a child Node.js process.
 
 **Entry points:**
-- `/v1/chat/completions` — OpenAI-compatible endpoint, accepts requests from Cursor
-- `/v1/messages` — Anthropic-compatible endpoint (direct proxy)
-- `/v1/analytics` — request statistics
-- `/v1/auth/*` — OAuth routes (Claude, ChatGPT)
-- `/v1/models` — model list
-- `/v1/settings` — settings
+- `/v1/chat/completions` — OpenAI-compatible endpoint, accepts requests from Cursor (proxy key)
+- `/v1/messages` — Anthropic-compatible endpoint (direct proxy, proxy key)
+- `/v1/models` — model list (proxy key)
+- `/v1/analytics` — request statistics (admin key)
+- `/v1/auth/*` — OAuth routes (Claude, ChatGPT) (admin key)
+- `/v1/settings` — settings (admin key)
+- `/health` — the only unauthenticated route; the extension polls it for liveness
 
 **Architecture:**
-- `src/server.ts` — Fastify initialization, plugin registration
-- `src/config.ts` — static configuration (URLs, OAuth, beta parameters)
-- `src/plugins/auth.ts` — preHandler for API-key authentication
+- `src/server.ts` — Fastify initialization, plugin registration. Binds `127.0.0.1` only (`LISTEN_HOST`); the Cloudflare tunnel is the sole remote path in.
+- `src/config.ts` — static configuration (URLs, OAuth, beta parameters). `getConfig` requires `UNGATE_ADMIN_KEY` in the environment and throws without it, so administrative routes can never come up unprotected.
+- `src/plugins/auth.ts` — `apiKeyAuth` (proxy key, `Authorization: Bearer` or `x-api-key`) and `adminKeyAuth` (admin key, `x-ungate-admin-key`). Both compare hashed digests through `timingSafeEqual`, and both fail closed: an absent or blank configured key rejects every request rather than opening the route. Registered as encapsulated `onRequest` hooks inside each route plugin, so a newly added route inherits its plugin's auth instead of defaulting to open.
+- `src/plugins/cors-origin.ts` — CORS origin policy: webview and loopback origins only, never a wildcard, so no web page can drive the dashboard API.
 
 **Routing (`src/routes/`):**
 - `openai.ts` — main router: determines provider by model (MiniMax → mapped → Claude). Branch order matters and must stay consistent.
@@ -105,11 +107,12 @@ Fastify server, spawned by the extension as a child Node.js process.
 
 User entry point. Manages the API server and tunnel lifecycle.
 
-- `extension.ts` — activate/deactivate
-- `extension-controller.ts` — main controller: manages API server, tunnel, WebView dashboard, OpenAI Key Fix, heartbeat, runtime state sync
-- `api-server.ts` — start/stop Node.js API as child process. Production: `cp.spawn(runtime, ['bundle/main.cjs'])`. Dev: `cp.spawn('node', ['-r', 'source-map-support/register', 'dist/main.js'])`. Port detected from stdout via `localhost:(\d+)` regex
+- `extension.ts` — activate/deactivate. `activate` is async: the admin key must be readable before anything starts
+- `extension-controller.ts` — main controller: loads the admin key, manages API server, tunnel, WebView dashboard, OpenAI Key Fix, heartbeat, runtime state sync
+- `admin-key.ts` — owner of the administrative API key (`ungate.admin-api-key`) in VS Code SecretStorage. `AdminKey.load(storage)` mints a 256-bit base64url key on first run and replaces a stored value too short to carry 256 bits. The key reaches only the API child's environment and the dashboard webview — never SQLite, the runtime state file or the log
+- `api-server.ts` — start/stop Node.js API as child process. Production: `cp.spawn(runtime, ['bundle/main.cjs'])`. Dev: `cp.spawn('node', ['-r', 'source-map-support/register', 'dist/main.js'])`. Port detected from stdout via `localhost:(\d+)` regex. Spawned with `UNGATE_ADMIN_KEY` in the environment
 - `tunnel-manager.ts` — Cloudflare tunnel (cloudflared) management. Quick tunnel only, no named tunnel config (avoids 404 conflicts). Not auto-started, only on explicit user action. Auto-restarts on port change if already running
-- `dashboard.ts` — WebView dashboard (Svelte UI). Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__`. Handshake: frontend sends `webview-ready` before extension sends initial state
+- `dashboard.ts` — WebView dashboard (Svelte UI). Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__` and `window.__ADMIN_KEY__` via `toInlineScriptJson` (JSON plus `<`/`>`/`&`/U+2028/U+2029 escaping, and a function replacer so `$&` patterns in a value are never expanded). Constructor takes `(context, adminApiKey, onMessage)`. Handshake: frontend sends `webview-ready` before extension sends initial state
 - `extension-status-bar.ts` — status bar (API + tunnel state)
 - `extension-commands.ts` — command registration (openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix)
 - `openai-key-fix.ts` — auto-enable OpenAI API Key in Cursor settings. Uses `aiSettings.usingOpenAIKey.toggle` command. SQLite writes to `state.vscdb` do not work — Cursor does not re-read reactive storage

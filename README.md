@@ -134,6 +134,10 @@ If Cursor turns `OpenAI API Key` off on its own, Ungate should turn it back on a
 - Tunnel URL and proxy API key are secrets and should be treated like credentials.
 - Anyone with both values can send requests through your proxy.
 - Rotate your proxy key from the dashboard when you suspect leakage.
+- The proxy key only authorizes model routes: completions, messages, and the model list.
+- Settings, provider auth, and analytics require a separate admin key that never leaves your machine — the extension keeps it in Cursor's secret storage and injects it into the dashboard only.
+- The proxy binds `127.0.0.1`, so it is reachable through the tunnel and from your own machine, never from other hosts on your network.
+- Clearing the proxy key does not open the proxy up: model routes reject every request until a new key is set.
 
 ## Local build and install in Cursor
 

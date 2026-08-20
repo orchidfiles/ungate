@@ -104,6 +104,7 @@ describe('Dashboard.setPort', () => {
 				extensionMode: 1,
 				extensionPath: '/tmp/ungate-extension'
 			} as never,
+			'admin-key',
 			() => {}
 		);
 		dashboard.show();
@@ -128,6 +129,7 @@ describe('Dashboard.setPort', () => {
 				extensionMode: 1,
 				extensionPath: '/tmp/ungate-extension'
 			} as never,
+			'admin-key',
 			() => {}
 		);
 		dashboard.show();
@@ -147,6 +149,7 @@ describe('Dashboard.setPort', () => {
 				extensionMode: 1,
 				extensionPath: '/tmp/ungate-extension'
 			} as never,
+			'admin-key',
 			() => {}
 		);
 		const dashboardB = new Dashboard(
@@ -154,6 +157,7 @@ describe('Dashboard.setPort', () => {
 				extensionMode: 1,
 				extensionPath: '/tmp/ungate-extension'
 			} as never,
+			'admin-key',
 			() => {}
 		);
 		dashboardA.pushLog('api', { timestamp: 1, level: 'info', message: 'started elsewhere' });

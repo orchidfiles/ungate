@@ -10,6 +10,7 @@ import {
 } from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
+import { AdminKey } from './admin-key';
 import { ApiServer } from './api-server';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
@@ -41,7 +42,7 @@ export class ExtensionController {
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
-	public activate(): void {
+	public async activate(): Promise<void> {
 		this.extensionHostActive = true;
 		this.outputChannel = vscode.window.createOutputChannel('Ungate');
 		this.context.subscriptions.push(this.outputChannel);
@@ -50,7 +51,11 @@ export class ExtensionController {
 		this.statusBar.command = extensionCommands.openDashboard;
 		this.context.subscriptions.push(this.statusBar);
 
-		this.dashboard = new Dashboard(this.context, (message) => {
+		// Nothing may start before the administrative key is readable: it gates the dashboard
+		// and every administrative route on the API child.
+		const adminApiKey = await this.loadAdminApiKey();
+
+		this.dashboard = new Dashboard(this.context, adminApiKey, (message) => {
 			this.handleDashboardMessage(message);
 		});
 		this.keyFix = new OpenAiKeyFix(
@@ -81,7 +86,7 @@ export class ExtensionController {
 			}
 		);
 
-		this.apiServer = new ApiServer(this.context, {
+		this.apiServer = new ApiServer(this.context, adminApiKey, {
 			onLog: (level: LogEntry['level'], message: string) => {
 				this.log(message);
 				this.dashboard.pushLog('api', { timestamp: Date.now(), level, message });
@@ -142,7 +147,7 @@ export class ExtensionController {
 
 		const disposeState = RuntimeStateStore.read();
 		if (this.isLeaderWindow(disposeState)) {
-			void this.apiServer.stop().catch(() => {});
+			void this.apiServer?.stop().catch(() => {});
 		}
 
 		if (this.heartbeatTimer) {
@@ -171,6 +176,23 @@ export class ExtensionController {
 
 		if (!hasLiveClients) {
 			this.tunnelManager?.stop();
+		}
+	}
+
+	/**
+	 * Fails closed: when VS Code SecretStorage cannot be reached there is no administrative key,
+	 * so activation must not continue and leave the API running without one.
+	 */
+	private async loadAdminApiKey(): Promise<string> {
+		try {
+			return await AdminKey.load(this.context.secrets);
+		} catch (error: unknown) {
+			const message = this.formatError(error);
+
+			this.log(`[admin-key] secret storage unavailable: ${message}`);
+			void vscode.window.showErrorMessage(`Ungate cannot start: secret storage is unavailable (${message}).`);
+
+			throw error;
 		}
 	}
 

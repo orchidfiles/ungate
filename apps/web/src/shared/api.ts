@@ -1,4 +1,5 @@
 import {
+	ADMIN_KEY_HEADER,
 	sleep,
 	type AnalyticsSummary,
 	type AppSettings,
@@ -8,7 +9,7 @@ import {
 } from '@ungate/shared/frontend';
 
 export class Api {
-	private static port: number | null = (window as unknown as { __PORT__?: number | null }).__PORT__ ?? null;
+	private static port: number | null = window.__PORT__ ?? null;
 	private static readonly portWaiters = new Set<(port: number) => void>();
 
 	static {
@@ -30,7 +31,7 @@ export class Api {
 	}
 
 	private static async getPort(): Promise<number> {
-		const injected = (window as unknown as { __PORT__?: number | null }).__PORT__;
+		const injected = window.__PORT__;
 
 		if (injected) {
 			return injected;
@@ -65,9 +66,25 @@ export class Api {
 		return `http://localhost:${port}`;
 	}
 
+	/**
+	 * Administrative routes (settings, provider auth, analytics) require the admin key that the
+	 * extension injects into this webview. It is read per request rather than cached, so a webview
+	 * HTML rebuild always wins. Proxy routes are never called from here.
+	 */
+	private static adminHeaders(base?: Record<string, string>): Record<string, string> {
+		const key = window.__ADMIN_KEY__;
+		const headers: Record<string, string> = { ...base };
+
+		if (key) {
+			headers[ADMIN_KEY_HEADER] = key;
+		}
+
+		return headers;
+	}
+
 	private static async get<T>(path: string): Promise<T> {
 		const baseUrl = await this.baseUrl();
-		const response = await fetch(`${baseUrl}${path}`);
+		const response = await fetch(`${baseUrl}${path}`, { headers: this.adminHeaders() });
 
 		if (!response.ok) {
 			throw new Error(`GET ${path} failed: ${response.status}`);
@@ -80,7 +97,7 @@ export class Api {
 		const baseUrl = await this.baseUrl();
 		const response = await fetch(`${baseUrl}${path}`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: this.adminHeaders({ 'Content-Type': 'application/json' }),
 			body: JSON.stringify(body ?? {})
 		});
 

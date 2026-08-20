@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import settingsPlugin from 'src/routes/settings';
 
-import { withPlugin } from '../test-harness';
+import { ADMIN_HEADERS, TEST_ADMIN_KEY, withPlugin } from '../test-harness';
 
 describe('routes: settings (real database)', () => {
 	it('strips unknown fields and saves model to database', async () => {
@@ -11,6 +11,7 @@ describe('routes: settings (real database)', () => {
 		const postRes = await app.inject({
 			method: 'POST',
 			url: '/settings',
+			headers: ADMIN_HEADERS,
 			payload: {
 				quiet: false,
 				models: [
@@ -29,7 +30,7 @@ describe('routes: settings (real database)', () => {
 		});
 		expect(postRes.statusCode).toBe(200);
 
-		const getRes = await app.inject({ method: 'GET', url: '/settings' });
+		const getRes = await app.inject({ method: 'GET', url: '/settings', headers: ADMIN_HEADERS });
 		expect(getRes.statusCode).toBe(200);
 
 		const body = getRes.json();
@@ -37,6 +38,10 @@ describe('routes: settings (real database)', () => {
 
 		expect(saved).toBeDefined();
 		expect(saved).not.toHaveProperty('enabled');
+
+		// The admin key lives in the environment only; it must never travel back through settings.
+		expect(body).not.toHaveProperty('adminApiKey');
+		expect(getRes.body).not.toContain(TEST_ADMIN_KEY);
 
 		await app.close();
 	});

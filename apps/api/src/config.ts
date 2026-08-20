@@ -1,4 +1,4 @@
-import { MINIMAX_BASE_URLS, type AppSettings } from '@ungate/shared';
+import { ADMIN_KEY_ENV, ADMIN_KEY_MIN_LENGTH, MINIMAX_BASE_URLS, type AppSettings } from '@ungate/shared';
 
 import type { ProxyConfig } from './types';
 
@@ -59,6 +59,22 @@ export function getConfig(settings: AppSettings): ProxyConfig {
 	return {
 		port: envPort ?? settings.port,
 		apiKey: settings.apiKey ?? undefined,
+		adminApiKey: readAdminApiKey(),
 		quietMode: settings.quiet
 	};
+}
+
+// The admin key lives only in the environment. It is minted by the extension, stored in VS Code
+// SecretStorage and handed to this process at spawn time, so a missing value means the API was
+// launched outside the extension. Failing here keeps administrative routes from ever opening up.
+function readAdminApiKey(): string {
+	const value = process.env[ADMIN_KEY_ENV] ?? '';
+
+	if (value.length < ADMIN_KEY_MIN_LENGTH) {
+		throw new Error(
+			`${ADMIN_KEY_ENV} must hold a 256-bit key (at least ${ADMIN_KEY_MIN_LENGTH} characters). The Ungate extension supplies it when it spawns the API.`
+		);
+	}
+
+	return value;
 }

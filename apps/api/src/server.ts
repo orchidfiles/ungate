@@ -1,13 +1,13 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 
+import { ADMIN_KEY_HEADER } from '@ungate/shared';
 import { logger, setQuietMode } from 'src/utils/logger';
-
-const BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 
 import { getConfig } from './config';
 import { getDb } from './database/index';
 import { Settings } from './database/settings';
+import { isAllowedDashboardOrigin } from './plugins/cors-origin';
 import analyticsPlugin from './routes/analytics';
 import anthropicPlugin from './routes/anthropic';
 import authPlugin from './routes/auth';
@@ -15,6 +15,12 @@ import healthPlugin from './routes/health';
 import modelsPlugin from './routes/models';
 import openaiPlugin from './routes/openai';
 import settingsPlugin from './routes/settings';
+
+const BODY_LIMIT_BYTES = 256 * 1024 * 1024;
+
+// Cursor reaches the API through the Cloudflare tunnel, never by connecting to a LAN
+// interface. Binding loopback keeps every other host on the network out.
+export const LISTEN_HOST = '127.0.0.1';
 
 export async function startServer(): Promise<void> {
 	globalThis.console.log('[startup] getDb...');
@@ -41,7 +47,13 @@ export async function startServer(): Promise<void> {
 	});
 
 	globalThis.console.log('[startup] register cors...');
-	await app.register(cors, { origin: '*' });
+	await app.register(cors, {
+		origin: (origin, callback) => {
+			callback(null, isAllowedDashboardOrigin(origin));
+		},
+		credentials: false,
+		allowedHeaders: ['content-type', 'authorization', 'x-api-key', ADMIN_KEY_HEADER]
+	});
 
 	globalThis.console.log('[startup] register plugins...');
 	await app.register(healthPlugin);
@@ -53,7 +65,7 @@ export async function startServer(): Promise<void> {
 	await app.register(settingsPlugin);
 
 	globalThis.console.log(`[startup] listen ${config.port}...`);
-	await app.listen({ port: config.port, host: '0.0.0.0' });
+	await app.listen({ port: config.port, host: LISTEN_HOST });
 
 	// Always print port to stdout — extension parses this to detect the running port.
 	// Uses globalThis.console to bypass quiet mode.
