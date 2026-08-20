@@ -15,6 +15,7 @@ import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar } from './extension-status-bar';
 import { OpenAiKeyFix } from './openai-key-fix';
+import { ProviderSecretBroker } from './provider-secret-broker';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { TunnelManager } from './tunnel-manager';
@@ -81,7 +82,9 @@ export class ExtensionController {
 			}
 		);
 
-		this.apiServer = new ApiServer(this.context, {
+		// The API child has no other source of provider credentials: it asks this broker over the
+		// IPC channel ApiServer opens when it spawns the process.
+		this.apiServer = new ApiServer(this.context, new ProviderSecretBroker(this.context.secrets), {
 			onLog: (level: LogEntry['level'], message: string) => {
 				this.log(message);
 				this.dashboard.pushLog('api', { timestamp: Date.now(), level, message });

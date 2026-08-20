@@ -11,8 +11,8 @@ export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
 	response: Response;
 	context: RequestContext;
 }> {
-	const creds = ProviderSettings.get('minimax');
-	const minimaxUrl = creds?.baseUrl ?? config.minimax.baseUrlGlobal;
+	const metadata = ProviderSettings.getMetadata('minimax');
+	const minimaxUrl = metadata?.baseUrl ?? config.minimax.baseUrlGlobal;
 	const provider = getProvider('minimax');
 	const authHeader = await provider.getAuthHeader();
 

@@ -9,8 +9,8 @@ export class StaticTokenProvider implements AIProvider {
 		this.name = name;
 	}
 
-	getAuthHeader(): string | null {
-		const creds = ProviderSettings.get(this.name);
+	async getAuthHeader(): Promise<string | null> {
+		const creds = await ProviderSettings.get(this.name);
 
 		if (!creds?.accessToken) {
 			return null;
@@ -19,13 +19,11 @@ export class StaticTokenProvider implements AIProvider {
 		return `Bearer ${creds.accessToken}`;
 	}
 
-	isAuthenticated(): boolean {
-		const creds = ProviderSettings.get(this.name);
-
-		return !!creds?.accessToken;
+	async isAuthenticated(): Promise<boolean> {
+		return ProviderSettings.hasCredentials(this.name);
 	}
 
-	logout(): void {
-		ProviderSettings.remove(this.name);
+	async logout(): Promise<void> {
+		await ProviderSettings.remove(this.name);
 	}
 }

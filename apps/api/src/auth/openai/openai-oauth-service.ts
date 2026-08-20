@@ -83,16 +83,16 @@ export class OpenAIOAuthService {
 			accountId: accountId ?? undefined
 		};
 
-		ProviderSettings.upsertOAuth('openai', credentials);
+		await ProviderSettings.upsertOAuth('openai', credentials);
 		logger.log('✓ OpenAI OAuth login complete', email ? `(${email})` : '');
 
 		return { ok: true, email: email ?? undefined };
 	}
 
 	public static async getValidToken(): Promise<OAuthCredentials | null> {
-		const credentials = ProviderSettings.get('openai');
+		const credentials = await ProviderSettings.get('openai');
 
-		if (!credentials) {
+		if (!credentials?.accessToken) {
 			return null;
 		}
 
@@ -113,7 +113,7 @@ export class OpenAIOAuthService {
 			return null;
 		}
 
-		const existingCredentials = ProviderSettings.get('openai');
+		const existingCredentials = ProviderSettings.getMetadata('openai');
 		const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600;
 		const credentials: OAuthCredentials = {
 			accessToken: tokens.access_token as string,
@@ -123,14 +123,14 @@ export class OpenAIOAuthService {
 			accountId: existingCredentials?.accountId ?? undefined
 		};
 
-		ProviderSettings.upsertOAuth('openai', credentials);
+		await ProviderSettings.upsertOAuth('openai', credentials);
 		logger.log('OpenAI token refreshed successfully');
 
 		return credentials;
 	}
 
-	public static getAuthStatus(): { authenticated: boolean; email?: string } {
-		const credentials = ProviderSettings.get('openai');
+	public static async getAuthStatus(): Promise<{ authenticated: boolean; email?: string }> {
+		const credentials = await ProviderSettings.get('openai');
 
 		return {
 			authenticated: !!credentials?.accessToken,
@@ -138,8 +138,8 @@ export class OpenAIOAuthService {
 		};
 	}
 
-	public static logout(): void {
-		ProviderSettings.remove('openai');
+	public static async logout(): Promise<void> {
+		await ProviderSettings.remove('openai');
 		logger.log('✓ OpenAI OAuth logged out, tokens deleted');
 	}
 

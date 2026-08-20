@@ -2,13 +2,15 @@ import * as cp from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { sleep, type ApiStatus as ServerStatus, type LogEntry } from '@ungate/shared';
+import { sleep, type ApiStatus as ServerStatus, type LogEntry, type ProviderSecretResponse } from '@ungate/shared';
 import * as vscode from 'vscode';
 
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { BetterSqlite3Installer } from './utils/better-sqlite3-installer';
 import { NodeResolver } from './utils/node-resolver';
+
+import type { ProviderSecretBroker } from './provider-secret-broker';
 
 const HEALTH_CHECK_URL = (port: number) => `http://localhost:${port}/health`;
 const STARTING_STATE_TIMEOUT_MS = 10000;
@@ -38,6 +40,7 @@ export class ApiServer {
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
+		private readonly secrets: ProviderSecretBroker,
 		private readonly callbacks: ApiServerCallbacks
 	) {}
 
@@ -203,18 +206,60 @@ export class ApiServer {
 
 		this.callbacks.onLog('info', `[process] starting api via ${runtime}`);
 
-		this.process = cp.spawn(runtime, nodeArgs, { cwd, env, stdio: 'pipe', detached: true });
+		// The fourth stdio slot is the credential channel: the child asks for provider secrets
+		// instead of reading them from the database.
+		this.process = cp.spawn(runtime, nodeArgs, { cwd, env, stdio: ['pipe', 'pipe', 'pipe', 'ipc'], detached: true });
 		this.process.unref();
 		void this.writeRuntimeState('starting', null).catch(() => {});
 
 		this.process.stdout?.on('data', (data: Buffer) => this.onStdout(data));
 		this.process.stderr?.on('data', (data: Buffer) => this.onStderr(data));
 		this.process.on('exit', (code, signal) => this.onExit(code, signal));
+		this.process.on('message', (message: unknown) => {
+			void this.onChildMessage(message);
+		});
 		this.process.on('error', (err) => {
 			void this.onSpawnProcessError(err).catch(() => {});
 		});
 
 		this.startHealthCheck();
+	}
+
+	/**
+	 * Serves credential requests from the API child. Only the outcome is logged: request and
+	 * response payloads carry access and refresh tokens.
+	 */
+	private async onChildMessage(message: unknown): Promise<void> {
+		const child = this.process;
+		let response: ProviderSecretResponse | null;
+
+		try {
+			response = await this.secrets.handleApiChildMessage(message);
+		} catch (err) {
+			const reason = err instanceof Error ? err.message : String(err);
+
+			this.callbacks.onLog('error', `[secrets] credential request failed: ${reason}`);
+
+			return;
+		}
+
+		if (!response) {
+			return;
+		}
+
+		if (!child?.connected) {
+			this.callbacks.onLog('error', '[secrets] dropped a credential response: the api channel closed');
+
+			return;
+		}
+
+		try {
+			child.send(response);
+		} catch (err) {
+			const reason = err instanceof Error ? err.message : String(err);
+
+			this.callbacks.onLog('error', `[secrets] failed to answer a credential request: ${reason}`);
+		}
 	}
 
 	private onStdout(data: Buffer): void {

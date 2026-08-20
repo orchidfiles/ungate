@@ -6,6 +6,15 @@ import { TestHelper } from './helpers/test-helper';
 
 import type { RuntimeState } from '@ungate/shared/frontend';
 
+interface SpawnedChildMock {
+	emit(event: string, payload?: unknown): void;
+	connected: boolean;
+	send: (message: unknown) => boolean;
+}
+
+/** Mirrors PROVIDER_SECRET_CHANNEL; @ungate/shared is mocked in this file. */
+const SECRET_CHANNEL = 'ungate.provider-secret';
+
 const {
 	runtimeReadMock,
 	runtimeHasLiveClientsMock,
@@ -33,6 +42,13 @@ const {
 
 				return child;
 			},
+			emit(event: string, payload?: unknown) {
+				for (const handler of handlers.get(event) ?? []) {
+					handler(payload);
+				}
+			},
+			connected: true,
+			send: vi.fn(() => true),
 			unref: vi.fn(),
 			kill: vi.fn()
 		};
@@ -144,15 +160,18 @@ function createServer(options?: { isLeaderWindow?: boolean; isExtensionHostActiv
 	onStatusChange: ReturnType<typeof vi.fn>;
 	onPortDetected: ReturnType<typeof vi.fn>;
 	onLog: ReturnType<typeof vi.fn>;
+	handleApiChildMessage: ReturnType<typeof vi.fn>;
 } {
 	const onStatusChange = vi.fn();
 	const onPortDetected = vi.fn();
 	const onLog = vi.fn();
+	const handleApiChildMessage = vi.fn().mockResolvedValue(null);
 	const server = new ApiServer(
 		{
 			extensionMode: 1,
 			extensionPath: '/tmp/ungate-extension'
 		} as never,
+		{ handleApiChildMessage } as never,
 		{
 			onLog,
 			onPortDetected,
@@ -169,7 +188,7 @@ function createServer(options?: { isLeaderWindow?: boolean; isExtensionHostActiv
 		}
 	);
 
-	return { server, onStatusChange, onPortDetected, onLog };
+	return { server, onStatusChange, onPortDetected, onLog, handleApiChildMessage };
 }
 
 describe('ApiServer.runHealthCheckCycle', () => {
@@ -278,7 +297,7 @@ describe('ApiServer.runHealthCheckCycle', () => {
 		expect(spawnSpy).not.toHaveBeenCalled();
 	});
 
-	it('passes the installed better-sqlite3 binary path to the api process', async () => {
+	it('passes the installed better-sqlite3 binary path and an ipc credential channel to the api process', async () => {
 		const runtimeState = createRuntimeState([], null);
 		const { server } = createServer();
 		const internals = getInternals(server);
@@ -297,11 +316,64 @@ describe('ApiServer.runHealthCheckCycle', () => {
 			expect.any(String),
 			expect.any(Array),
 			expect.objectContaining({
+				stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
 				env: expect.objectContaining({
 					UNGATE_BETTER_SQLITE3_NATIVE_BINDING: expect.stringContaining('better_sqlite3.installed.node')
 				})
 			})
 		);
+	});
+
+	it('answers credential requests from the api child and never logs the payload', async () => {
+		const runtimeState = createRuntimeState([], null);
+		const { server, onLog, handleApiChildMessage } = createServer();
+		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeMutateMock.mockImplementation((mutator) => {
+			return Promise.resolve(mutator(structuredClone(runtimeState)));
+		});
+
+		vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
+
+		const response = { channel: SECRET_CHANNEL, id: 'r1', ok: true, secret: null };
+		handleApiChildMessage.mockResolvedValueOnce(response);
+
+		await server.start();
+
+		const child = spawnMock.mock.results.at(-1)?.value as SpawnedChildMock;
+		const request = { channel: SECRET_CHANNEL, id: 'r1', action: 'get', provider: 'claude' };
+
+		child.emit('message', request);
+		await flushPromises();
+
+		expect(handleApiChildMessage).toHaveBeenCalledWith(request);
+		expect(child.send).toHaveBeenCalledWith(response);
+		expect(onLog.mock.calls.flat().join(' ')).not.toContain(SECRET_CHANNEL);
+	});
+
+	it('reports a closed channel instead of answering a credential request', async () => {
+		const runtimeState = createRuntimeState([], null);
+		const { server, onLog, handleApiChildMessage } = createServer();
+		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeMutateMock.mockImplementation((mutator) => {
+			return Promise.resolve(mutator(structuredClone(runtimeState)));
+		});
+
+		vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
+
+		handleApiChildMessage.mockResolvedValueOnce({ channel: SECRET_CHANNEL, id: 'r2', ok: true, secret: null });
+
+		await server.start();
+
+		const child = spawnMock.mock.results.at(-1)?.value as SpawnedChildMock;
+		child.connected = false;
+
+		child.emit('message', { channel: SECRET_CHANNEL, id: 'r2', action: 'get', provider: 'claude' });
+		await flushPromises();
+
+		expect(child.send).not.toHaveBeenCalled();
+		expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('the api channel closed'));
 	});
 
 	it('retries startup when shared starting state is stale', async () => {

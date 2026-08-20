@@ -120,7 +120,7 @@ export class OAuth {
 			const expiresAt = Date.now() + data.expires_in * 1000;
 			const email = data.account?.email_address;
 
-			ProviderSettings.upsertOAuth('claude', {
+			await ProviderSettings.upsertOAuth('claude', {
 				accessToken: data.access_token,
 				refreshToken: data.refresh_token,
 				expiresAt,
@@ -167,7 +167,7 @@ export class OAuth {
 			const data: TokenRefreshResponse = await response.json();
 			const expiresAt = Date.now() + data.expires_in * 1000;
 
-			ProviderSettings.upsertOAuth('claude', {
+			await ProviderSettings.upsertOAuth('claude', {
 				accessToken: data.access_token,
 				refreshToken: data.refresh_token,
 				expiresAt
@@ -191,9 +191,9 @@ export class OAuth {
 	}
 
 	static async getValidToken(): Promise<TokenInfo | null> {
-		const row = ProviderSettings.get('claude');
+		const row = await ProviderSettings.get('claude');
 
-		if (!row) {
+		if (!row?.accessToken) {
 			return null;
 		}
 
@@ -208,24 +208,28 @@ export class OAuth {
 			return result;
 		}
 
-		return this.refreshToken(row.refreshToken!);
+		if (!row.refreshToken) {
+			return null;
+		}
+
+		return this.refreshToken(row.refreshToken);
 	}
 
-	// No-op — token state is DB-backed, no in-memory cache to clear
+	// No-op — token state lives in the extension secret store, no in-memory cache to clear
 	static clearCachedToken(): void {}
 
-	static getAuthStatus(): AuthStatus {
-		const row = ProviderSettings.get('claude');
+	static async getAuthStatus(): Promise<AuthStatus> {
+		const row = await ProviderSettings.get('claude');
 
-		if (!row) {
+		if (!row?.accessToken) {
 			return { authenticated: false };
 		}
 
 		return { authenticated: true, email: row.email ?? undefined };
 	}
 
-	static logout(): void {
-		ProviderSettings.remove('claude');
+	static async logout(): Promise<void> {
+		await ProviderSettings.remove('claude');
 		logger.log('✓ Logged out, OAuth tokens deleted');
 	}
 }

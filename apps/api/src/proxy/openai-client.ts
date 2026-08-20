@@ -28,7 +28,7 @@ export class OpenAiClient {
 		const model = body.model;
 		const resolvedModel = ResponsesModelResolver.resolveModel(model);
 		const normalizedModel = resolvedModel.model;
-		const creds = ProviderSettings.get('openai');
+		const creds = await ProviderSettings.get('openai');
 
 		if (!creds?.accessToken) {
 			return this.authErrorResult(model, startTime, 'Not authenticated with OpenAI');

@@ -1,31 +1,40 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { OpenAIOAuthService } from 'src/auth/openai/openai-oauth-service';
 import { ProviderSettings } from 'src/database/provider-settings';
 
-describe('auth-openai-oauth-lifecycle', () => {
-	it('returns auth status from provider settings', () => {
-		expect(OpenAIOAuthService.getAuthStatus()).toEqual({ authenticated: false, email: undefined });
+import { useMemorySecretTransport, type MemorySecretTransport } from '../../helpers/memory-secret-transport';
 
-		ProviderSettings.upsertOAuth('openai', {
+describe('auth-openai-oauth-lifecycle', () => {
+	let secrets: MemorySecretTransport;
+
+	beforeEach(() => {
+		secrets = useMemorySecretTransport();
+	});
+
+	it('returns auth status from provider settings', async () => {
+		expect(await OpenAIOAuthService.getAuthStatus()).toEqual({ authenticated: false, email: undefined });
+
+		await ProviderSettings.upsertOAuth('openai', {
 			accessToken: 'a',
 			refreshToken: 'r',
 			expiresAt: Date.now() + 10 * 60_000,
 			email: 'u@example.com'
 		});
-		expect(OpenAIOAuthService.getAuthStatus()).toEqual({ authenticated: true, email: 'u@example.com' });
+		expect(await OpenAIOAuthService.getAuthStatus()).toEqual({ authenticated: true, email: 'u@example.com' });
 	});
 
 	it('returns null token when no credentials and logout removes tokens', async () => {
 		expect(await OpenAIOAuthService.getValidToken()).toBeNull();
 
-		ProviderSettings.upsertOAuth('openai', {
+		await ProviderSettings.upsertOAuth('openai', {
 			accessToken: 'a',
 			refreshToken: 'r',
 			expiresAt: Date.now() + 10 * 60_000
 		});
-		OpenAIOAuthService.logout();
-		expect(ProviderSettings.get('openai')).toBeUndefined();
+		await OpenAIOAuthService.logout();
+		expect(await ProviderSettings.get('openai')).toBeUndefined();
+		expect(secrets.peek('openai')).toBeUndefined();
 		expect(await OpenAIOAuthService.getValidToken()).toBeNull();
 	});
 
@@ -37,7 +46,7 @@ describe('auth-openai-oauth-lifecycle', () => {
 			email: 'x@example.com',
 			accountId: 'acc'
 		};
-		ProviderSettings.upsertOAuth('openai', creds);
+		await ProviderSettings.upsertOAuth('openai', creds);
 		const token = await OpenAIOAuthService.getValidToken();
 		expect(token).toMatchObject(creds);
 	});
