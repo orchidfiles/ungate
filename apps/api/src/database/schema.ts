@@ -12,6 +12,11 @@ export const appSettings = sqliteTable('app_settings', {
 
 export const providerSettings = sqliteTable('provider_settings', {
 	provider: text().primaryKey(),
+	/**
+	 * Legacy: credentials moved to the extension secret store. Kept so
+	 * `ProviderSettings.migrateLegacySecrets()` can drain and blank pre-existing rows; new
+	 * writes always store an empty string / null here.
+	 */
 	accessToken: text().notNull(),
 	refreshToken: text(),
 	expiresAt: integer(),

@@ -5,11 +5,13 @@ import { ExtensionController } from './extension-controller';
 // Keep a single controller instance between activate/deactivate hooks.
 let active: ExtensionController | undefined;
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	const app = new ExtensionController(context);
 
-	app.activate();
+	// Registered before awaiting so deactivate can tear down a half-started controller.
 	active = app;
+
+	await app.activate();
 }
 
 export function deactivate(): void {

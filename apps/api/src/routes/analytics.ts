@@ -1,6 +1,7 @@
 import { hoursToMilliseconds } from 'date-fns';
 
 import { Analytics } from '../database/analytics';
+import { adminKeyAuth } from '../plugins/auth';
 
 import type { Period } from '@ungate/shared';
 import type { FastifyPluginCallback } from 'fastify';
@@ -21,6 +22,9 @@ function toPeriod(value: string | undefined): Period {
 }
 
 const plugin: FastifyPluginCallback = (app) => {
+	// Encapsulated hook: covers every route this plugin registers, present and future.
+	app.addHook('onRequest', adminKeyAuth(app.config));
+
 	app.get('/analytics', async (request, reply) => {
 		const period = toPeriod((request.query as Record<string, string>).period);
 		const now = Date.now();

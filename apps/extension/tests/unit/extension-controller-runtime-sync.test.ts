@@ -192,9 +192,24 @@ function createRuntimeState(windowIds: string[], apiPort: number | null = 4783):
 }
 
 function createContext() {
+	const stored: Record<string, string> = {};
+
 	return {
 		subscriptions: [],
-		extensionPath: '/tmp/ungate-extension'
+		extensionPath: '/tmp/ungate-extension',
+		secrets: {
+			get: (key: string) => Promise.resolve(stored[key]),
+			store: (key: string, value: string) => {
+				stored[key] = value;
+
+				return Promise.resolve();
+			},
+			delete: (key: string) => {
+				delete stored[key];
+
+				return Promise.resolve();
+			}
+		}
 	};
 }
 
@@ -329,7 +344,7 @@ describe('ExtensionController', () => {
 			startRuntimeSync: vi.fn()
 		});
 
-		controller.activate();
+		await controller.activate();
 
 		await vi.waitFor(() => {
 			expect(apiServerStartMock).toHaveBeenCalledTimes(1);
@@ -376,7 +391,7 @@ describe('ExtensionController', () => {
 			startRuntimeSync: vi.fn()
 		});
 
-		controller.activate();
+		await controller.activate();
 
 		await vi.waitFor(() => {
 			expect(apiServerStartMock).toHaveBeenCalledTimes(1);

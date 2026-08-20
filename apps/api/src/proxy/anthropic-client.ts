@@ -67,7 +67,7 @@ async function makeClaudeCodeRequest(
 			const errorBody = await response.clone().text();
 			logger.error(`Claude Code 401 error: ${errorBody}`);
 
-			const row = ProviderSettings.get('claude');
+			const row = await ProviderSettings.get('claude');
 
 			if (row?.refreshToken) {
 				logger.log('Attempting token refresh after 401...');

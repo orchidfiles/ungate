@@ -2,10 +2,15 @@ import { OAuth } from '../auth/oauth';
 import { OpenAIOAuthService } from '../auth/openai/openai-oauth-service';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
+import { adminKeyAuth } from '../plugins/auth';
 
 import type { FastifyPluginCallback } from 'fastify';
 
 const plugin: FastifyPluginCallback = (app) => {
+	// Encapsulated hook: covers every route this plugin registers, including the OAuth callback.
+	// Provider login and logout are the most damaging routes to leave open.
+	app.addHook('onRequest', adminKeyAuth(app.config));
+
 	app.post('/auth/claude/start', async (_request, reply) => {
 		const result = await OAuth.startLogin();
 
@@ -24,18 +29,20 @@ const plugin: FastifyPluginCallback = (app) => {
 		return reply.send(result);
 	});
 
-	app.get('/auth/claude/status', (_request, reply) => {
-		return reply.send(OAuth.getAuthStatus());
+	app.get('/auth/claude/status', async (_request, reply) => {
+		const status = await OAuth.getAuthStatus();
+
+		return reply.send(status);
 	});
 
-	app.post('/auth/claude/logout', (_request, reply) => {
-		OAuth.logout();
+	app.post('/auth/claude/logout', async (_request, reply) => {
+		await OAuth.logout();
 
 		return reply.send({ ok: true });
 	});
 
-	app.get('/auth/minimax/status', (_request, reply) => {
-		const creds = ProviderSettings.get('minimax');
+	app.get('/auth/minimax/status', async (_request, reply) => {
+		const creds = await ProviderSettings.get('minimax');
 
 		return reply.send({
 			authenticated: !!creds?.accessToken,
@@ -50,7 +57,7 @@ const plugin: FastifyPluginCallback = (app) => {
 			return reply.code(400).send({ ok: false, error: 'API key is required' });
 		}
 
-		ProviderSettings.upsertApiKey('minimax', apiKey.trim(), baseUrl?.trim());
+		await ProviderSettings.upsertApiKey('minimax', apiKey.trim(), baseUrl?.trim());
 
 		return reply.send({ ok: true });
 	});
@@ -72,8 +79,8 @@ const plugin: FastifyPluginCallback = (app) => {
 		return reply.send({ ok: true });
 	});
 
-	app.post('/auth/minimax/logout', (_request, reply) => {
-		ProviderSettings.remove('minimax');
+	app.post('/auth/minimax/logout', async (_request, reply) => {
+		await ProviderSettings.remove('minimax');
 
 		return reply.send({ ok: true });
 	});
@@ -101,12 +108,14 @@ const plugin: FastifyPluginCallback = (app) => {
 		return reply.type('text/html').send(`<html><body><h1>Error</h1><p>${result.error ?? 'Unknown error'}</p></body></html>`);
 	});
 
-	app.get('/auth/openai/status', (_request, reply) => {
-		return reply.send(OpenAIOAuthService.getAuthStatus());
+	app.get('/auth/openai/status', async (_request, reply) => {
+		const status = await OpenAIOAuthService.getAuthStatus();
+
+		return reply.send(status);
 	});
 
-	app.post('/auth/openai/logout', (_request, reply) => {
-		OpenAIOAuthService.logout();
+	app.post('/auth/openai/logout', async (_request, reply) => {
+		await OpenAIOAuthService.logout();
 
 		return reply.send({ ok: true });
 	});

@@ -6,6 +6,12 @@ import { TestHelper } from './helpers/test-helper';
 
 import type { RuntimeState } from '@ungate/shared/frontend';
 
+interface SpawnedChildMock {
+	emit(event: string, payload?: unknown): void;
+	connected: boolean;
+	send: (message: unknown) => boolean;
+}
+
 const {
 	runtimeReadMock,
 	runtimeHasLiveClientsMock,
@@ -33,6 +39,13 @@ const {
 
 				return child;
 			},
+			emit(event: string, payload?: unknown) {
+				for (const handler of handlers.get(event) ?? []) {
+					handler(payload);
+				}
+			},
+			connected: true,
+			send: vi.fn(() => true),
 			unref: vi.fn(),
 			kill: vi.fn()
 		};
@@ -77,7 +90,9 @@ vi.mock('../../src/utils/better-sqlite3-installer', () => {
 
 vi.mock('@ungate/shared', () => {
 	return {
-		sleep: sleepMock
+		sleep: sleepMock,
+		ADMIN_KEY_ENV: 'UNGATE_ADMIN_KEY',
+		PROVIDER_SECRET_CHANNEL: 'ungate.provider-secret'
 	};
 });
 
@@ -124,6 +139,9 @@ interface ApiServerInternals {
 	shouldRespawn(): boolean;
 }
 
+/** Stand-in for the base64url 256-bit key SecuritySecrets mints. */
+const TEST_ADMIN_KEY = 'a'.repeat(43);
+
 function createRuntimeState(): RuntimeState {
 	const runtimeState = TestHelper.createRuntimeState([], 4783);
 
@@ -144,14 +162,20 @@ function createServer(options?: { isLeaderWindow?: boolean; isExtensionHostActiv
 	onStatusChange: ReturnType<typeof vi.fn>;
 	onPortDetected: ReturnType<typeof vi.fn>;
 	onLog: ReturnType<typeof vi.fn>;
+	handleApiChildMessage: ReturnType<typeof vi.fn>;
 } {
 	const onStatusChange = vi.fn();
 	const onPortDetected = vi.fn();
 	const onLog = vi.fn();
+	const handleApiChildMessage = vi.fn().mockResolvedValue(null);
 	const server = new ApiServer(
 		{
 			extensionMode: 1,
 			extensionPath: '/tmp/ungate-extension'
+		} as never,
+		{
+			adminApiKey: TEST_ADMIN_KEY,
+			handleApiChildMessage
 		} as never,
 		{
 			onLog,
@@ -169,7 +193,7 @@ function createServer(options?: { isLeaderWindow?: boolean; isExtensionHostActiv
 		}
 	);
 
-	return { server, onStatusChange, onPortDetected, onLog };
+	return { server, onStatusChange, onPortDetected, onLog, handleApiChildMessage };
 }
 
 describe('ApiServer.runHealthCheckCycle', () => {
@@ -200,10 +224,10 @@ describe('ApiServer.runHealthCheckCycle', () => {
 			return {
 				error: undefined,
 				status: 0,
-				stdout: 'v24.0.0\n',
+				stdout: '{"abi":"137","platform":"darwin","arch":"arm64"}',
 				stderr: '',
 				pid: 1,
-				output: [null, 'v24.0.0\n', ''],
+				output: [null, '{"abi":"137","platform":"darwin","arch":"arm64"}', ''],
 				signal: null
 			};
 		});
@@ -297,11 +321,81 @@ describe('ApiServer.runHealthCheckCycle', () => {
 			expect.any(String),
 			expect.any(Array),
 			expect.objectContaining({
+				stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
 				env: expect.objectContaining({
-					UNGATE_BETTER_SQLITE3_NATIVE_BINDING: expect.stringContaining('better_sqlite3.installed.node')
+					UNGATE_BETTER_SQLITE3_NATIVE_BINDING: expect.stringContaining('better_sqlite3.installed.node'),
+					UNGATE_ADMIN_KEY: TEST_ADMIN_KEY
 				})
 			})
 		);
+	});
+
+	it('answers credential requests from the api child and never logs the payload', async () => {
+		const runtimeState = createRuntimeState([], null);
+		const { server, onLog, handleApiChildMessage } = createServer();
+		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeMutateMock.mockImplementation((mutator) => {
+			const nextState = mutator(structuredClone(runtimeState));
+
+			return Promise.resolve(nextState);
+		});
+		vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
+
+		await server.start();
+
+		const child = spawnMock.mock.results.at(-1)!.value as SpawnedChildMock;
+		const response = {
+			channel: 'ungate.provider-secret',
+			id: 'req-1',
+			ok: true,
+			secret: { accessToken: 'plaintext-access', refreshToken: null }
+		};
+		handleApiChildMessage.mockResolvedValueOnce(response);
+
+		child.emit('message', { channel: 'ungate.provider-secret', id: 'req-1', action: 'get', provider: 'claude' });
+		await flushPromises();
+
+		expect(handleApiChildMessage).toHaveBeenCalledWith({
+			channel: 'ungate.provider-secret',
+			id: 'req-1',
+			action: 'get',
+			provider: 'claude'
+		});
+		expect(child.send).toHaveBeenCalledWith(response);
+
+		const loggedLines = onLog.mock.calls.map((call) => String(call[1])).join('\n');
+		expect(loggedLines).not.toContain('plaintext-access');
+	});
+
+	it('drops credential responses when the api channel is already closed', async () => {
+		const runtimeState = createRuntimeState([], null);
+		const { server, onLog, handleApiChildMessage } = createServer();
+		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeMutateMock.mockImplementation((mutator) => {
+			const nextState = mutator(structuredClone(runtimeState));
+
+			return Promise.resolve(nextState);
+		});
+		vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
+
+		await server.start();
+
+		const child = spawnMock.mock.results.at(-1)!.value as SpawnedChildMock;
+		child.connected = false;
+		handleApiChildMessage.mockResolvedValueOnce({
+			channel: 'ungate.provider-secret',
+			id: 'req-2',
+			ok: true,
+			secret: null
+		});
+
+		child.emit('message', { channel: 'ungate.provider-secret', id: 'req-2', action: 'delete', provider: 'minimax' });
+		await flushPromises();
+
+		expect(child.send).not.toHaveBeenCalled();
+		expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('the api channel closed'));
 	});
 
 	it('retries startup when shared starting state is stale', async () => {

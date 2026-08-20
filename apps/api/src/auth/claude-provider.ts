@@ -15,11 +15,13 @@ export class ClaudeProvider implements AIProvider {
 		return `Bearer ${token.accessToken}`;
 	}
 
-	isAuthenticated(): boolean {
-		return OAuth.getAuthStatus().authenticated;
+	async isAuthenticated(): Promise<boolean> {
+		const status = await OAuth.getAuthStatus();
+
+		return status.authenticated;
 	}
 
-	logout(): void {
-		OAuth.logout();
+	async logout(): Promise<void> {
+		await OAuth.logout();
 	}
 }

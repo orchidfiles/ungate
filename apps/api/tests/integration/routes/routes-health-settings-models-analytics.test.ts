@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ADMIN_KEY_HEADER } from '@ungate/shared';
+
 import analyticsPlugin from 'src/routes/analytics';
 import healthPlugin from 'src/routes/health';
 import modelsPlugin from 'src/routes/models';
 import settingsPlugin from 'src/routes/settings';
 
-import { withPlugin } from '../test-harness';
+import { ADMIN_HEADERS, withPlugin } from '../test-harness';
 
 const settingsGetMock = vi.fn();
 const settingsUpdateMock = vi.fn();
@@ -48,6 +50,7 @@ describe('routes: health/settings/models/analytics', () => {
 		const res = await app.inject({
 			method: 'POST',
 			url: '/settings',
+			headers: ADMIN_HEADERS,
 			payload: {
 				models: [
 					{
@@ -90,13 +93,14 @@ describe('routes: health/settings/models/analytics', () => {
 		});
 
 		const app = await withPlugin(settingsPlugin);
-		const getRes = await app.inject({ method: 'GET', url: '/settings' });
+		const getRes = await app.inject({ method: 'GET', url: '/settings', headers: ADMIN_HEADERS });
 		expect(getRes.statusCode).toBe(200);
 		expect(getRes.json().port).toBe(4783);
 
 		const postRes = await app.inject({
 			method: 'POST',
 			url: '/settings',
+			headers: ADMIN_HEADERS,
 			payload: { quiet: true }
 		});
 		expect(postRes.statusCode).toBe(200);
@@ -113,8 +117,12 @@ describe('routes: health/settings/models/analytics', () => {
 			]
 		});
 
-		const app = await withPlugin(modelsPlugin);
-		const response = await app.inject({ method: 'GET', url: '/v1/models' });
+		const app = await withPlugin(modelsPlugin, { apiKey: 'proxy-key' });
+		const response = await app.inject({
+			method: 'GET',
+			url: '/v1/models',
+			headers: { authorization: 'Bearer proxy-key' }
+		});
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toEqual({
 			object: 'list',
@@ -143,16 +151,90 @@ describe('routes: health/settings/models/analytics', () => {
 
 		const app = await withPlugin(analyticsPlugin);
 
-		const summary = await app.inject({ method: 'GET', url: '/analytics?period=all' });
+		const summary = await app.inject({ method: 'GET', url: '/analytics?period=all', headers: ADMIN_HEADERS });
 		expect(summary.statusCode).toBe(200);
 		expect(summary.json().period).toBe('all');
 		expect(summary.json().note).toContain('Costs are estimates');
 
-		await app.inject({ method: 'GET', url: '/analytics/requests?limit=9999' });
+		await app.inject({ method: 'GET', url: '/analytics/requests?limit=9999', headers: ADMIN_HEADERS });
 		expect(analyticsRecentMock).toHaveBeenCalledWith(1000);
 
-		const reset = await app.inject({ method: 'POST', url: '/analytics/reset' });
+		const reset = await app.inject({ method: 'POST', url: '/analytics/reset', headers: ADMIN_HEADERS });
 		expect(reset.json()).toEqual({ success: true, deletedCount: 4 });
+		await app.close();
+	});
+
+	it('refuses settings reads and writes without the admin key', async () => {
+		const app = await withPlugin(settingsPlugin);
+
+		const read = await app.inject({ method: 'GET', url: '/settings' });
+		expect(read.statusCode).toBe(403);
+
+		const write = await app.inject({ method: 'POST', url: '/settings', payload: { quiet: true } });
+		expect(write.statusCode).toBe(403);
+
+		expect(settingsGetMock).not.toHaveBeenCalled();
+		expect(settingsUpdateMock).not.toHaveBeenCalled();
+		await app.close();
+	});
+
+	it('refuses settings requests carrying a wrong admin key', async () => {
+		const app = await withPlugin(settingsPlugin);
+
+		const read = await app.inject({
+			method: 'GET',
+			url: '/settings',
+			headers: { [ADMIN_KEY_HEADER]: 'not-the-key' }
+		});
+		expect(read.statusCode).toBe(403);
+		expect(settingsGetMock).not.toHaveBeenCalled();
+		await app.close();
+	});
+
+	it('refuses every analytics route without the admin key', async () => {
+		const app = await withPlugin(analyticsPlugin);
+
+		for (const url of ['/analytics', '/analytics/requests', '/analytics/tokens']) {
+			const response = await app.inject({ method: 'GET', url });
+			expect(response.statusCode).toBe(403);
+		}
+
+		const reset = await app.inject({ method: 'POST', url: '/analytics/reset' });
+		expect(reset.statusCode).toBe(403);
+
+		expect(analyticsSummaryMock).not.toHaveBeenCalled();
+		expect(analyticsResetMock).not.toHaveBeenCalled();
+		await app.close();
+	});
+
+	it('refuses the model list without the proxy key', async () => {
+		const app = await withPlugin(modelsPlugin, { apiKey: 'proxy-key' });
+
+		const anonymous = await app.inject({ method: 'GET', url: '/v1/models' });
+		expect(anonymous.statusCode).toBe(403);
+
+		const wrong = await app.inject({ method: 'GET', url: '/v1/models', headers: { 'x-api-key': 'nope' } });
+		expect(wrong.statusCode).toBe(403);
+
+		expect(settingsGetMock).not.toHaveBeenCalled();
+		await app.close();
+	});
+
+	it('refuses the model list when no proxy key is configured at all', async () => {
+		const app = await withPlugin(modelsPlugin);
+
+		const response = await app.inject({ method: 'GET', url: '/v1/models' });
+		expect(response.statusCode).toBe(403);
+
+		expect(settingsGetMock).not.toHaveBeenCalled();
+		await app.close();
+	});
+
+	it('keeps health reachable without any key', async () => {
+		const app = await withPlugin(healthPlugin);
+
+		const response = await app.inject({ method: 'GET', url: '/health' });
+		expect(response.statusCode).toBe(200);
 		await app.close();
 	});
 });

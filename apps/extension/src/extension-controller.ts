@@ -17,6 +17,7 @@ import { ExtensionStatusBar } from './extension-status-bar';
 import { OpenAiKeyFix } from './openai-key-fix';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
+import { SecuritySecrets } from './security-secrets';
 import { TunnelManager } from './tunnel-manager';
 
 import type { LogEntry } from './utils/log-ring-buffer';
@@ -41,7 +42,7 @@ export class ExtensionController {
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
-	public activate(): void {
+	public async activate(): Promise<void> {
 		this.extensionHostActive = true;
 		this.outputChannel = vscode.window.createOutputChannel('Ungate');
 		this.context.subscriptions.push(this.outputChannel);
@@ -50,7 +51,11 @@ export class ExtensionController {
 		this.statusBar.command = extensionCommands.openDashboard;
 		this.context.subscriptions.push(this.statusBar);
 
-		this.dashboard = new Dashboard(this.context, (message) => {
+		// Nothing may start before the secrets are readable: the administrative API key gates the
+		// dashboard and the API child, and provider credentials live in the same store.
+		const secrets = await this.createSecuritySecrets();
+
+		this.dashboard = new Dashboard(this.context, secrets.adminApiKey, (message) => {
 			this.handleDashboardMessage(message);
 		});
 		this.keyFix = new OpenAiKeyFix(
@@ -81,7 +86,7 @@ export class ExtensionController {
 			}
 		);
 
-		this.apiServer = new ApiServer(this.context, {
+		this.apiServer = new ApiServer(this.context, secrets, {
 			onLog: (level: LogEntry['level'], message: string) => {
 				this.log(message);
 				this.dashboard.pushLog('api', { timestamp: Date.now(), level, message });
@@ -142,7 +147,7 @@ export class ExtensionController {
 
 		const disposeState = RuntimeStateStore.read();
 		if (this.isLeaderWindow(disposeState)) {
-			void this.apiServer.stop().catch(() => {});
+			void this.apiServer?.stop().catch(() => {});
 		}
 
 		if (this.heartbeatTimer) {
@@ -171,6 +176,23 @@ export class ExtensionController {
 
 		if (!hasLiveClients) {
 			this.tunnelManager?.stop();
+		}
+	}
+
+	/**
+	 * Fails closed: when VS Code SecretStorage cannot be reached there is no administrative key
+	 * and no provider credential source, so activation must not continue with an open API.
+	 */
+	private async createSecuritySecrets(): Promise<SecuritySecrets> {
+		try {
+			return await SecuritySecrets.create(this.context.secrets);
+		} catch (error: unknown) {
+			const message = this.formatError(error);
+
+			this.log(`[secrets] secret storage unavailable: ${message}`);
+			void vscode.window.showErrorMessage(`Ungate cannot start: secret storage is unavailable (${message}).`);
+
+			throw error;
 		}
 	}
 

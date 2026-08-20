@@ -8,9 +8,10 @@ export interface OAuthCredentials {
 	accountId?: string | null;
 }
 
+/** Every member is async: credentials live in the extension secret store, one IPC hop away. */
 export interface AIProvider {
 	readonly name: AIProviderName;
-	getAuthHeader(): string | null | Promise<string | null>;
-	isAuthenticated(): boolean;
-	logout(): void;
+	getAuthHeader(): Promise<string | null>;
+	isAuthenticated(): Promise<boolean>;
+	logout(): Promise<void>;
 }

@@ -19,6 +19,21 @@ export type Msg =
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' }
 	| Extract<WebviewToExtension, { type: (typeof MSGS_SIMPLE)[number] }>;
 
+/**
+ * Serialises a value for embedding inside an inline `<script>` element. JSON alone is not enough:
+ * a literal `</script` inside a string would close the element, and U+2028/U+2029 are line
+ * terminators in JavaScript source but legal inside JSON strings. Escaping the three HTML-special
+ * characters and both separators keeps the payload inert no matter what the value contains.
+ */
+export function toInlineScriptJson(value: unknown): string {
+	return JSON.stringify(value ?? null)
+		.replace(/</g, '\\u003c')
+		.replace(/>/g, '\\u003e')
+		.replace(/&/g, '\\u0026')
+		.replace(/\u2028/g, '\\u2028')
+		.replace(/\u2029/g, '\\u2029');
+}
+
 export class Dashboard {
 	private panel: vscode.WebviewPanel | null = null;
 	private readonly apiLogBuffer = new LogRingBuffer(LOG_BUFFER_SIZE);
@@ -30,6 +45,7 @@ export class Dashboard {
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
+		private readonly adminApiKey: string,
 		private readonly onMessage: (message: Msg) => void
 	) {}
 
@@ -247,10 +263,15 @@ export class Dashboard {
 		html = html.replace(/src="\/assets\//g, `src="${assetsUri.toString()}/`);
 		html = html.replace(/href="\/assets\//g, `href="${assetsUri.toString()}/`);
 		html = html.replace('href="/favicon.png"', `href="${faviconUri.toString()}"`);
-		html = html.replace(
-			'</head>',
-			`<script>window.__PORT__ = ${this.currentPort}; window.__TS__ = ${Date.now()};</script>\n\t</head>`
-		);
+
+		const bootstrap =
+			`<script>window.__PORT__ = ${toInlineScriptJson(this.currentPort)}; ` +
+			`window.__ADMIN_KEY__ = ${toInlineScriptJson(this.adminApiKey)}; ` +
+			`window.__TS__ = ${Date.now()};</script>`;
+
+		// The replacement is a function so that `$&`-style patterns inside the injected values
+		// are never interpreted by String.replace.
+		html = html.replace('</head>', () => `${bootstrap}\n\t</head>`);
 
 		return html;
 	}

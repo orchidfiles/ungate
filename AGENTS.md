@@ -27,17 +27,19 @@ Cursor → Cloudflare Tunnel → Ungate API → Provider API. Cursor cannot call
 Fastify server, spawned by the extension as a child Node.js process.
 
 **Entry points:**
-- `/v1/chat/completions` — OpenAI-compatible endpoint, accepts requests from Cursor
-- `/v1/messages` — Anthropic-compatible endpoint (direct proxy)
-- `/v1/analytics` — request statistics
-- `/v1/auth/*` — OAuth routes (Claude, ChatGPT)
-- `/v1/models` — model list
-- `/v1/settings` — settings
+- `/v1/chat/completions` — OpenAI-compatible endpoint, accepts requests from Cursor (proxy key)
+- `/v1/messages` — Anthropic-compatible endpoint (direct proxy, proxy key)
+- `/v1/models` — model list (proxy key)
+- `/v1/analytics` — request statistics (admin key)
+- `/v1/auth/*` — OAuth routes (Claude, ChatGPT) (admin key)
+- `/v1/settings` — settings (admin key)
+- `/health` — the only unauthenticated route; the extension polls it for liveness
 
 **Architecture:**
-- `src/server.ts` — Fastify initialization, plugin registration
-- `src/config.ts` — static configuration (URLs, OAuth, beta parameters)
-- `src/plugins/auth.ts` — preHandler for API-key authentication
+- `src/server.ts` — Fastify initialization, plugin registration. Binds `127.0.0.1` only (`LISTEN_HOST`); the Cloudflare tunnel is the sole remote path in.
+- `src/config.ts` — static configuration (URLs, OAuth, beta parameters). `getConfig` requires `UNGATE_ADMIN_KEY` in the environment and throws without it, so administrative routes can never come up unprotected.
+- `src/plugins/auth.ts` — `apiKeyAuth` (proxy key, `Authorization: Bearer` or `x-api-key`) and `adminKeyAuth` (admin key, `x-ungate-admin-key`). Both compare hashed digests through `timingSafeEqual`, and both fail closed: an absent or blank configured key rejects every request rather than opening the route. Registered as encapsulated `onRequest` hooks inside each route plugin, so a newly added route inherits its plugin's auth instead of defaulting to open.
+- `src/plugins/cors-origin.ts` — CORS origin policy: webview and loopback origins only, never a wildcard, so no web page can drive the dashboard API.
 
 **Routing (`src/routes/`):**
 - `openai.ts` — main router: determines provider by model (MiniMax → mapped → Claude). Branch order matters and must stay consistent.
@@ -84,7 +86,7 @@ Fastify server, spawned by the extension as a child Node.js process.
 
 **Database (`src/database/`):**
 - SQLite via Drizzle ORM + better-sqlite3
-- Tables: `app_settings` (port, apiKey, quiet, extraInstruction), `provider_settings` (per-provider OAuth tokens, refresh tokens, expiry), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget), `requests` (analytics)
+- Tables: `app_settings` (port, apiKey, quiet, extraInstruction), `provider_settings` (per-provider metadata: expiry, email, accountId, baseUrl — the `access_token`/`refresh_token` columns are legacy and always blank), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget), `requests` (analytics)
 - Migrations: `apps/api/drizzle/` — idempotent (`CREATE TABLE IF NOT EXISTS`, `INSERT OR IGNORE`)
 
 **Types (`src/types/`):**
@@ -100,16 +102,23 @@ Fastify server, spawned by the extension as a child Node.js process.
 
 **Auth (`src/auth/`):**
 - OAuth PKCE flow for Anthropic: `startLogin()` generates verifier/challenge, `completeLogin()` exchanges code for tokens. Manual `CODE#STATE` entry required (Anthropic rejects localhost redirect_uri for claude.ai OAuth).
+- Provider methods are async — credentials come from the extension, not the database.
+
+**Security (`src/security/`):**
+- `provider-secrets.ts` — process-wide credential facade over a pluggable transport. Reads deny when no transport is installed, writes throw `SecretStorageUnavailableError`
+- `ipc-secret-transport.ts` — request/response client over the child process IPC channel
+- `credential-channel.ts` — `requireCredentialChannel()`: installs the transport or throws `CredentialChannelMissingError`, then exits the process if the channel is later lost. Called first from `main.ts`, before the legacy migration and before `startServer()`
 
 ## apps/extension — VS Code extension
 
 User entry point. Manages the API server and tunnel lifecycle.
 
-- `extension.ts` — activate/deactivate
-- `extension-controller.ts` — main controller: manages API server, tunnel, WebView dashboard, OpenAI Key Fix, heartbeat, runtime state sync
-- `api-server.ts` — start/stop Node.js API as child process. Production: `cp.spawn(runtime, ['bundle/main.cjs'])`. Dev: `cp.spawn('node', ['-r', 'source-map-support/register', 'dist/main.js'])`. Port detected from stdout via `localhost:(\d+)` regex
+- `extension.ts` — activate/deactivate. `activate` is async: secrets must be readable before anything starts
+- `extension-controller.ts` — main controller: creates `SecuritySecrets`, manages API server, tunnel, WebView dashboard, OpenAI Key Fix, heartbeat, runtime state sync
+- `security-secrets.ts` — owner of the administrative API key (`ungate.admin-api-key`) and provider credentials in VS Code SecretStorage. `create(storage)` mints a 256-bit base64url key on first run; `handleApiChildMessage` answers the API child's credential requests
+- `api-server.ts` — start/stop Node.js API as child process. Production: `cp.spawn(runtime, ['bundle/main.cjs'])`. Dev: `cp.spawn('node', ['-r', 'source-map-support/register', 'dist/main.js'])`. Port detected from stdout via `localhost:(\d+)` regex. Spawned with a fourth `ipc` stdio slot for credential requests and `UNGATE_ADMIN_KEY` in the environment
 - `tunnel-manager.ts` — Cloudflare tunnel (cloudflared) management. Quick tunnel only, no named tunnel config (avoids 404 conflicts). Not auto-started, only on explicit user action. Auto-restarts on port change if already running
-- `dashboard.ts` — WebView dashboard (Svelte UI). Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__`. Handshake: frontend sends `webview-ready` before extension sends initial state
+- `dashboard.ts` — WebView dashboard (Svelte UI). Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__` and `window.__ADMIN_KEY__` via `toInlineScriptJson` (JSON plus `<`/`>`/`&`/U+2028/U+2029 escaping, and a function replacer so `$&` patterns in a value are never expanded). Constructor takes `(context, adminApiKey, onMessage)`. Handshake: frontend sends `webview-ready` before extension sends initial state
 - `extension-status-bar.ts` — status bar (API + tunnel state)
 - `extension-commands.ts` — command registration (openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix)
 - `openai-key-fix.ts` — auto-enable OpenAI API Key in Cursor settings. Uses `aiSettings.usingOpenAIKey.toggle` command. SQLite writes to `state.vscdb` do not work — Cursor does not re-read reactive storage
@@ -118,6 +127,11 @@ User entry point. Manages the API server and tunnel lifecycle.
 **Native dependencies:**
 - better-sqlite3: prebuilt binary downloaded at first run from GitHub Releases matching host Node ABI (not Electron). VSIX ships only JS wrapper + bindings
 - cloudflared: binary downloaded to `~/.ungate/bin/`, managed by tsup bundling
+- sqlite3 CLI: `sqlite-tools` archive from sqlite.org, used only to read Cursor's `state.vscdb`
+- Every download goes through `utils/verified-artifact.ts`: one pinned upstream URL plus a SHA-256 allowlist per platform/arch (and per Node ABI for better-sqlite3). Bytes are hashed while streaming into a staging directory and compared with `timingSafeEqual`; nothing is extracted, copied, chmod-ed or executed before the digest matches, and staging is deleted on failure. Unknown platform/ABI tuples fail closed with an actionable error instead of falling back to a `latest` release
+- Pinned sets: better-sqlite3 12.11.1 for Node ABI 127/137/141/147 (Node 22/24/25/26) on glibc Linux, macOS and Windows; cloudflared 2026.8.2; sqlite-tools 3470200 (upstream publishes only `win-x64`, `linux-x64`, `osx-x64` — macOS arm64 and Linux arm64 must supply their own `sqlite3` on PATH)
+- Every binary Ungate installs carries a `<binary>.sha256` stamp written after verification: `~/.ungate/bin/` for cloudflared and the sqlite3 CLI, and `better_sqlite3.installed.node` in the API's `node_modules`. A managed binary without a matching stamp is treated as unverified — it is never loaded, executed or handed to the API child, and is replaced by a verified install. This retires binaries left behind by pre-pinning Ungate versions and by the `cloudflared` npm helper's `latest` install. The bundled/dev `better_sqlite3.node` binding shipped in the tree is still load-tested, since it is not a download
+- There is no manual drop-in override: on a platform with no pinned artifact the unsupported error says the feature cannot start, rather than pointing at a directory whose unstamped contents would be rejected anyway
 
 **Logs:**
 - Two ring buffers (500 entries each): API (stdout/stderr) and tunnel (stderr)
@@ -139,7 +153,7 @@ Dashboard for managing providers, tunnel, settings.
 
 Types, constants, Zod schemas, helpers.
 
-- `src/types/` — `settings.ts`, `runtime.ts`, `tunnel.ts`, `analytics.ts`, `log.ts`
+- `src/types/` — `settings.ts`, `runtime.ts`, `tunnel.ts`, `analytics.ts`, `log.ts`, `secrets.ts`
 - `src/constants/` — `routes.ts`
 - `src/enums/` — `common.ts`
 - `src/helpers/` — `model-provider.ts`, `provider-labels.ts`, `utils.ts`
@@ -149,7 +163,9 @@ Types, constants, Zod schemas, helpers.
 
 ## Key mechanisms
 
-**Claude OAuth authentication:** acquires token via Anthropic OAuth PKCE flow, stores in SQLite. Refreshes token on 401. Anthropic requires exact request fingerprint: `?beta=true` URL suffix, `User-Agent: claude-cli/2.1.9`, full `x-stainless-*` headers, `anthropic-dangerous-direct-browser-access: true`, three `anthropic-beta` feature flags (oauth, claude-code, interleaved-thinking). Manual `CODE#STATE` entry required — Anthropic does not accept localhost as redirect_uri for claude.ai OAuth.
+**Claude OAuth authentication:** acquires token via Anthropic OAuth PKCE flow, stores the credential in the extension secret store (never SQLite). Refreshes token on 401. Anthropic requires exact request fingerprint: `?beta=true` URL suffix, `User-Agent: claude-cli/2.1.9`, full `x-stainless-*` headers, `anthropic-dangerous-direct-browser-access: true`, three `anthropic-beta` feature flags (oauth, claude-code, interleaved-thinking). Manual `CODE#STATE` entry required — Anthropic does not accept localhost as redirect_uri for claude.ai OAuth.
+
+**Credential storage:** provider access and refresh tokens live in VS Code SecretStorage under `ungate.provider.<provider>`, owned by the extension (`security-secrets.ts`). The API child process asks for them over its IPC channel (`ungate.provider-secret` messages, protocol in `packages/shared/src/types/secrets.ts`); `ProviderSettings` joins that credential with the SQLite metadata row. Every message is validated and correlated by request id; a missing or closed channel fails closed — reads deny, writes throw. `main.ts` refuses to start at all without the channel (`requireCredentialChannel()`), so the API is never up while unable to serve any provider, and the legacy migration never blanks a column it cannot drain. Then `ProviderSettings.migrateLegacySecrets()` moves credentials left in the legacy SQLite columns into the secret store and blanks them. Losing the channel later is equally fatal: the process exits on `disconnect` and the leader window respawns it.
 
 **System prompt conflict:** Claude Code's system prompt describing tools conflicts with Cursor's actual `input_schema`. The prompt must be minimal (just identity) and delegate tool shape to `input_schema`. The `extraInstruction` field in `app_settings` reinforces this priority. Full removal breaks API contract (empty blocks error), long prompts cause `invalid arguments` on large plans.
 
