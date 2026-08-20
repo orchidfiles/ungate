@@ -4,6 +4,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 const DEFAULT_NODE_COMMAND = 'node';
+// Node ABI 127 = Node 22, 137 = Node 24, 141 = Node 25, 147 = Node 26
+// (nodejs/node abi_version_registry). Anything else cannot load our native bindings.
+const SUPPORTED_NODE_ABIS: Record<string, true> = { '127': true, '137': true, '141': true, '147': true };
+const SUPPORTED_NODE_VERSIONS = '22, 24, 25 or 26';
 
 interface RuntimeInfo {
 	abi: string;
@@ -14,18 +18,24 @@ interface RuntimeInfo {
 export class NodeResolver {
 	static resolve(overridePath?: string): string {
 		if (overridePath) {
-			return overridePath;
+			if (this.isSupported(overridePath)) {
+				return overridePath;
+			}
+
+			throw new Error(`[native] UNGATE_NODE_BIN must point to Node ${SUPPORTED_NODE_VERSIONS}: ${overridePath}`);
 		}
 
 		const candidates = this.getCandidates();
 
 		for (const candidate of candidates) {
-			if (this.isUsable(candidate)) {
+			if (this.isSupported(candidate)) {
 				return candidate;
 			}
 		}
 
-		return DEFAULT_NODE_COMMAND;
+		throw new Error(
+			`[native] No supported Node runtime found. Install Node ${SUPPORTED_NODE_VERSIONS}, or set UNGATE_NODE_BIN to one.`
+		);
 	}
 
 	static inspect(runtime: string): RuntimeInfo {
@@ -92,6 +102,7 @@ export class NodeResolver {
 		this.push(candidates, seen, path.join(homeDir, '.volta', 'bin', binaryName));
 		this.push(candidates, seen, path.join(homeDir, '.asdf', 'shims', binaryName));
 		this.pushFromDir(candidates, seen, path.join(homeDir, '.nvm', 'versions', 'node'), binaryName);
+		this.pushFromDir(candidates, seen, path.join(homeDir, '.asdf', 'installs', 'nodejs'), binaryName);
 
 		return candidates;
 	}
@@ -121,9 +132,11 @@ export class NodeResolver {
 		}
 	}
 
-	private static isUsable(candidate: string): boolean {
-		const result = cp.spawnSync(candidate, ['-v'], { encoding: 'utf8' });
-
-		return !result.error && result.status === 0;
+	private static isSupported(candidate: string): boolean {
+		try {
+			return SUPPORTED_NODE_ABIS[this.inspect(candidate).abi] === true;
+		} catch {
+			return false;
+		}
 	}
 }
