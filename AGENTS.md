@@ -118,6 +118,11 @@ User entry point. Manages the API server and tunnel lifecycle.
 **Native dependencies:**
 - better-sqlite3: prebuilt binary downloaded at first run from GitHub Releases matching host Node ABI (not Electron). VSIX ships only JS wrapper + bindings
 - cloudflared: binary downloaded to `~/.ungate/bin/`, managed by tsup bundling
+- sqlite3 CLI: `sqlite-tools` archive from sqlite.org, used only to read Cursor's `state.vscdb`
+- Every download goes through `utils/verified-artifact.ts`: one pinned upstream URL plus a SHA-256 allowlist per platform/arch (and per Node ABI for better-sqlite3). Bytes are hashed while streaming into a staging directory and compared with `timingSafeEqual`; nothing is extracted, copied, chmod-ed or executed before the digest matches, and staging is deleted on failure. Unknown platform/ABI tuples fail closed with an actionable error instead of falling back to a `latest` release
+- Pinned sets: better-sqlite3 12.11.1 for Node ABI 127/137/141/147 (Node 22/24/25/26) on glibc Linux, macOS and Windows; cloudflared 2026.8.2; sqlite-tools 3470200 (upstream publishes only `win-x64`, `linux-x64`, `osx-x64` — macOS arm64 and Linux arm64 must supply their own `sqlite3` on PATH)
+- Every binary Ungate installs carries a `<binary>.sha256` stamp written after verification: `~/.ungate/bin/` for cloudflared and the sqlite3 CLI, and `better_sqlite3.installed.node` in the API's `node_modules`. A managed binary without a matching stamp is treated as unverified — it is never loaded, executed or handed to the API child, and is replaced by a verified install. This retires binaries left behind by pre-pinning Ungate versions and by the `cloudflared` npm helper's `latest` install. The bundled/dev `better_sqlite3.node` binding shipped in the tree is still load-tested, since it is not a download
+- There is no manual drop-in override: on a platform with no pinned artifact the unsupported error says the feature cannot start, rather than pointing at a directory whose unstamped contents would be rejected anyway
 
 **Logs:**
 - Two ring buffers (500 entries each): API (stdout/stderr) and tunnel (stderr)

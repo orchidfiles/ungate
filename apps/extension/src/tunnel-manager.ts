@@ -2,10 +2,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { bin, install, use, Tunnel } from 'cloudflared';
+import { bin, use, Tunnel } from 'cloudflared';
 
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
+import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
 
 import type { LogEntry, TunnelState } from '@ungate/shared/frontend';
 
@@ -84,12 +85,11 @@ export class TunnelManager {
 	}
 
 	private async ensureBinary(): Promise<void> {
-		const devBinExists = fs.existsSync(bin);
-		const userBinPath = this.resolveUserBinaryPath();
-
-		if (devBinExists) {
+		if (fs.existsSync(bin)) {
 			return;
 		}
+
+		const userBinPath = this.resolveUserBinaryPath();
 
 		if (userBinPath) {
 			use(userBinPath);
@@ -98,15 +98,17 @@ export class TunnelManager {
 		}
 
 		this.setState({ status: 'installing', url: null, error: null });
-		this.onLog({ timestamp: Date.now(), level: 'info', message: 'Downloading cloudflared binary...' });
+		this.onLog({ timestamp: Date.now(), level: 'info', message: `Downloading cloudflared ${CLOUDFLARED_VERSION}...` });
 
 		try {
-			fs.mkdirSync(CLOUDFLARED_BIN_DIR, { recursive: true });
-			const installPath = getCloudflaredBinPath();
-			const installedPath = await install(installPath);
+			const installedPath = await CloudflaredInstaller.install(getCloudflaredBinPath());
 
 			use(installedPath);
-			this.onLog({ timestamp: Date.now(), level: 'info', message: 'cloudflared installed successfully' });
+			this.onLog({
+				timestamp: Date.now(),
+				level: 'info',
+				message: `cloudflared ${CLOUDFLARED_VERSION} installed and checksum-verified`
+			});
 			this.setState({ status: 'starting', url: null, error: null });
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -115,18 +117,20 @@ export class TunnelManager {
 		}
 	}
 
+	/**
+	 * Returns a managed `~/.ungate/bin` binary only when it came from the pinned
+	 * release. Binaries from an earlier unverified `latest` install are ignored so
+	 * they get replaced by a checksum-verified one instead of being executed.
+	 */
 	private resolveUserBinaryPath(): string | null {
 		const binPath = getCloudflaredBinPath();
-
-		if (fs.existsSync(binPath)) {
-			return binPath;
-		}
-
 		const legacyPath = getCloudflaredLegacyBinPath();
 
-		if (process.platform === 'win32' && fs.existsSync(legacyPath)) {
+		if (process.platform === 'win32' && !fs.existsSync(binPath) && fs.existsSync(legacyPath)) {
 			fs.renameSync(legacyPath, binPath);
+		}
 
+		if (CloudflaredInstaller.isPinnedInstall(binPath)) {
 			return binPath;
 		}
 

@@ -28,8 +28,27 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 import { Sqlite3CliResolver } from '../../src/utils/sqlite3-cli-resolver';
+import { InstallStamp, VerifiedArtifact, type PinnedArtifact } from '../../src/utils/verified-artifact';
+
+const LINUX_X64_SHA256 = '9043648ac1186308c212c82d32327f0f1351fdf9dfb56a2a58bcf9bc947e3f90';
+const LINUX_X64_URL = 'https://www.sqlite.org/2024/sqlite-tools-linux-x64-3470200.zip';
+
+function forceHost(platform: string, arch: string): void {
+	Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+	Object.defineProperty(process, 'arch', { value: arch, configurable: true });
+}
+
+/** `which sqlite3` misses, so the resolver has to decide between a pinned download and failing closed. */
+function mockEmptyPath(): void {
+	mocks.execFileMock.mockImplementation((command: string, _args: string[], callback: (error: Error | null) => void) => {
+		callback(new Error(`not found: ${command}`));
+	});
+}
 
 describe('Sqlite3CliResolver', () => {
+	const originalPlatform = process.platform;
+	const originalArch = process.arch;
+
 	beforeEach(() => {
 		mocks.execFileMock.mockReset();
 		mocks.existsSyncMock.mockReset();
@@ -38,18 +57,45 @@ describe('Sqlite3CliResolver', () => {
 	});
 
 	afterEach(() => {
+		forceHost(originalPlatform, originalArch);
 		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
 	});
 
-	it('returns the bundled install path when it already exists', async () => {
-		mocks.existsSyncMock.mockImplementation(
-			(target) => String(target).endsWith('sqlite3.exe') || String(target).endsWith('/sqlite3')
-		);
+	it('returns the bundled install path when it was installed from the pinned archive', async () => {
+		forceHost('linux', 'x64');
+		mocks.existsSyncMock.mockImplementation((target) => String(target) === Sqlite3CliResolver.getInstalledPath());
+		vi.spyOn(InstallStamp, 'matches').mockReturnValue(true);
 
 		const resolved = await Sqlite3CliResolver.resolve();
 
 		expect(resolved).toBe(Sqlite3CliResolver.getInstalledPath());
 		expect(mocks.execFileMock).not.toHaveBeenCalled();
+	});
+
+	it('ignores an existing binary that carries no pinned checksum stamp', async () => {
+		forceHost('linux', 'x64');
+		mocks.existsSyncMock.mockImplementation((target) => {
+			const value = String(target);
+
+			return value === Sqlite3CliResolver.getInstalledPath() || value === '/usr/bin/sqlite3';
+		});
+		mocks.execFileMock.mockImplementation(
+			(command: string, args: string[], callback: (error: Error | null, result?: { stdout: string }) => void) => {
+				if (command === 'which' && args[0] === 'sqlite3') {
+					callback(null, { stdout: '/usr/bin/sqlite3\n' });
+
+					return;
+				}
+
+				callback(new Error('not found'));
+			}
+		);
+
+		const resolved = await Sqlite3CliResolver.resolve();
+
+		expect(resolved).toBe('/usr/bin/sqlite3');
+		expect(mocks.fetchMock).not.toHaveBeenCalled();
 	});
 
 	it('falls back to sqlite3 from PATH before downloading', async () => {
@@ -73,9 +119,7 @@ describe('Sqlite3CliResolver', () => {
 	});
 
 	it('uses where.exe on win32 when searching PATH', async () => {
-		const originalPlatform = process.platform;
-
-		Object.defineProperty(process, 'platform', { value: 'win32' });
+		forceHost('win32', 'x64');
 		mocks.existsSyncMock.mockImplementation((target) => String(target) === 'C:\\Tools\\sqlite3.exe');
 		mocks.execFileMock.mockImplementation(
 			(command: string, args: string[], callback: (error: Error | null, result: { stdout: string }) => void) => {
@@ -91,12 +135,12 @@ describe('Sqlite3CliResolver', () => {
 
 		const resolved = await Sqlite3CliResolver.resolve();
 
-		Object.defineProperty(process, 'platform', { value: originalPlatform });
-
 		expect(resolved).toBe('C:\\Tools\\sqlite3.exe');
 	});
 
-	it('downloads sqlite3 into ~/.ungate/bin when nothing is available locally', async () => {
+	it('downloads the pinned archive into ~/.ungate/bin when nothing is available locally', async () => {
+		forceHost('linux', 'x64');
+
 		const installedPath = Sqlite3CliResolver.getInstalledPath();
 
 		mocks.existsSyncMock.mockImplementation((target) => {
@@ -106,35 +150,67 @@ describe('Sqlite3CliResolver', () => {
 		});
 		mocks.execFileMock.mockImplementation(
 			(command: string, args: string[], callback: (error: Error | null, result?: { stdout: string }) => void) => {
-				if (command === 'which') {
-					callback(new Error('not found'));
-
-					return;
-				}
-
 				if (command === 'unzip') {
 					const destDir = args[args.indexOf('-d') + 1];
 
 					fs.mkdirSync(destDir, { recursive: true });
-					fs.writeFileSync(path.join(destDir, Sqlite3CliResolver.getBinaryName()), '');
+					fs.writeFileSync(path.join(destDir, 'sqlite3'), '');
 					callback(null);
 
 					return;
 				}
 
-				callback(new Error(`unexpected command: ${command}`));
+				callback(new Error(`not found: ${command}`));
 			}
 		);
-		mocks.fetchMock.mockResolvedValue({
-			ok: true,
-			arrayBuffer: () => Promise.resolve(new Uint8Array([0x50, 0x4b, 0x03, 0x04]).buffer)
-		});
+
+		const downloadSpy = vi
+			.spyOn(VerifiedArtifact, 'download')
+			.mockImplementation((_artifact: PinnedArtifact, destPath: string) => {
+				fs.mkdirSync(path.dirname(destPath), { recursive: true });
+				fs.writeFileSync(destPath, 'verified-zip');
+
+				return Promise.resolve();
+			});
 
 		const resolved = await Sqlite3CliResolver.resolve();
+		const artifact = downloadSpy.mock.calls[0]?.[0];
 
 		fs.rmSync(installedPath, { force: true });
+		fs.rmSync(`${installedPath}.sha256`, { force: true });
 
 		expect(resolved).toBe(installedPath);
-		expect(mocks.fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/www\.sqlite\.org\/\d{4}\/sqlite-tools-/));
+		expect(artifact?.url).toBe(LINUX_X64_URL);
+		expect(artifact?.sha256).toBe(LINUX_X64_SHA256);
+	});
+
+	it('rejects a tampered archive before extraction and installs nothing', async () => {
+		forceHost('linux', 'x64');
+		mocks.existsSyncMock.mockReturnValue(false);
+		mockEmptyPath();
+		mocks.fetchMock.mockResolvedValue(new Response('tampered-sqlite-tools-zip'));
+
+		const logs: string[] = [];
+		const resolved = await Sqlite3CliResolver.resolve((message) => logs.push(message));
+
+		expect(resolved).toBeNull();
+		expect(logs.join('\n')).toMatch(/Checksum mismatch/);
+		expect(mocks.execFileMock.mock.calls.some(([command]) => command === 'unzip')).toBe(false);
+	});
+
+	it('fails closed with an actionable message where upstream publishes no archive', async () => {
+		forceHost('darwin', 'arm64');
+		mocks.existsSyncMock.mockReturnValue(false);
+		mockEmptyPath();
+
+		const logs: string[] = [];
+		const resolved = await Sqlite3CliResolver.resolve((message) => logs.push(message));
+		const log = logs.join('\n');
+
+		expect(resolved).toBeNull();
+		expect(log).toContain('no pinned, checksum-verified artifact for darwin-arm64');
+		expect(log).toContain('darwin-x64, linux-x64, win32-x64');
+		expect(log).toContain('brew install sqlite');
+		expect(mocks.fetchMock).not.toHaveBeenCalled();
 	});
 });
