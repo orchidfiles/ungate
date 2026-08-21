@@ -200,10 +200,10 @@ describe('ApiServer.runHealthCheckCycle', () => {
 			return {
 				error: undefined,
 				status: 0,
-				stdout: 'v24.0.0\n',
+				stdout: '{"abi":"137","platform":"darwin","arch":"arm64"}',
 				stderr: '',
 				pid: 1,
-				output: [null, 'v24.0.0\n', ''],
+				output: [null, '{"abi":"137","platform":"darwin","arch":"arm64"}', ''],
 				signal: null
 			};
 		});
