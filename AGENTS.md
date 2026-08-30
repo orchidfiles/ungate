@@ -2,7 +2,9 @@
 
 ## Purpose
 
-Ungate is a Cursor extension that lets you use Claude, ChatGPT, and MiniMax subscriptions instead of paying for API tokens. It consists of a VS Code extension, a local HTTP proxy (Fastify), a Svelte WebUI, and a shared types/constants library.
+Ungate is a Cursor extension that lets you use Claude, ChatGPT, and MiniMax subscriptions instead of paying for API tokens. It consists of a VS Code extension, a local HTTP proxy (Fastify), a Svelte WebUI, and a shared types/constants library. The primary user value is using a subscription through Cursor's native chat, not exposing a generic proxy for arbitrary providers.
+
+Scope: one monorepo with the extension, proxy, and web UI. Tunnel integration is part of the product because Cursor cannot reach `localhost` from its backend. Hosted deployment, custom domains, and external key-management infrastructure are out of scope.
 
 ## Monorepo (pnpm workspace)
 
@@ -24,7 +26,7 @@ Cursor → Cloudflare Tunnel → Ungate API → Provider API. Cursor cannot call
 
 ## apps/api — proxy server
 
-Fastify server, spawned by the extension as a child Node.js process.
+Fastify v5 server, spawned by the extension as a child Node.js process. CORS is handled globally via `@fastify/cors`. Both the extension and the API are bundled with `tsup` (CJS) — production entry point is `bundle/main.cjs`, dev entry point is `dist/main.js`.
 
 **Entry points:**
 - `/v1/chat/completions` — OpenAI-compatible endpoint, accepts requests from Cursor
@@ -85,7 +87,9 @@ Fastify server, spawned by the extension as a child Node.js process.
 **Database (`src/database/`):**
 - SQLite via Drizzle ORM + better-sqlite3
 - Tables: `app_settings` (port, apiKey, quiet, extraInstruction), `provider_settings` (per-provider OAuth tokens, refresh tokens, expiry), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget), `requests` (analytics)
-- Migrations: `apps/api/drizzle/` — idempotent (`CREATE TABLE IF NOT EXISTS`, `INSERT OR IGNORE`)
+- Migrations: `apps/api/drizzle/` — idempotent (`CREATE TABLE IF NOT EXISTS`, `INSERT OR IGNORE`). Generated with `pnpm drizzle-kit generate --name <index>` (config: `prefix: 'none'`); files are named `_0000.sql`, `_0001.sql`, …
+- Model registry: `model_mappings` is the single source of truth for model routing. Default models are seeded by migration `_0002.sql` only — there are no runtime defaults in code.
+- Databases on disk: `~/.ungate/data.db` (production default) and `~/.ungate/data-dev.db` (used when `DB_PATH=$HOME/.ungate/data-dev.db` is set in dev). Always verify which database the running API process is using before debugging analytics or auth.
 
 **Types (`src/types/`):**
 - `openai.ts`, `anthropic.ts`, `anthropic-stream.ts`, `proxy.ts`, `auth.ts`
@@ -156,7 +160,7 @@ Types, constants, Zod schemas, helpers.
 
 **Claude OAuth authentication:** acquires token via Anthropic OAuth PKCE flow, stores in SQLite. Refreshes token on 401. Anthropic requires exact request fingerprint: `?beta=true` URL suffix, `User-Agent: claude-cli/2.1.9`, full `x-stainless-*` headers, `anthropic-dangerous-direct-browser-access: true`, three `anthropic-beta` feature flags (oauth, claude-code, interleaved-thinking). Manual `CODE#STATE` entry required — Anthropic does not accept localhost as redirect_uri for claude.ai OAuth.
 
-**System prompt conflict:** Claude Code's system prompt describing tools conflicts with Cursor's actual `input_schema`. The prompt must be minimal (just identity) and delegate tool shape to `input_schema`. The `extraInstruction` field in `app_settings` reinforces this priority. Full removal breaks API contract (empty blocks error), long prompts cause `invalid arguments` on large plans.
+**System prompt conflict:** Claude Code's system prompt describing tools conflicts with Cursor's actual `input_schema`. The prompt must be minimal — identity only — and delegate tool shape to `input_schema`. The `extraInstruction` field in `app_settings` reinforces this priority. Full removal breaks API contract (empty blocks error), long prompts cause `invalid arguments` on large plans.
 
 **Tool mapping:** Cursor tool names (Shell, LS, StrReplace) are mapped to Claude Code names (Bash, Glob, Edit) on outbound requests and reverse-mapped in responses. Required for Anthropic OAuth whitelist — Anthropic validates tool names server-side and only allows standard Claude Code names. Mapping covers: Bash↔Shell, Read↔Read, Write↔Write, Edit↔StrReplace, Edit↔Delete, Glob↔LS, Grep↔Grep, WebFetch↔WebFetch, WebSearch↔WebSearch.
 
@@ -169,3 +173,5 @@ Types, constants, Zod schemas, helpers.
 **MiniMax reasoning:** MiniMax M2.7 streams `<think>`/`</think>` tags as reasoning content. Split tags across chunks are reassembled via `pendingTag` state in `minimax-stream-handler.ts`. Cursor renders this as collapsed "Planning next moves" (non-expandable). Non-streaming responses use `【 Reasoning: ... 】` / `<output>` format (separate parser, not yet implemented).
 
 **Cursor architectural constraint:** Requests go through Cursor backend (`api2.cursor.sh`), not from the local machine. This means localhost never works as OpenAI Base URL — a public tunnel is always required. Cursor 3.0 regression: built-in model names can bypass the custom base URL entirely, requiring custom model IDs from Ungate's model registry.
+
+**Reasoning budget tiers:** `null` (no extended thinking), `medium`, `high`. Default model IDs use the base name (e.g. `sonnet-4.6`); extended-reasoning variants use `-medium` and `-high` suffixes (e.g. `sonnet-4.6-medium`, `sonnet-4.6-high`). The tier is encoded in the model ID; Cursor strips the suffix when forwarding, so the tier must be recovered from the suffix before the request is sent upstream.
