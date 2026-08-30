@@ -101,7 +101,7 @@ Reports we cannot classify land in **Low** and may not receive a fix if there is
 
 ## Known limitations (non-vulnerabilities)
 
-These are documented in `README.md` and listed here so they are not reported as bugs:
+These are documented in [README.md](README.md) and listed here so they are not reported as bugs:
 
 - **Built-in Cursor model IDs bypass the custom base URL.** Ungate can only route model IDs that the user has added as custom models in Cursor.
 - **`localhost` does not work as `OpenAI Base URL`.** Cursor's backend cannot reach it. A public tunnel is required.

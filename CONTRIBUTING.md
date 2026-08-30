@@ -95,7 +95,7 @@ Linting is automatic via ESLint and Prettier configs in `packages/dev-kit`. Pre-
 ## Community and license
 
 - **Bugs and feature requests:** [GitHub Issues](https://github.com/orchidfiles/ungate/issues). Use the bug/feature templates.
-- **Security issues:** see `SECURITY.md` for private vulnerability reporting.
-- **Anything else:** `orchid@orchidfiles.com`. For other channels, see [orchidfiles.com](https://orchidfiles.com).
+- **Security issues:** see [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+- **Questions, setup help, anything else:** see [SUPPORT.md](SUPPORT.md).
 
 By contributing, you agree that your contributions are licensed under the MIT License (see `LICENSE`).
