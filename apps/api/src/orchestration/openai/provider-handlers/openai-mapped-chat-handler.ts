@@ -13,7 +13,7 @@ export class OpenAiMappedChatHandler {
 		reply: FastifyReply
 	): Promise<FastifyReply> {
 		const upstreamBody = CompletionModelRouting.buildOpenAiUpstreamBody(openaiBody, resolvedModel);
-		const { response, context } = await proxyOpenAIRequest(upstreamBody, 'openai');
+		const { response, context } = await proxyOpenAIRequest(upstreamBody, resolvedModel.provider);
 
 		if (!response.ok) {
 			const errorMessage = await CompletionErrorMapper.openAiUpstreamErrorMessage(response);

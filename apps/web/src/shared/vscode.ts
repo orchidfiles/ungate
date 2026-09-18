@@ -23,7 +23,7 @@ const vscodeApi = (
 ).acquireVsCodeApi?.();
 
 const dashboardPages: DashboardPage[] = ['analytics', 'settings', 'logs'];
-const modelMappingProviders: ModelMappingProvider[] = ['claude', 'minimax', 'openai'];
+const modelMappingProviders: ModelMappingProvider[] = ['bedrock', 'claude', 'minimax', 'openai'];
 
 function readWebviewState(): WebviewState {
 	const state = vscodeApi?.getState();

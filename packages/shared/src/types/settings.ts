@@ -1,9 +1,9 @@
 export type ReasoningBudgetTier = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-export type ModelMappingProvider = 'claude' | 'minimax' | 'openai';
+export type ModelMappingProvider = 'bedrock' | 'claude' | 'minimax' | 'openai';
 export type ModelServiceTier = 'default' | 'priority';
 
-export const MODEL_MAPPING_PROVIDERS = ['claude', 'minimax', 'openai'] as const;
+export const MODEL_MAPPING_PROVIDERS = ['bedrock', 'claude', 'minimax', 'openai'] as const;
 export const MODEL_SERVICE_TIERS = ['default', 'priority'] as const;
 export const REASONING_BUDGET_TIERS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 

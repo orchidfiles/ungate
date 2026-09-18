@@ -6,6 +6,40 @@ import { ProviderSettings } from '../database/provider-settings';
 import type { FastifyPluginCallback } from 'fastify';
 
 const plugin: FastifyPluginCallback = (app) => {
+	app.get('/auth/bedrock/status', (_request, reply) => {
+		const creds = ProviderSettings.get('bedrock');
+		const region = creds?.baseUrl?.match(/^https:\/\/bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com\/openai\/v1$/)?.[1];
+
+		return reply.send({ authenticated: !!creds?.accessToken, region: region ?? 'us-east-1' });
+	});
+
+	app.post('/auth/bedrock/login', async (request, reply) => {
+		const { apiKey, region } = request.body as { apiKey?: string; region?: string };
+		const normalizedRegion = region?.trim() ?? '';
+
+		if (!apiKey?.trim()) {
+			return reply.code(400).send({ ok: false, error: 'Bedrock API key is required' });
+		}
+
+		if (!/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/.test(normalizedRegion)) {
+			return reply.code(400).send({ ok: false, error: 'A valid AWS Region is required' });
+		}
+
+		ProviderSettings.upsertApiKey(
+			'bedrock',
+			apiKey.trim(),
+			`https://bedrock-runtime.${normalizedRegion}.amazonaws.com/openai/v1`
+		);
+
+		return reply.send({ ok: true });
+	});
+
+	app.post('/auth/bedrock/logout', (_request, reply) => {
+		ProviderSettings.remove('bedrock');
+
+		return reply.send({ ok: true });
+	});
+
 	app.post('/auth/claude/start', async (_request, reply) => {
 		const result = await OAuth.startLogin();
 

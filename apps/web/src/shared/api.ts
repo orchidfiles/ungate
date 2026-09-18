@@ -137,6 +137,18 @@ export class Api {
 		return this.post('/auth/claude/logout');
 	}
 
+	static authBedrockStatus(): Promise<{ authenticated: boolean; region: string }> {
+		return this.get('/auth/bedrock/status');
+	}
+
+	static authBedrockLogin(apiKey: string, region: string): Promise<{ ok: boolean; error?: string }> {
+		return this.post('/auth/bedrock/login', { apiKey, region });
+	}
+
+	static authBedrockLogout(): Promise<{ ok: boolean }> {
+		return this.post('/auth/bedrock/logout');
+	}
+
 	static authMinimaxStatus(): Promise<{ authenticated: boolean; baseUrl?: string }> {
 		return this.get('/auth/minimax/status');
 	}

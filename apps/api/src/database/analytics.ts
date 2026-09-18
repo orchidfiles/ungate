@@ -15,6 +15,7 @@ export class Analytics {
 		const totals = db
 			.select({
 				totalRequests: sql<number>`COUNT(*)`,
+				bedrockRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'bedrock' THEN 1 ELSE 0 END)`,
 				claudeRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'claude' THEN 1 ELSE 0 END)`,
 				minimaxRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'minimax' THEN 1 ELSE 0 END)`,
 				openaiRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'openai' THEN 1 ELSE 0 END)`,
@@ -28,6 +29,7 @@ export class Analytics {
 
 		return {
 			totalRequests: totals?.totalRequests ?? 0,
+			bedrockRequests: totals?.bedrockRequests ?? 0,
 			claudeRequests: totals?.claudeRequests ?? 0,
 			minimaxRequests: totals?.minimaxRequests ?? 0,
 			openaiRequests: totals?.openaiRequests ?? 0,

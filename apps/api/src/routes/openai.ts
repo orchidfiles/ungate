@@ -20,7 +20,7 @@ const plugin: FastifyPluginCallback = (app) => {
 				return MiniMaxChatHandler.handle(openaiBody, resolvedModel, reply);
 			}
 
-			if (CompletionModelRouting.isOpenAiMapped(resolvedModel)) {
+			if (CompletionModelRouting.isResponsesMapped(resolvedModel)) {
 				return OpenAiMappedChatHandler.handle(openaiBody, resolvedModel, reply);
 			}
 

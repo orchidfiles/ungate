@@ -3,6 +3,7 @@ import IconCheck from 'virtual:icons/lucide/check';
 import IconLoader from 'virtual:icons/lucide/loader-circle';
 import IconX from 'virtual:icons/lucide/x';
 
+import BedrockAuthSection from '../auth/BedrockAuthSection.svelte';
 import ChatGPTAuthSection from '../auth/ChatGPTAuthSection.svelte';
 import ClaudeAuthSection from '../auth/ClaudeAuthSection.svelte';
 import MiniMaxAuthSection from '../auth/MiniMaxAuthSection.svelte';
@@ -12,7 +13,7 @@ import { getSettingsUiStore, ProviderAuthState } from './settings-ui-store.svelt
 import type { ModelMappingProvider } from '@ungate/shared/frontend';
 
 const uiStore = getSettingsUiStore();
-const providerTabs: ModelMappingProvider[] = ['claude', 'minimax', 'openai'];
+const providerTabs: ModelMappingProvider[] = ['claude', 'openai', 'bedrock', 'minimax'];
 
 const authStatusTitle: Record<ProviderAuthState, string> = {
 	[ProviderAuthState.Authorized]: 'Authorized',
@@ -67,6 +68,8 @@ function handleAuthStatusChange(): void {
 		<ClaudeAuthSection onAuthStatusChange={handleAuthStatusChange} />
 	{:else if uiStore.selectedProvider === 'openai'}
 		<ChatGPTAuthSection onAuthStatusChange={handleAuthStatusChange} />
+	{:else if uiStore.selectedProvider === 'bedrock'}
+		<BedrockAuthSection onAuthStatusChange={handleAuthStatusChange} />
 	{:else}
 		<MiniMaxAuthSection onAuthStatusChange={handleAuthStatusChange} />
 	{/if}

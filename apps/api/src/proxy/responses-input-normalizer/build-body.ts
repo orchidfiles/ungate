@@ -14,7 +14,9 @@ export class ResponsesBodyBuilder {
 		options: BuildResponsesBodyOptions
 	): BuildResponsesBodyResult {
 		const messages = CodexInputUtils.coerceMessages(body);
-		const resolvedModel = ResponsesModelResolver.resolveModel(requestedModel);
+		const resolvedModel = options.preserveModelId
+			? { model: requestedModel }
+			: ResponsesModelResolver.resolveModel(requestedModel);
 		let reasoningEffort = body.reasoning?.effort ?? body.reasoning_effort ?? resolvedModel.reasoningEffort;
 
 		// Astra requires at least low reasoning, including when Cursor requests none.

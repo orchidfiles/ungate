@@ -160,6 +160,7 @@ export interface ProviderOption {
 
 const PROVIDER_OPTIONS: ProviderOption[] = [
 	{ value: 'all', label: 'All Providers' },
+	{ value: 'bedrock', label: getProviderLabel('bedrock') },
 	{ value: 'claude', label: getProviderLabel('claude') },
 	{ value: 'openai', label: getProviderLabel('openai') },
 	{ value: 'minimax', label: getProviderLabel('minimax') }

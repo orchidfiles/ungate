@@ -3,6 +3,10 @@ import { type RequestSource, type ModelMappingProvider } from '../types';
 export function detectProviderByModel(model: string): ModelMappingProvider {
 	const normalized = model.trim().toLowerCase();
 
+	if (normalized.startsWith('us.openai.') || normalized.startsWith('global.openai.')) {
+		return 'bedrock';
+	}
+
 	if (normalized.startsWith('gpt') || normalized.startsWith('o1') || normalized.startsWith('o3') || normalized.startsWith('o4')) {
 		return 'openai';
 	}
@@ -15,6 +19,10 @@ export function detectProviderByModel(model: string): ModelMappingProvider {
 }
 
 export function detectProviderBySource(source: RequestSource): ModelMappingProvider | null {
+	if (source === 'bedrock') {
+		return 'bedrock';
+	}
+
 	if (source === 'openai') {
 		return 'openai';
 	}

@@ -129,6 +129,7 @@ describe('routes: health/settings/models/analytics', () => {
 	it('analytics supports period, limit clamp and reset', async () => {
 		analyticsSummaryMock.mockReturnValueOnce({
 			totalRequests: 1,
+			bedrockRequests: 0,
 			claudeRequests: 1,
 			minimaxRequests: 0,
 			openaiRequests: 0,

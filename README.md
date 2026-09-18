@@ -16,7 +16,7 @@
 
 ## How it works
 
-Ungate lets you use Claude, ChatGPT, and MiniMax in Cursor through account subscriptions instead of direct API token billing. Claude and ChatGPT authenticate via OAuth; MiniMax uses provider API credentials.
+Ungate lets you use Claude, ChatGPT, MiniMax, and OpenAI models on Amazon Bedrock in Cursor. Claude and ChatGPT authenticate via OAuth; MiniMax and Bedrock use provider API credentials.
 
 Cursor allows a custom OpenAI Base URL. Ungate listens on that URL and translates requests to the target provider API, including streaming, tool calls, and vision where supported.
 
@@ -63,14 +63,14 @@ sequenceDiagram
 
 ## Provider support
 
-| Capability | Claude | OpenAI | MiniMax |
-| --- | --- | --- | --- |
-| Authentication | OAuth | OAuth | API key |
-| Streaming | Yes | Yes | Yes |
-| Tool calls | Yes | Yes | Yes |
-| Vision | Yes | No | Yes |
-| Reasoning tiers | Yes | No | No |
-| Analytics | Yes | Yes | Yes |
+| Capability | Claude | OpenAI | Amazon Bedrock | MiniMax |
+| --- | --- | --- | --- | --- |
+| Authentication | OAuth | OAuth | Bedrock API key | API key |
+| Streaming | Yes | Yes | Yes | Yes |
+| Tool calls | Yes | Yes | Yes | Yes |
+| Vision | Yes | No | Yes | Yes |
+| Reasoning tiers | Yes | No | Yes | No |
+| Analytics | Yes | Yes | Yes | Yes |
 
 ## Prerequisites
 
