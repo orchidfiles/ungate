@@ -1,4 +1,4 @@
-export type AIProviderName = 'claude' | 'minimax' | 'openai';
+export type AIProviderName = 'bedrock' | 'claude' | 'minimax' | 'openai';
 
 export interface OAuthCredentials {
 	accessToken: string;

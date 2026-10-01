@@ -7,6 +7,7 @@ const limits = [20, 50, 100];
 const store = getAnalyticsStore();
 
 const sourceClasses: Record<string, string> = {
+	bedrock: 'preset-filled-primary-500',
 	claude: 'preset-filled-success-500',
 	minimax: 'preset-filled-warning-500',
 	error: 'preset-filled-error-500'

@@ -167,6 +167,44 @@ describe('routes-openai', () => {
 		await app.close();
 	});
 
+	it('routes a Bedrock mapping through the Responses provider', async () => {
+		resolveForChatCompletionMock.mockReturnValueOnce({
+			provider: 'bedrock',
+			upstreamModel: 'us.openai.gpt-6-astra',
+			reasoningBudget: 'medium',
+			serviceTier: null
+		});
+		proxyOpenAIRequestMock.mockResolvedValueOnce({
+			response: new Response(JSON.stringify({ choices: [{ message: { content: 'done' } }] }), { status: 200 }),
+			context: {
+				startTime: Date.now(),
+				model: 'us.openai.gpt-6-astra',
+				source: 'bedrock',
+				reverseToolMapping: {},
+				inputTokens: 3,
+				outputTokens: 4
+			}
+		});
+
+		const app = await withPlugin(openaiPlugin, { apiKey: 'secret' });
+		const response = await app.inject({
+			method: 'POST',
+			url: '/v1/chat/completions',
+			headers: { 'x-api-key': 'secret' },
+			payload: { model: 'us.openai.gpt-6-astra', messages: [{ role: 'user', content: 'hi' }], stream: false }
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(proxyOpenAIRequestMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: 'us.openai.gpt-6-astra',
+				reasoning: { effort: 'medium' }
+			}),
+			'bedrock'
+		);
+		await app.close();
+	});
+
 	it('routes to anthropic provider and maps successful response', async () => {
 		resolveForChatCompletionMock.mockReturnValueOnce(null);
 		proxyRequestMock.mockResolvedValueOnce({

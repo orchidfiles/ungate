@@ -22,6 +22,9 @@ export const config = {
 		baseUrlGlobal: MINIMAX_BASE_URLS.global,
 		baseUrlChina: MINIMAX_BASE_URLS.china
 	},
+	bedrock: {
+		baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1'
+	},
 	claudeCode: {
 		systemPrompt: "You are Claude Code, Anthropic's official CLI for Claude."
 	},

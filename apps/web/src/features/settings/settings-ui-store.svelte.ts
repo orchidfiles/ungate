@@ -24,6 +24,7 @@ let selectedProvider = $state<ModelMappingProvider>(getSavedSettingsProvider());
 
 function createAuthStates(state: ProviderAuthState): Record<ModelMappingProvider, ProviderAuthState> {
 	return {
+		bedrock: state,
 		claude: state,
 		openai: state,
 		minimax: state
@@ -33,6 +34,7 @@ function createAuthStates(state: ProviderAuthState): Record<ModelMappingProvider
 let authStates = $state<Record<ModelMappingProvider, ProviderAuthState>>(createAuthStates(ProviderAuthState.Loading));
 
 const providerLabels: Record<ModelMappingProvider, string> = {
+	bedrock: getProviderLabel('bedrock'),
 	claude: getProviderLabel('claude'),
 	openai: getProviderLabel('openai'),
 	minimax: getProviderLabel('minimax')
@@ -51,8 +53,14 @@ async function refreshAuthStates(): Promise<void> {
 	authStates = createAuthStates(ProviderAuthState.Loading);
 
 	try {
-		const [claude, openai, minimax] = await Promise.all([Api.authStatus(), Api.authChatGPTStatus(), Api.authMinimaxStatus()]);
+		const [bedrock, claude, openai, minimax] = await Promise.all([
+			Api.authBedrockStatus(),
+			Api.authStatus(),
+			Api.authChatGPTStatus(),
+			Api.authMinimaxStatus()
+		]);
 		authStates = {
+			bedrock: bedrock.authenticated ? ProviderAuthState.Authorized : ProviderAuthState.NotAuthorized,
 			claude: claude.authenticated ? ProviderAuthState.Authorized : ProviderAuthState.NotAuthorized,
 			openai: openai.authenticated ? ProviderAuthState.Authorized : ProviderAuthState.NotAuthorized,
 			minimax: minimax.authenticated ? ProviderAuthState.Authorized : ProviderAuthState.NotAuthorized

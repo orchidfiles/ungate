@@ -25,6 +25,10 @@ function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 		let serviceTier = model.serviceTier;
 		let provider: ModelMappingProvider = 'claude';
 
+		if (model.provider === 'bedrock') {
+			provider = 'bedrock';
+		}
+
 		if (model.provider === 'minimax') {
 			provider = 'minimax';
 		}

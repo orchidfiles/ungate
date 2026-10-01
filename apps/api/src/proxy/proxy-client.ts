@@ -30,7 +30,11 @@ export async function proxyOpenAIRequest(
 	const resolved = provider ?? detectProvider(openaiBody.model);
 
 	if (resolved === 'openai') {
-		return OpenAiClient.proxy(openaiBody);
+		return OpenAiClient.proxy(openaiBody, 'openai');
+	}
+
+	if (resolved === 'bedrock') {
+		return OpenAiClient.proxy(openaiBody, 'bedrock');
 	}
 
 	if (resolved === 'minimax') {

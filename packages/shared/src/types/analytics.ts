@@ -1,9 +1,10 @@
 export type Period = 'hour' | 'day' | 'week' | 'month' | 'all';
 
-export type RequestSource = 'claude' | 'minimax' | 'openai' | 'error';
+export type RequestSource = 'bedrock' | 'claude' | 'minimax' | 'openai' | 'error';
 
 export interface AnalyticsSummary {
 	totalRequests: number;
+	bedrockRequests: number;
 	claudeRequests: number;
 	minimaxRequests: number;
 	openaiRequests: number;

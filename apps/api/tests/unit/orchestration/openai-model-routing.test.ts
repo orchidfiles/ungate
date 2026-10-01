@@ -37,12 +37,14 @@ describe('CompletionModelRouting', () => {
 		expect(CompletionModelRouting.buildMiniMaxBody(body as never, null).model).toBe('alias');
 	});
 
-	it('narrows openai mapping with isOpenAiMapped', () => {
+	it('narrows Responses API mappings', () => {
 		const openai = mapping({ provider: 'openai', upstreamModel: 'gpt-up' });
+		const bedrock = mapping({ provider: 'bedrock', upstreamModel: 'us.openai.gpt-6-astra' });
 
-		expect(CompletionModelRouting.isOpenAiMapped(openai)).toBe(true);
-		expect(CompletionModelRouting.isOpenAiMapped(null)).toBe(false);
-		expect(CompletionModelRouting.isOpenAiMapped(mapping({ provider: 'claude', upstreamModel: 'c' }))).toBe(false);
+		expect(CompletionModelRouting.isResponsesMapped(openai)).toBe(true);
+		expect(CompletionModelRouting.isResponsesMapped(bedrock)).toBe(true);
+		expect(CompletionModelRouting.isResponsesMapped(null)).toBe(false);
+		expect(CompletionModelRouting.isResponsesMapped(mapping({ provider: 'claude', upstreamModel: 'c' }))).toBe(false);
 	});
 
 	it('builds openai upstream body with optional reasoning effort and service tier', () => {

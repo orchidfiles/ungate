@@ -22,16 +22,31 @@ interface ProxyOpenAiResult {
 	context: RequestContext;
 }
 
+type ResponsesProvider = 'bedrock' | 'openai';
+
 export class OpenAiClient {
-	static async proxy(body: OpenAIChatRequest): Promise<ProxyOpenAiResult> {
+	static async proxy(body: OpenAIChatRequest, provider: ResponsesProvider): Promise<ProxyOpenAiResult> {
 		const startTime = Date.now();
 		const model = body.model;
-		const resolvedModel = ResponsesModelResolver.resolveModel(model);
-		const normalizedModel = resolvedModel.model;
-		const creds = ProviderSettings.get('openai');
+		const normalizedModel = provider === 'bedrock' ? model : ResponsesModelResolver.resolveModel(model).model;
+		const creds = ProviderSettings.get(provider);
 
 		if (!creds?.accessToken) {
-			return this.authErrorResult(model, startTime, 'Not authenticated with OpenAI');
+			return this.authErrorResult(
+				model,
+				startTime,
+				`Not authenticated with ${provider === 'bedrock' ? 'Amazon Bedrock' : 'OpenAI'}`
+			);
+		}
+
+		if (provider === 'bedrock') {
+			const response = await this.fetchBedrockResponses(body, model, creds.accessToken, creds.baseUrl ?? config.bedrock.baseUrl);
+
+			if (!response.ok) {
+				return this.upstreamErrorResult(response, model, startTime, provider);
+			}
+
+			return this.successResult(body, response, model, normalizedModel, startTime, provider);
 		}
 
 		const accountId = creds.accountId;
@@ -43,10 +58,10 @@ export class OpenAiClient {
 		const response = await this.fetchCodexResponses(body, model, normalizedModel, creds.accessToken, accountId);
 
 		if (!response.ok) {
-			return this.upstreamErrorResult(response, model, startTime);
+			return this.upstreamErrorResult(response, model, startTime, provider);
 		}
 
-		return this.successResult(body, response, model, normalizedModel, startTime);
+		return this.successResult(body, response, model, normalizedModel, startTime, provider);
 	}
 
 	private static authErrorResult(model: string, startTime: number, message: string): ProxyOpenAiResult {
@@ -97,9 +112,40 @@ export class OpenAiClient {
 		});
 	}
 
-	private static async upstreamErrorResult(response: Response, model: string, startTime: number): Promise<ProxyOpenAiResult> {
+	private static async fetchBedrockResponses(
+		body: OpenAIChatRequest,
+		model: string,
+		accessToken: string,
+		baseUrl: string
+	): Promise<Response> {
+		const requestBody = ResponsesBodyBuilder.buildBody(body, model, {
+			extraInstruction: Settings.get().extraInstruction ?? undefined,
+			envInstructions: ENV_CHATGPT_INSTRUCTIONS,
+			instructionsFallback: CODEX_INSTRUCTIONS_FALLBACK,
+			preserveModelId: true
+		}).payload;
+
+		delete requestBody.service_tier;
+
+		return fetch(`${baseUrl.replace(/\/$/, '')}/responses`, {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				authorization: `Bearer ${accessToken}`,
+				accept: 'text/event-stream'
+			},
+			body: JSON.stringify(requestBody)
+		});
+	}
+
+	private static async upstreamErrorResult(
+		response: Response,
+		model: string,
+		startTime: number,
+		provider: ResponsesProvider
+	): Promise<ProxyOpenAiResult> {
 		const errorText = await response.text();
-		logger.error('ChatGPT Codex upstream error:', response.status, errorText);
+		logger.error(`${provider === 'bedrock' ? 'Amazon Bedrock' : 'ChatGPT Codex'} upstream error:`, response.status, errorText);
 		const errorMessage = this.parseUpstreamError(response.status, errorText);
 		const errorResponse = new Response(JSON.stringify({ error: { message: errorMessage, type: 'api_error' } }), {
 			status: response.status,
@@ -143,7 +189,8 @@ export class OpenAiClient {
 		response: Response,
 		model: string,
 		normalizedModel: string,
-		startTime: number
+		startTime: number,
+		provider: ResponsesProvider
 	): Promise<ProxyOpenAiResult> {
 		const stream = body.stream ?? false;
 		const state = StreamStateFactory.create(normalizedModel);
@@ -153,7 +200,7 @@ export class OpenAiClient {
 
 			return {
 				response: streamResponse,
-				context: this.openAiContext(model, startTime)
+				context: this.responsesContext(model, startTime, provider)
 			};
 		}
 
@@ -161,7 +208,7 @@ export class OpenAiClient {
 
 		return {
 			response: bufferedResponse,
-			context: this.openAiContext(model, startTime)
+			context: this.responsesContext(model, startTime, provider)
 		};
 	}
 
@@ -267,7 +314,7 @@ export class OpenAiClient {
 		return { model, source: 'error', startTime, reverseToolMapping: {}, inputTokens: 0, outputTokens: 0 };
 	}
 
-	private static openAiContext(model: string, startTime: number): RequestContext {
-		return { model, source: 'openai', startTime, reverseToolMapping: {}, inputTokens: 0, outputTokens: 0 };
+	private static responsesContext(model: string, startTime: number, provider: ResponsesProvider): RequestContext {
+		return { model, source: provider, startTime, reverseToolMapping: {}, inputTokens: 0, outputTokens: 0 };
 	}
 }

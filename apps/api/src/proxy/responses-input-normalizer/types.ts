@@ -9,6 +9,7 @@ export interface BuildResponsesBodyOptions {
 	extraInstruction?: string;
 	envInstructions?: string;
 	instructionsFallback: string;
+	preserveModelId?: boolean;
 }
 
 export interface BuildResponsesBodyResult {

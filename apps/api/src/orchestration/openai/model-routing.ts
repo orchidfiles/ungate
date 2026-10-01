@@ -34,16 +34,12 @@ export class CompletionModelRouting {
 		return openaiBody;
 	}
 
-	static isOpenAiMapped(resolved: ModelMappingConfig | null): resolved is ModelMappingConfig {
+	static isResponsesMapped(resolved: ModelMappingConfig | null): resolved is ModelMappingConfig {
 		if (!resolved) {
 			return false;
 		}
 
-		if (String(resolved.provider) !== 'openai') {
-			return false;
-		}
-
-		return true;
+		return resolved.provider === 'openai' || resolved.provider === 'bedrock';
 	}
 
 	static buildOpenAiUpstreamBody(openaiBody: OpenAIChatRequest, resolved: ModelMappingConfig): OpenAIChatRequest {
