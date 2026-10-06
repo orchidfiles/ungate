@@ -12,7 +12,7 @@ pnpm install
 
 In Cursor/VS Code:
 
-1. **Command Palette → Run Task → `build:watch all`** — starts the dev-kit, shared, web, and api watchers as background tasks.
+1. **Command Palette → Run Task → `build:watch all`** — builds dev-kit once and starts the shared, web, and api watchers.
 2. Press **F5** to launch the extension in debug mode. The proxy (`apps/api`) is spawned by the extension as a child Node process; its port is detected from stdout.
 
 Individual tasks (`dev-kit build`, `shared build-watch`, `api build-watch`, `web build-watch`) are available in the Run Task picker if you only need a subset. `@ungate/dev-kit` does not expose a watch task — it only ships the lint and vitest configs, so a single `build` after editing it (or after `pnpm install`) is enough.
@@ -35,7 +35,7 @@ DB_PATH=$HOME/.ungate/data-dev.db PORT=4784 node dist/main.js
 
 ## Prerequisites
 
-- **Node.js 22, 24, or 26** — other versions fail on the `better-sqlite3` ABI. If the API child fails to start with `No prebuilt binary for ABI ...`, your Node version is the cause.
+- **Node.js 22, 24, 25, or 26**: supported by the extension's Node resolver. If the API child fails to start with `No prebuilt binary for ABI ...`, check both the Node ABI and whether a pinned `better-sqlite3` build is available for your OS and architecture.
 - **pnpm** — the repo is a pnpm workspace.
 - **Cursor** with custom OpenAI provider support enabled.
 
@@ -65,7 +65,7 @@ Data flow: Cursor sends a request from its backend, the request is forwarded thr
 
 ## Things the linter can't catch
 
-Linting is automatic via ESLint and Prettier configs in `packages/dev-kit`. Pre-commit runs `lint:fix`, so committed code is always formatted. A few things the linter will not catch that we care about:
+ESLint and Prettier configs live in `packages/dev-kit`. The pre-commit hook runs `lint:fix`, but hooks can be skipped and CI does not currently enforce these checks. A few things the linter will not catch that we care about:
 
 - **Don't bypass `VerifiedArtifact`** when adding or updating a downloaded binary. Pin the URL and add the SHA-256 to the allowlist. Do not introduce fallbacks to `latest` releases.
 - **Don't write to `state.vscdb` directly** for the OpenAI Key Fix. Cursor ignores reactive storage writes; use `aiSettings.usingOpenAIKey.toggle`.
@@ -74,10 +74,10 @@ Linting is automatic via ESLint and Prettier configs in `packages/dev-kit`. Pre-
 
 ## Testing
 
-- Unit tests live co-located with the code you change, in the matching app's `src/`.
+- API and extension tests live in `apps/api/tests/` and `apps/extension/tests/`. API tests are split into `unit/` and `integration/`; extension tests are in `unit/`.
 - Run them with `pnpm test`. The API server is testable in isolation via `apps/api/dist/main.js` on a custom `PORT` and `DB_PATH`.
 - Changes in streaming code (`src/streaming/`, `src/proxy/responses-stream-mapper/`) should include tests for both `function_call` and `custom_tool_call` Codex variants.
-- OAuth and tunnel code paths are exercised manually because they require real provider accounts and a public tunnel.
+- Automated tests cover OAuth lifecycle and tunnel-manager behavior with mocks. End-to-end checks against real provider accounts and Cloudflare tunnels are performed manually.
 
 ## Pull requests
 
@@ -94,7 +94,7 @@ Linting is automatic via ESLint and Prettier configs in `packages/dev-kit`. Pre-
 
 ## Community and license
 
-- **Bugs and feature requests:** [GitHub Issues](https://github.com/orchidfiles/ungate/issues). Use the bug/feature templates.
+- **Bugs and feature requests**: [GitHub Issues](https://github.com/orchidfiles/ungate/issues). Use the Bug Report or Feature Request template.
 - **Security issues:** see [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 - **Questions, setup help, anything else:** see [SUPPORT.md](SUPPORT.md).
 

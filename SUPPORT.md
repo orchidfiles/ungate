@@ -7,8 +7,8 @@ Use this file when you have a question about Ungate, need help installing or run
 | Topic | Channel |
 | --- | --- |
 | Questions about using Ungate | [GitHub Discussions](https://github.com/orchidfiles/ungate/discussions) — pick the Q&A category for "how do I…" questions, General for everything else |
-| Setup help, "it does not work" | [GitHub Issues](https://github.com/orchidfiles/ungate/issues) — pick the closest template, leave it blank if none fits |
-| Bugs and feature requests | [GitHub Issues](https://github.com/orchidfiles/ungate/issues) with the bug or feature template — see [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow |
+| Setup help, "it does not work" | [GitHub Issues](https://github.com/orchidfiles/ungate/issues) — use Question for setup help or Bug Report for a reproducible failure; open a blank issue if neither fits |
+| Bugs and feature requests | [GitHub Issues](https://github.com/orchidfiles/ungate/issues) — Bug Report or Feature Request template; see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow |
 | Security issues | [SECURITY.md](SECURITY.md) only — do not file public issues |
 
 ## Direct contact

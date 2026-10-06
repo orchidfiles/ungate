@@ -1,0 +1,34 @@
+name: Question
+description: Setup help, usage questions, model routing questions. For bugs use the Bug Report template.
+title: "Question: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For setup walkthroughs, see `README.md` and [SUPPORT.md](https://github.com/orchidfiles/ungate/blob/main/SUPPORT.md), and the **Discussions → Q&A** section for previously answered questions.
+        This template is here as a fallback — prefer Discussions for questions so others can find the answers.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you already tried
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider you're using
+      options:
+        - Claude (Pro / Max)
+        - ChatGPT (Plus / Team / Pro)
+        - MiniMax
+        - Not using a provider yet
+    validations:
+      required: true

@@ -1,0 +1,34 @@
+name: Feature Request
+description: Suggest a feature or improvement.
+title: "Feature: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem and your proposed solution. For bugs, use Bug Report. For setup help, use Question or Discussions.
+        Before opening a feature PR, file an issue so we can agree on scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem or limitation would this address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to add or change?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: willing
+    attributes:
+      label: Would you like to send a PR?
+      options:
+        - "Yes"
+        - Yes, with guidance
+        - No, suggesting only

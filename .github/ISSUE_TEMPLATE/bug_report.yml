@@ -1,0 +1,70 @@
+name: Bug Report
+description: Report a reproducible bug or regression.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The fields below give us what we need to reproduce.
+        Logs come from the dashboard's Logs tab.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where the bug shows up. Pick the closest match.
+      options:
+        - Chat / streaming response
+        - Tools (Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, LS)
+        - Plan tool
+        - OAuth / sign-in
+        - Cloudflare tunnel
+        - Dashboard / WebView / status bar
+        - Analytics / usage display
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Ungate extension version
+      placeholder: e.g. 1.7.12
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Provider
+      placeholder: e.g. ChatGPT, Claude, MiniMax
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and error output
+      description: Paste the error from the dashboard Logs tab or from Cursor's chat. Include the response body if the API returned one.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste 20-50 lines from the API or tunnel ring buffer around the failure.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
