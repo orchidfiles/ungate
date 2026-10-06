@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Q&A (Discussions)
+    url: https://github.com/orchidfiles/ungate/discussions/categories/q-a
+    about: Setup help and how-to — prefer Discussions so answers stay searchable.
+  - name: Report a security vulnerability
+    url: https://github.com/orchidfiles/ungate/security/advisories/new
+    about: Do not file public issues for security problems — use private vulnerability reporting.

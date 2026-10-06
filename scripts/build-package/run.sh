@@ -22,6 +22,7 @@ pnpm run build
 echo "Copying project files..."
 cp "$REPO_DIR/LICENSE" "$EXT_DIR/LICENSE"
 cp "$REPO_DIR/README.md" "$EXT_DIR/README.md"
+cp "$REPO_DIR/CHANGELOG.md" "$EXT_DIR/CHANGELOG.md"
 
 echo "Assembling bundle..."
 rm -rf "$BUNDLED_DIR" "$OUT_DIR"
