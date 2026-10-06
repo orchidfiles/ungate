@@ -4,7 +4,7 @@ import { ResponsesInputShape } from './input-shape';
 import { ResponsesInputText } from './input-text';
 import { ResponsesModelResolver } from './resolve-model';
 
-import type { BuildResponsesBodyOptions, BuildResponsesBodyResult, CodexReasoningEffort } from './types';
+import type { BuildResponsesBodyOptions, BuildResponsesBodyResult } from './types';
 import type { OpenAIChatRequest } from 'src/types/openai';
 
 export class ResponsesBodyBuilder {
@@ -15,8 +15,13 @@ export class ResponsesBodyBuilder {
 	): BuildResponsesBodyResult {
 		const messages = CodexInputUtils.coerceMessages(body);
 		const resolvedModel = ResponsesModelResolver.resolveModel(requestedModel);
-		const explicitReasoning = body.reasoning as { effort?: CodexReasoningEffort } | undefined;
-		const reasoningEffort = explicitReasoning?.effort ?? body.reasoning_effort ?? resolvedModel.reasoningEffort;
+		let reasoningEffort = body.reasoning?.effort ?? body.reasoning_effort ?? resolvedModel.reasoningEffort;
+
+		// Astra requires at least low reasoning, including when Cursor requests none.
+		if (resolvedModel.model === 'gpt-6-astra' && (reasoningEffort === 'none' || reasoningEffort === 'minimal')) {
+			reasoningEffort = 'low';
+		}
+
 		const expandedInput = CodexInputUtils.expandInput(body.input);
 		const usedExpandedInput = expandedInput !== null;
 

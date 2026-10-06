@@ -389,7 +389,7 @@ $effect(() => {
 								{#if model.serviceTier === null}
 									<span class="text-xs text-surface-400 mt-1">No service_tier sent.</span>
 								{:else}
-									<span class="text-xs text-surface-400 mt-1">Only supported by GPT-5.6 models.</span>
+									<span class="text-xs text-surface-400 mt-1">Availability depends on the model and account.</span>
 								{/if}
 							</label>
 						{/if}

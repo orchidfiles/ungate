@@ -4,6 +4,7 @@ interface ModelPricing {
 }
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
+	'gpt-6-astra': { inputPerMTok: 10.0, outputPerMTok: 50.0 },
 	'gpt-5.6-sol': { inputPerMTok: 5.0, outputPerMTok: 30.0 },
 	'gpt-5.6-terra': { inputPerMTok: 2.5, outputPerMTok: 15.0 },
 	'gpt-5.6-luna': { inputPerMTok: 1.0, outputPerMTok: 6.0 },

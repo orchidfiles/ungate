@@ -24,6 +24,14 @@ describe('proxy-tool-mapper', () => {
 		expect(result.reverseMapping.Read_1).toBe('read_file');
 	});
 
+	it('passes Cursor MCP tools through unchanged', () => {
+		const names = ['CallMcpTool', 'GetMcpTools', 'FetchMcpResource', 'ListMcpResources'];
+		const result = ToolMapper.map(names.map((name) => ({ name, description: '', input_schema: {} })));
+
+		expect(result.tools.map((tool) => tool.name)).toEqual(names);
+		expect(result.reverseMapping).toEqual({});
+	});
+
 	it('drops unknown tools', () => {
 		const result = ToolMapper.map([{ name: 'UnknownTool', description: '', input_schema: {} }]);
 		expect(result.tools).toHaveLength(0);

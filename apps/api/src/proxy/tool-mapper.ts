@@ -88,7 +88,14 @@ const VALID_CLAUDE_CODE_TOOLS = new Set([
 	// Cursor-specific tools (pass through as-is)
 	'CreatePlan',
 	'AskQuestion',
-	'SwitchMode'
+	'SwitchMode',
+	'CallMcpTool',
+	'GetMcpTools',
+	'FetchMcpResource',
+	'ListMcpResources',
+	'GenerateImage',
+	'SembleSearch',
+	'SembleFindRelated'
 ]);
 
 export class ToolMapper {

@@ -110,6 +110,20 @@ describe('proxy-responses-input-normalizer', () => {
 		expect(payload.parallel_tool_calls).toBe(false);
 	});
 
+	it.each(['none', 'minimal'] as const)('raises unsupported %s reasoning to low', (effort) => {
+		const { payload } = ResponsesBodyBuilder.buildBody(
+			{
+				model: 'gpt-6-astra',
+				messages: [{ role: 'user', content: 'hello' }],
+				reasoning: { effort }
+			},
+			'gpt-6-astra',
+			{ instructionsFallback: 'fallback' }
+		);
+
+		expect(payload.reasoning).toEqual({ effort: 'low' });
+	});
+
 	it('prefers explicit reasoning over model-derived effort and keeps no tool_choice without tools', () => {
 		const { payload } = ResponsesBodyBuilder.buildBody(
 			{

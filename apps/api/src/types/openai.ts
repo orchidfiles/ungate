@@ -51,9 +51,9 @@ export interface OpenAIChatRequest {
 	service_tier?: 'default' | 'priority';
 	tools?: OpenAITool[];
 	tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
-	reasoning_effort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+	reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	reasoning?: {
-		effort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+		effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	};
 }
 
