@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.13 - 2026-10-07
+
+- Add GPT-6 Astra with standard and priority tiers
+- Fix Cursor MCP tools not reaching Claude
+- Fix `GenerateImage` and Semble search tools not reaching Claude
+- Rewrite README
+- Add contributing guide, security policy, and issue templates
+
 ## 1.7.12 - 2026-08-26
 
 - Verify SHA-256 checksums for all native binary downloads (`cloudflared`, `better-sqlite3`, `sqlite3`) before execution
