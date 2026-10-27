@@ -10,7 +10,21 @@ import { schema } from './schema';
 
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
 
-const MIGRATIONS_PATH = process.env.DRIZZLE_PATH ?? join(import.meta.dirname, '../../drizzle');
+export function resolveMigrationsPath(): string {
+	if (process.env.DRIZZLE_PATH) {
+		return process.env.DRIZZLE_PATH;
+	}
+
+	if (import.meta.dirname) {
+		return join(import.meta.dirname, '../../drizzle');
+	}
+
+	if (typeof __dirname === 'string') {
+		return join(__dirname, '../drizzle');
+	}
+
+	throw new Error('Unable to resolve drizzle migrations path');
+}
 
 let _db: DrizzleDb | null = null;
 let _sqlite: DatabaseType | null = null;
@@ -38,7 +52,7 @@ export function getDb(): DrizzleDb {
 		_db = drizzle(_sqlite, { schema, casing: 'snake_case' });
 		_dbPath = dbPath;
 
-		migrate(_db, { migrationsFolder: MIGRATIONS_PATH });
+		migrate(_db, { migrationsFolder: resolveMigrationsPath() });
 	} else if (_dbPath !== dbPath) {
 		throw new Error(
 			`Database already initialized with "${_dbPath}", but current DB_PATH is "${dbPath}". Restart process to switch database.`

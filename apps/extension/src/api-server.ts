@@ -97,14 +97,8 @@ export class ApiServer {
 		this.process = null;
 		this.noClientsSince = null;
 
-		if (RuntimeStateStore.isApiStartSuppressed()) {
-			this.lastStatus = 'error';
-
-			return;
-		}
-
 		this.lastStatus = 'stopped';
-		await this.writeRuntimeState('stopped', null);
+		await RuntimeStateStore.resetApiForRestart();
 	}
 
 	getPort(): number | null {
@@ -147,9 +141,11 @@ export class ApiServer {
 		}
 
 		if (runtimeState.api.status === 'starting' && runtimeState.api.ownerWindowId !== this.callbacks.getWindowId()) {
+			const ownerId = runtimeState.api.ownerWindowId;
+			const ownerIsLive = ownerId !== null && RuntimeStateStore.getLiveClientIds(runtimeState).includes(ownerId);
 			const startingStateAge = Date.now() - runtimeState.api.lastSeenAt;
 
-			if (startingStateAge < STARTING_STATE_TIMEOUT_MS) {
+			if (ownerIsLive && startingStateAge < STARTING_STATE_TIMEOUT_MS) {
 				return;
 			}
 		}
@@ -196,7 +192,8 @@ export class ApiServer {
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
 			UNGATE_BETTER_SQLITE3_NATIVE_BINDING: BetterSqlite3Installer.resolveBindingPath(cwd),
-			...(isDev ? { DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
+			DRIZZLE_PATH: path.join(cwd, 'drizzle'),
+			...(isDev ? { DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') } : {})
 		};
 
 		const nodeArgs = isDev ? ['-r', 'source-map-support/register', 'dist/main.js'] : ['bundle/main.cjs'];

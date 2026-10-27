@@ -438,8 +438,7 @@ export class ExtensionController {
 
 	private async bootstrapRuntime(): Promise<void> {
 		await RuntimeStateStore.touchClient(this.windowId);
-		const runtimeState = await RuntimeStateStore.prepareApiForBootstrap();
-		this.startApiAsLeaderIfNeeded(runtimeState);
+		await RuntimeStateStore.prepareApiForBootstrap();
 		await this.syncFromRuntimeState();
 	}
 
@@ -456,6 +455,7 @@ export class ExtensionController {
 		await this.keyFix.applySharedState(runtimeState.keyFix.enabled);
 		this.applyRuntimeState(runtimeState);
 		this.apiServer.syncLeaderHealthMonitor(this.isLeaderWindow(runtimeState));
+		this.startApiAsLeaderIfNeeded(runtimeState);
 		this.tryHandleCommand(runtimeState);
 	}
 

@@ -67,6 +67,25 @@ describe('RuntimeStateStore', () => {
 		);
 	});
 
+	it('prepareApiForBootstrap marks a healthy port as running and releases suppression', async () => {
+		const initial = createState('error', '[process] health check failed');
+		initial.api.startSuppressed = true;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => Promise.resolve({ ok: true }))
+		);
+		runtimeReadMock.mockReturnValue(initial);
+		runtimeMutateMock.mockImplementation((mutator) => Promise.resolve(mutator(structuredClone(initial))));
+
+		const next = await RuntimeStateStore.prepareApiForBootstrap();
+
+		expect(runtimeMutateMock).toHaveBeenCalledTimes(1);
+		expect(next.api.startSuppressed).toBe(false);
+		expect(next.api.status).toBe('running');
+		expect(next.api.lastError).toBeNull();
+		expect(next.api.port).toBe(47821);
+	});
+
 	it('prepareApiForBootstrap clears stale port and releases suppression', async () => {
 		const initial = createState('error', '[process] health check failed');
 		runtimeReadMock.mockReturnValue(initial);

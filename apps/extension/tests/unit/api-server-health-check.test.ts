@@ -9,6 +9,7 @@ import type { RuntimeState } from '@ungate/shared/frontend';
 const {
 	runtimeReadMock,
 	runtimeHasLiveClientsMock,
+	runtimeGetLiveClientIdsMock,
 	runtimeMutateMock,
 	sleepMock,
 	ensureInstalledMock,
@@ -17,6 +18,7 @@ const {
 } = vi.hoisted(() => {
 	const runtimeReadMock = vi.fn<() => RuntimeState>();
 	const runtimeHasLiveClientsMock = vi.fn<(state: RuntimeState) => boolean>();
+	const runtimeGetLiveClientIdsMock = vi.fn<(state: RuntimeState) => string[]>(() => []);
 	const runtimeMutateMock = vi.fn<(mutator: (current: RuntimeState) => RuntimeState) => Promise<RuntimeState>>();
 	const sleepMock = vi.fn<(ms: number) => Promise<void>>();
 	const ensureInstalledMock = vi.fn<() => Promise<void>>();
@@ -43,6 +45,7 @@ const {
 	return {
 		runtimeReadMock,
 		runtimeHasLiveClientsMock,
+		runtimeGetLiveClientIdsMock,
 		runtimeMutateMock,
 		sleepMock,
 		ensureInstalledMock,
@@ -99,6 +102,7 @@ vi.mock('../../src/runtime-state', () => {
 		RuntimeStateStore: {
 			read: runtimeReadMock,
 			hasLiveClients: runtimeHasLiveClientsMock,
+			getLiveClientIds: (...args: unknown[]) => runtimeGetLiveClientIdsMock(...args),
 			mutate: runtimeMutateMock,
 			isApiStartSuppressed: (...args: unknown[]) => isApiStartSuppressedMock(...args),
 			suppressApiAutoStart: (...args: unknown[]) => suppressApiAutoStartMock(...args),
@@ -176,6 +180,8 @@ describe('ApiServer.runHealthCheckCycle', () => {
 	beforeEach(() => {
 		runtimeReadMock.mockReset();
 		runtimeHasLiveClientsMock.mockReset();
+		runtimeGetLiveClientIdsMock.mockReset();
+		runtimeGetLiveClientIdsMock.mockReturnValue([]);
 		runtimeMutateMock.mockReset();
 		isApiStartSuppressedMock.mockReset();
 		isApiStartSuppressedMock.mockReturnValue(false);
@@ -302,6 +308,27 @@ describe('ApiServer.runHealthCheckCycle', () => {
 				})
 			})
 		);
+	});
+
+	it('retries startup when another window left starting state but is no longer live', async () => {
+		const runtimeState = createRuntimeState([], null);
+		const { server } = createServer();
+		const internals = getInternals(server);
+		runtimeState.api.status = 'starting';
+		runtimeState.api.ownerWindowId = 'other-window';
+		runtimeState.api.lastSeenAt = Date.now();
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeMutateMock.mockImplementation((mutator) => {
+			const nextState = mutator(structuredClone(runtimeState));
+
+			return Promise.resolve(nextState);
+		});
+		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {});
+
+		await server.start();
+
+		expect(ensureInstalledMock).toHaveBeenCalledTimes(1);
+		expect(spawnSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it('retries startup when shared starting state is stale', async () => {

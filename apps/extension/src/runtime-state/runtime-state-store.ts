@@ -127,6 +127,8 @@ export class RuntimeStateStore {
 		if (portHealthy) {
 			return await this.mutate((state) => {
 				state.api.startSuppressed = false;
+				state.api.status = 'running';
+				state.api.lastError = null;
 
 				return state;
 			});

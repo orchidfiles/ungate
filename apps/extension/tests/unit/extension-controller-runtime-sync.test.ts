@@ -336,8 +336,8 @@ describe('ExtensionController', () => {
 		});
 	});
 
-	it('does not start api from periodic sync', async () => {
-		const { controller } = createController('window-a');
+	it('starts api from periodic sync when leader has no port', async () => {
+		const { controller, apiServer } = createController('window-a');
 		const runtimeState = createRuntimeState(['window-a'], null);
 		runtimeReadMock.mockReturnValue(runtimeState);
 		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a']);
@@ -346,7 +346,7 @@ describe('ExtensionController', () => {
 
 		await getInternals(controller).syncFromRuntimeState();
 
-		expect(apiServerStartMock).not.toHaveBeenCalled();
+		expect(apiServer.start).toHaveBeenCalledTimes(1);
 	});
 
 	it('does not start api from sync while start is suppressed', async () => {
