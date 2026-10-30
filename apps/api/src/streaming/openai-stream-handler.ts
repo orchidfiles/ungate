@@ -137,7 +137,13 @@ export class OpenAIStreamHandler {
 				};
 
 				const mapFinishReason = (unexpectedEof: boolean): 'stop' | 'length' | 'tool_calls' => {
-					if (unexpectedEof || salvageFailed || stopReason === 'max_tokens' || stopReason === 'model_context_window_exceeded') {
+					if (
+						unexpectedEof ||
+						salvageFailed ||
+						activeToolCalls.size > 0 ||
+						stopReason === 'max_tokens' ||
+						stopReason === 'model_context_window_exceeded'
+					) {
 						return 'length';
 					}
 
@@ -323,7 +329,6 @@ export class OpenAIStreamHandler {
 										}
 									} else if (activeToolCalls.size > 0) {
 										logger.error(`Open tool calls at message_stop stop_reason=${stopReason ?? 'none'} ${describeOpenTools()}`);
-										activeToolCalls.clear();
 									}
 
 									finalizeStream(false);

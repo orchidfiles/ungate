@@ -277,6 +277,49 @@ describe('streaming-openai-stream-handler', () => {
 		expect(output).not.toContain('"finish_reason":"tool_calls"');
 	});
 
+	it.each(['end_turn', 'refusal', 'pause_turn', 'stop_sequence'])(
+		'finishes as length for an open tool on %s, even after a completed call',
+		async (stopReason) => {
+			const event = (data: object) => `data: ${JSON.stringify(data)}`;
+			const response = createResponseWithSse([
+				event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }),
+				event({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'done', name: 'Read' } }),
+				event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"done"}' } }),
+				event({ type: 'content_block_stop', index: 0 }),
+				event({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'open', name: 'Write' } }),
+				event({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"path":"unfinished"' } }),
+				event({ type: 'message_delta', delta: { stop_reason: stopReason } }),
+				event({ type: 'message_stop' })
+			]);
+			const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'incomplete', 'model', {
+				model: 'model', source: 'claude', startTime: Date.now(), reverseToolMapping: {}
+			});
+			const output = await readStream(stream);
+			expect(output).toContain('\\"path\\":\\"done\\"');
+			expect(output).not.toContain('unfinished');
+			expect(output).toContain('"finish_reason":"length"');
+			expect(output).not.toContain('"finish_reason":"tool_calls"');
+		}
+	);
+
+	it.each(['message_stop', 'done'])('finishes as length for a single open tool on %s', async (ending) => {
+		const event = (data: object) => `data: ${JSON.stringify(data)}`;
+		const response = createResponseWithSse([
+			event({ type: 'message_start' }),
+			event({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'open', name: 'Write' } }),
+			event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"unfinished"' } }),
+			event({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+			ending === 'done' ? 'data: [DONE]' : event({ type: 'message_stop' })
+		]);
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'incomplete', 'model', {
+			model: 'model', source: 'claude', startTime: Date.now(), reverseToolMapping: {}
+		});
+		const output = await readStream(stream);
+		expect(output).not.toContain('unfinished');
+		expect(output).toContain('"finish_reason":"length"');
+		expect(output).not.toContain('"finish_reason":"stop"');
+	});
+
 	it('does not emit truncated JSON and finishes as length on max_tokens', async () => {
 		const response = createResponseWithSse([
 			'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}',
