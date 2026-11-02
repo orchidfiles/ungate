@@ -1,12 +1,53 @@
 import {
 	localApiBaseUrl,
 	sleep,
+	type AccountErrorResponse,
+	type AccountListResponse,
+	type AccountLoginCompleteRequest,
+	type AccountLoginCompleteResponse,
+	type AccountLoginSession,
+	type AccountLoginStartRequest,
+	type AccountLoginStartResponse,
+	type AccountPolicyRequest,
+	type AccountRenameRequest,
+	type AccountSelectRequest,
 	type AnalyticsSummary,
 	type AppSettings,
 	type Period,
 	type RequestRecord,
+	type SubscriptionProvider,
 	type TokenSeriesPoint
 } from '@ungate/shared/frontend';
+
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+
+/** Non-2xx API response. `code`/`pendingSessionId` come from `AccountErrorResponse` bodies when present. */
+export class ApiError extends Error {
+	readonly status: number;
+	/** Server-provided human-readable message (`error` field), or empty. */
+	readonly detail: string;
+	/** An `AccountErrorCode` for account endpoints; other endpoints may return other codes. */
+	readonly code: string | undefined;
+	readonly pendingSessionId: string | undefined;
+
+	constructor(message: string, init: { status: number; detail: string; code?: string; pendingSessionId?: string }) {
+		super(message);
+		this.name = 'ApiError';
+		this.status = init.status;
+		this.detail = init.detail;
+		this.code = init.code;
+		this.pendingSessionId = init.pendingSessionId;
+	}
+}
+
+/** Prefers the server's message over the transport-level description. */
+export function errorMessage(error: unknown): string {
+	if (error instanceof ApiError) {
+		return error.detail || error.message;
+	}
+
+	return error instanceof Error ? error.message : String(error);
+}
 
 export class Api {
 	private static port: number | null = (window as unknown as { __PORT__?: number | null }).__PORT__ ?? null;
@@ -66,36 +107,51 @@ export class Api {
 		return localApiBaseUrl(port);
 	}
 
-	private static async get<T>(path: string): Promise<T> {
+	private static async request<T>(method: HttpMethod, path: string, body?: unknown): Promise<T> {
 		const baseUrl = await this.baseUrl();
-		const response = await fetch(`${baseUrl}${path}`);
+		// Fastify rejects an empty body declared as JSON, so body-less methods send no Content-Type.
+		const hasBody = method === 'POST' || method === 'PATCH';
+		const response = await fetch(`${baseUrl}${path}`, {
+			method,
+			...(hasBody && { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) })
+		});
 
 		if (!response.ok) {
-			throw new Error(`GET ${path} failed: ${response.status}`);
+			let detail = '';
+			let code: string | undefined;
+			let pendingSessionId: string | undefined;
+			try {
+				const errorBody = (await response.json()) as Partial<AccountErrorResponse>;
+				detail = typeof errorBody.error === 'string' ? errorBody.error : '';
+				code = typeof errorBody.code === 'string' ? errorBody.code : undefined;
+				pendingSessionId = typeof errorBody.pendingSessionId === 'string' ? errorBody.pendingSessionId : undefined;
+			} catch {}
+
+			throw new ApiError(`${method} ${path} failed: ${response.status}${detail ? ` — ${detail}` : ''}`, {
+				status: response.status,
+				detail,
+				code,
+				pendingSessionId
+			});
 		}
 
 		return response.json() as Promise<T>;
 	}
 
-	private static async post<T>(path: string, body?: unknown): Promise<T> {
-		const baseUrl = await this.baseUrl();
-		const response = await fetch(`${baseUrl}${path}`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body ?? {})
-		});
+	private static get<T>(path: string): Promise<T> {
+		return this.request('GET', path);
+	}
 
-		if (!response.ok) {
-			let detail = '';
-			try {
-				const body = (await response.json()) as { error?: string };
-				detail = body.error ?? '';
-			} catch {}
+	private static post<T>(path: string, body?: unknown): Promise<T> {
+		return this.request('POST', path, body);
+	}
 
-			throw new Error(`POST ${path} failed: ${response.status}${detail ? ` — ${detail}` : ''}`);
-		}
+	private static patch<T>(path: string, body: unknown): Promise<T> {
+		return this.request('PATCH', path, body);
+	}
 
-		return response.json() as Promise<T>;
+	private static delete<T>(path: string): Promise<T> {
+		return this.request('DELETE', path);
 	}
 
 	static fetchAnalytics(period: Period): Promise<AnalyticsSummary> {
@@ -122,20 +178,56 @@ export class Api {
 		return this.post('/settings', settings);
 	}
 
-	static authStart(): Promise<{ authUrl: string; sessionId: string }> {
-		return this.post('/auth/claude/start');
-	}
-
-	static authComplete(code: string, sessionId: string): Promise<{ ok: boolean; email?: string; error?: string }> {
-		return this.post('/auth/claude/complete', { code, sessionId });
-	}
-
+	/** Legacy status: reflects the provider's active account only. */
 	static authStatus(): Promise<{ authenticated: boolean; email?: string }> {
 		return this.get('/auth/claude/status');
 	}
 
-	static authLogout(): Promise<{ ok: boolean }> {
-		return this.post('/auth/claude/logout');
+	static accountLoginStart(provider: SubscriptionProvider, accountId?: string): Promise<AccountLoginStartResponse> {
+		const body: AccountLoginStartRequest = accountId ? { accountId } : {};
+
+		return this.post(`/auth/${provider}/start`, body);
+	}
+
+	/** Claude only: exchanges the manually pasted `CODE#STATE` for the given login session. */
+	static accountLoginComplete(code: string, sessionId: string): Promise<AccountLoginCompleteResponse> {
+		const body: AccountLoginCompleteRequest = { code, sessionId };
+
+		return this.post('/auth/claude/complete', body);
+	}
+
+	static accountLoginSession(provider: SubscriptionProvider, sessionId: string): Promise<AccountLoginSession> {
+		return this.get(`/auth/${provider}/sessions/${encodeURIComponent(sessionId)}`);
+	}
+
+	static accountLoginCancel(provider: SubscriptionProvider, sessionId: string): Promise<AccountLoginSession> {
+		return this.post(`/auth/${provider}/sessions/${encodeURIComponent(sessionId)}/cancel`);
+	}
+
+	static accountList(provider: SubscriptionProvider): Promise<AccountListResponse> {
+		return this.get(`/auth/${provider}/accounts`);
+	}
+
+	static accountRename(provider: SubscriptionProvider, accountId: string, label: string): Promise<AccountListResponse> {
+		const body: AccountRenameRequest = { label };
+
+		return this.patch(`/auth/${provider}/accounts/${encodeURIComponent(accountId)}`, body);
+	}
+
+	static accountSelect(provider: SubscriptionProvider, accountId: string, revision?: number): Promise<AccountListResponse> {
+		const body: AccountSelectRequest = revision === undefined ? {} : { revision };
+
+		return this.post(`/auth/${provider}/accounts/${encodeURIComponent(accountId)}/select`, body);
+	}
+
+	static accountRemove(provider: SubscriptionProvider, accountId: string): Promise<AccountListResponse> {
+		return this.delete(`/auth/${provider}/accounts/${encodeURIComponent(accountId)}`);
+	}
+
+	static accountPolicyUpdate(provider: SubscriptionProvider, autoSwitch: boolean): Promise<AccountListResponse> {
+		const body: AccountPolicyRequest = { autoSwitch };
+
+		return this.patch(`/auth/${provider}/policy`, body);
 	}
 
 	static authMinimaxStatus(): Promise<{ authenticated: boolean; baseUrl?: string }> {
@@ -154,16 +246,9 @@ export class Api {
 		return this.post('/auth/minimax/logout');
 	}
 
-	static authChatGPTStart(): Promise<{ authUrl: string; sessionId: string }> {
-		return this.get('/auth/openai/start');
-	}
-
+	/** Legacy status: reflects the provider's active account only. */
 	static authChatGPTStatus(): Promise<{ authenticated: boolean; email?: string }> {
 		return this.get('/auth/openai/status');
-	}
-
-	static authChatGPTLogout(): Promise<{ ok: boolean }> {
-		return this.post('/auth/openai/logout');
 	}
 
 	static async healthCheck(): Promise<boolean> {

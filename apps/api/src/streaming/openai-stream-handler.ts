@@ -122,6 +122,7 @@ export class OpenAIStreamHandler {
 					logger.error(`Aborting upstream stream id=${streamId} reason=${reason} ${describeOpenTools()}`);
 					reader.cancel(new Error(reason)).catch(() => {});
 				};
+				let failed = false;
 
 				const safeEnqueue = (data: Uint8Array) => {
 					try {
@@ -230,6 +231,42 @@ export class OpenAIStreamHandler {
 					return 'stop';
 				};
 
+				/**
+				 * Upstream `event: error` after HTTP 200 (post-commit): never replayed. The client gets an
+				 * OpenAI-style error event instead of a synthetic finish_reason/[DONE], and the request is
+				 * recorded once as failed.
+				 */
+				const failStream = (error: Record<string, unknown> | undefined) => {
+					if (finalized || cancelled) {
+						return;
+					}
+
+					finalized = true;
+					const type = typeof error?.type === 'string' && error.type ? error.type : 'api_error';
+					const message = typeof error?.message === 'string' && error.message ? error.message : 'Upstream stream error';
+
+					logger.error(`Upstream stream error type=${type} id=${streamId} ${describeOpenTools()}`);
+					activeToolCalls.clear();
+
+					try {
+						context.onStreamError?.(error);
+					} catch (hookError) {
+						logger.error(`Stream error hook failed: ${String(hookError)}`);
+					}
+
+					safeEnqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: { message, type, code: type } })}\n\n`));
+
+					Requests.record({
+						model: context.model,
+						source: 'error',
+						inputTokens: finalUsage?.input_tokens ?? 0,
+						outputTokens: finalUsage?.output_tokens ?? 0,
+						stream: true,
+						latencyMs: Date.now() - context.startTime,
+						error: message.slice(0, 500)
+					});
+				};
+
 				const finalizeStream = (unexpectedEof: boolean) => {
 					if (finalized || cancelled) {
 						return;
@@ -310,6 +347,12 @@ export class OpenAIStreamHandler {
 
 							try {
 								const event = JSON.parse(data) as AnthropicStreamEvent;
+
+								if (event.type === 'error') {
+									failStream(event.error as Record<string, unknown> | undefined);
+									failed = true;
+									break;
+								}
 
 								if (event.type === 'message_start' && !sentStart) {
 									safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamStart(streamId, modelName)));
@@ -430,6 +473,8 @@ export class OpenAIStreamHandler {
 								}
 							}
 						}
+
+						if (failed) break;
 					}
 				} catch (streamError) {
 					if (!cancelled) {
@@ -441,6 +486,19 @@ export class OpenAIStreamHandler {
 								error: streamError,
 								streamId: options.streamId,
 								model: options.modelName
+							});
+						}
+
+						if (!finalized) {
+							finalized = true;
+							Requests.record({
+								model: context.model,
+								source: 'error',
+								inputTokens: finalUsage?.input_tokens ?? 0,
+								outputTokens: finalUsage?.output_tokens ?? 0,
+								stream: true,
+								latencyMs: Date.now() - context.startTime,
+								error: `Stream processing failed: ${errorStr}`.slice(0, 500)
 							});
 						}
 

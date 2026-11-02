@@ -65,10 +65,11 @@ function handleAuthStatusChange(): void {
 	</div>
 
 	{#if uiStore.selectedProvider === 'claude'}
-		<ClaudeAuthSection onAuthStatusChange={handleAuthStatusChange} />
+		<!-- Account sections poll their own list and push the tab indicator via uiStore.setAuthorized. -->
+		<ClaudeAuthSection />
 		<ClaudeCliVersionSection />
 	{:else if uiStore.selectedProvider === 'openai'}
-		<ChatGPTAuthSection onAuthStatusChange={handleAuthStatusChange} />
+		<ChatGPTAuthSection />
 	{:else}
 		<MiniMaxAuthSection onAuthStatusChange={handleAuthStatusChange} />
 	{/if}

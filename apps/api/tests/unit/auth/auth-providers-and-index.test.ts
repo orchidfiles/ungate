@@ -14,6 +14,18 @@ vi.mock('src/auth/oauth', () => ({
 	}
 }));
 
+const openaiGetValidTokenMock = vi.fn();
+const openaiGetAuthStatusMock = vi.fn();
+const openaiLogoutMock = vi.fn();
+
+vi.mock('src/auth/openai/openai-oauth-service', () => ({
+	OpenAIOAuthService: {
+		getValidToken: (...args: unknown[]) => openaiGetValidTokenMock(...args),
+		getAuthStatus: (...args: unknown[]) => openaiGetAuthStatusMock(...args),
+		logout: (...args: unknown[]) => openaiLogoutMock(...args)
+	}
+}));
+
 vi.mock('src/database/provider-settings', () => ({
 	ProviderSettings: {
 		get: (...args: unknown[]) => providerGetMock(...args),
@@ -47,26 +59,34 @@ describe('auth providers and index', () => {
 		expect(provider.isAuthenticated()).toBe(false);
 	});
 
-	it('openai and minimax providers use provider settings', () => {
-		providerGetMock.mockReturnValueOnce({ accessToken: 'oa' }).mockReturnValueOnce({ accessToken: 'mm' });
+	it('openai provider delegates to the account-scoped oauth service; minimax keeps provider settings', async () => {
+		openaiGetValidTokenMock.mockResolvedValueOnce({ accessToken: 'oa' });
+		openaiGetAuthStatusMock.mockReturnValueOnce({ authenticated: true });
+		providerGetMock.mockReturnValueOnce({ accessToken: 'mm' });
 
 		const openai = new OpenAIProvider();
 		const minimax = new MiniMaxProvider();
-		expect(openai.getAuthHeader()).toBe('Bearer oa');
+		const openaiHeader = await openai.getAuthHeader();
+		expect(openaiHeader).toBe('Bearer oa');
+		expect(openai.isAuthenticated()).toBe(true);
 		expect(minimax.getAuthHeader()).toBe('Bearer mm');
 
 		openai.logout();
 		minimax.logout();
-		expect(providerRemoveMock).toHaveBeenCalledWith('openai');
+		expect(openaiLogoutMock).toHaveBeenCalled();
+		expect(providerRemoveMock).not.toHaveBeenCalledWith('openai');
 		expect(providerRemoveMock).toHaveBeenCalledWith('minimax');
 	});
 
-	it('openai and minimax providers return null auth headers without tokens', () => {
-		providerGetMock.mockReturnValueOnce(null).mockReturnValueOnce({}).mockReturnValueOnce(null).mockReturnValueOnce({});
+	it('openai and minimax providers return null auth headers without tokens', async () => {
+		openaiGetValidTokenMock.mockResolvedValueOnce(null);
+		openaiGetAuthStatusMock.mockReturnValueOnce({ authenticated: false });
+		providerGetMock.mockReturnValueOnce(null).mockReturnValueOnce({});
 
 		const openai = new OpenAIProvider();
 		const minimax = new MiniMaxProvider();
-		expect(openai.getAuthHeader()).toBeNull();
+		const openaiHeader = await openai.getAuthHeader();
+		expect(openaiHeader).toBeNull();
 		expect(openai.isAuthenticated()).toBe(false);
 		expect(minimax.getAuthHeader()).toBeNull();
 		expect(minimax.isAuthenticated()).toBe(false);
