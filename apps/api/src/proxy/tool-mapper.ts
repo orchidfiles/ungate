@@ -91,6 +91,8 @@ const VALID_CLAUDE_CODE_TOOLS = new Set([
 	'SwitchMode',
 	'CallMcpTool',
 	'GetMcpTools',
+	'CallDynamicTool',
+	'GetDynamicTools',
 	'FetchMcpResource',
 	'ListMcpResources',
 	'GenerateImage',
@@ -103,6 +105,7 @@ export class ToolMapper {
 		const usedNames = new Set<string>();
 		const filteredTools: Tool[] = [];
 		const reverseMapping: Record<string, string> = {};
+		const dropped: string[] = [];
 
 		for (const tool of tools) {
 			const originalName = tool.name;
@@ -140,8 +143,15 @@ export class ToolMapper {
 
 				logger.log(`Mapped tool: ${tool.name} -> ${uniqueName}`);
 				filteredTools.push({ ...tool, name: uniqueName });
+				continue;
 			}
-			// Unknown tools are silently dropped for OAuth compatibility
+
+			// Unknown tools are dropped for OAuth compatibility; log them so a missing tool is visible.
+			dropped.push(tool.name);
+		}
+
+		if (dropped.length > 0) {
+			logger.log(`Dropped tools: ${dropped.join(', ')}`);
 		}
 
 		return { tools: filteredTools, reverseMapping };

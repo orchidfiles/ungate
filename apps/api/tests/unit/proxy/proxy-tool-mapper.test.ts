@@ -25,7 +25,7 @@ describe('proxy-tool-mapper', () => {
 	});
 
 	it('passes Cursor MCP tools through unchanged', () => {
-		const names = ['CallMcpTool', 'GetMcpTools', 'FetchMcpResource', 'ListMcpResources'];
+		const names = ['CallMcpTool', 'GetMcpTools', 'CallDynamicTool', 'GetDynamicTools', 'FetchMcpResource', 'ListMcpResources'];
 		const result = ToolMapper.map(names.map((name) => ({ name, description: '', input_schema: {} })));
 
 		expect(result.tools.map((tool) => tool.name)).toEqual(names);
