@@ -8,6 +8,13 @@ export interface RequestContext {
 	inputTokens?: number;
 	outputTokens?: number;
 	bodyJson?: unknown;
+	/**
+	 * Post-commit hook for an upstream error delivered inside an already-forwarded stream. Never
+	 * retries; lets the proxy client cool down the serving account when it is a usage limit.
+	 */
+	onStreamError?: (error: Record<string, unknown> | undefined) => void;
+	/** The response body records its own single analytics row at stream end (success or failure). */
+	telemetryDeferred?: boolean;
 }
 
 export interface ProxyResult {
