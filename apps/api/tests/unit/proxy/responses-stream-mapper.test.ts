@@ -178,4 +178,70 @@ describe('responses-stream-mapper replay', () => {
 		});
 		expect(got.finishReason).toBe('stop');
 	});
+
+	it('response.failed emits an error result, no done, and ignores later events', () => {
+		const state = StreamStateFactory.create('gpt-5.3-codex');
+		const out = ResponsesSseProcessor.process(
+			state,
+			encodeSse([
+				{ type: 'response.created', response: { id: 'resp_fail' } },
+				{ type: 'response.output_text.delta', delta: 'partial' },
+				{
+					type: 'response.failed',
+					response: { error: { code: 'server_error', message: 'Something went wrong' } }
+				},
+				{ type: 'response.completed', response: {} }
+			])
+		);
+
+		expect(out.map((r) => r.type)).toEqual(['chunk', 'error']);
+		expect(out[1].data).toEqual({ error: { message: 'Something went wrong', type: 'server_error', code: 'server_error' } });
+		expect(state.terminal).toBe('failed');
+		expect(state.failure?.code).toBe('server_error');
+	});
+
+	it('error event with usage_limit_reached keeps resets_at in the raw upstream error', () => {
+		const state = StreamStateFactory.create('gpt-5.3-codex');
+		const out = ResponsesSseProcessor.process(
+			state,
+			encodeSse([
+				{
+					type: 'error',
+					error: { type: 'usage_limit_reached', message: 'The usage limit has been reached', resets_at: 1_900_000_000 }
+				}
+			])
+		);
+
+		expect(out).toHaveLength(1);
+		expect(out[0].type).toBe('error');
+		expect(out[0].upstreamError).toMatchObject({ type: 'usage_limit_reached', resets_at: 1_900_000_000 });
+		expect(out[0].data).toEqual({
+			error: { message: 'The usage limit has been reached', type: 'usage_limit_reached', code: 'usage_limit_reached' }
+		});
+	});
+
+	it('flat error event ({ code, message }) is an error, not success', () => {
+		const state = StreamStateFactory.create('gpt-5.3-codex');
+		const out = ResponsesSseProcessor.process(
+			state,
+			encodeSse([{ type: 'error', code: 'rate_limit_exceeded', message: 'slow' }])
+		);
+
+		expect(out.map((r) => r.type)).toEqual(['error']);
+		expect(out[0].data).toEqual({ error: { message: 'slow', type: 'rate_limit_exceeded', code: 'rate_limit_exceeded' } });
+	});
+
+	it('response.incomplete finishes with length (not stop) and keeps usage', () => {
+		const got = collectChunks([
+			{ type: 'response.output_text.delta', delta: 'cut' },
+			{
+				type: 'response.incomplete',
+				response: { incomplete_details: { reason: 'max_output_tokens' }, usage: { input_tokens: 2, output_tokens: 3 } }
+			}
+		]);
+
+		expect(got.finishReason).toBe('length');
+		expect(got.doneCount).toBe(1);
+		expect(got.chunks.at(-1)?.usage).toEqual({ prompt_tokens: 2, completion_tokens: 3, total_tokens: 0 });
+	});
 });

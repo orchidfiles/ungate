@@ -1,22 +1,39 @@
 import type { CodexAuthInfo } from './types';
 
 export class OpenAIOAuthUtils {
-	public static parseIdToken(idToken: string): { email: string | null; authInfo: CodexAuthInfo | null } {
+	public static parseIdToken(idToken: string): { email: string | null; authInfo: CodexAuthInfo | null; userId: string | null } {
 		try {
 			const parts = idToken.split('.');
 
 			if (parts.length !== 3) {
-				return { email: null, authInfo: null };
+				return { email: null, authInfo: null, userId: null };
 			}
 
 			const decoded = JSON.parse(this.decodeBase64(parts[1])) as Record<string, unknown>;
 			const email = typeof decoded.email === 'string' ? decoded.email : null;
 			const authInfoRecord = decoded['https://api.openai.com/auth'] as CodexAuthInfo | undefined;
 
-			return { email, authInfo: authInfoRecord ?? null };
+			const userId =
+				typeof decoded.sub === 'string' ? decoded.sub : (authInfoRecord?.chatgpt_user_id ?? authInfoRecord?.user_id ?? null);
+
+			return { email, authInfo: authInfoRecord ?? null, userId };
 		} catch {
-			return { email: null, authInfo: null };
+			return { email: null, authInfo: null, userId: null };
 		}
+	}
+
+	/** Callback page. The error text is HTML-escaped; full status is also available via the session API. */
+	public static callbackPage(ok: boolean, error?: string): string {
+		if (ok) {
+			return '<html><body><h1>Connected!</h1><p>You can close this window.</p><script>window.close()</script></body></html>';
+		}
+		const detail = this.escapeHtml(error ?? 'Login failed. Return to Ungate for details.');
+
+		return `<html><body><h1>Error</h1><p>${detail}</p></body></html>`;
+	}
+
+	public static escapeHtml(value: string): string {
+		return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 	}
 
 	public static resolveWorkspace(authInfo: CodexAuthInfo | null): string | null {
