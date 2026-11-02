@@ -10,7 +10,7 @@ if (!existsSync(bin)) {
 	console.log('[tunnel] cloudflared installed');
 }
 
-const tunnel = Tunnel.quick(`http://localhost:${port}`, {
+const tunnel = Tunnel.quick(`http://127.0.0.1:${port}`, {
 	'--config': '/dev/null',
 	'--edge-ip-version': '4'
 });

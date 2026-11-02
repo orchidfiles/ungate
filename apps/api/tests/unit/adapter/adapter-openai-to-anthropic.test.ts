@@ -41,6 +41,20 @@ describe('openai-to-anthropic', () => {
 			reasoningBudget: undefined
 		});
 		expect(normalizeModelName('custom-model')).toEqual({ model: 'custom-model' });
+		expect(normalizeModelName('claude-opus-5.5')).toEqual({ model: 'claude-opus-5-5' });
+	});
+
+	it('rewrites a mapped dotted Opus 5.5 id to the hyphenated upstream id', () => {
+		const result = openaiToAnthropic(
+			{
+				model: 'opus-5.5-high',
+				messages: [{ role: 'user', content: 'hello' }]
+			},
+			{ model: 'claude-opus-5.5', reasoningBudget: 'high' }
+		);
+
+		expect(result.model).toBe('claude-opus-5-5');
+		expect(result.reasoning_budget).toBe('high');
 	});
 
 	it('maps system/user/assistant/tool messages and tools', () => {
@@ -204,9 +218,7 @@ describe('openai-to-anthropic', () => {
 				{
 					role: 'assistant',
 					content: 'calling',
-					tool_calls: [
-						{ id: 'toolu_01ABC-xyz', type: 'function', function: { name: 'read_file', arguments: '{}' } }
-					]
+					tool_calls: [{ id: 'toolu_01ABC-xyz', type: 'function', function: { name: 'read_file', arguments: '{}' } }]
 				},
 				{ role: 'tool', tool_call_id: 'toolu_01ABC-xyz', content: 'ok' }
 			]

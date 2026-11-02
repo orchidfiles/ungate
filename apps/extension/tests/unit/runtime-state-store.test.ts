@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { RuntimeStateStore } from '../../src/runtime-state/runtime-state-store';
+import { RuntimeStateStore, staleRunningApiNeedsRestart } from '../../src/runtime-state/runtime-state-store';
 
 import type { RuntimeState, TunnelStatus } from '@ungate/shared/frontend';
 
@@ -78,6 +78,10 @@ describe('RuntimeStateStore', () => {
 		expect(next.api.startSuppressed).toBe(false);
 		expect(next.api.status).toBe('stopped');
 		expect(next.api.port).toBeNull();
+		expect(fetch).toHaveBeenCalledWith(
+			'http://127.0.0.1:47821/health',
+			expect.objectContaining({ signal: expect.any(AbortSignal) })
+		);
 	});
 
 	it('suppressApiAutoStart blocks further automatic starts in the same session', async () => {
@@ -136,5 +140,104 @@ describe('RuntimeStateStore', () => {
 		expect(next.tunnel.status).toBe('running');
 		expect(next.tunnel.url).toBe(orphaned.tunnel.url);
 		expect(next.tunnel.ownerWindowId).toBe('window-a');
+	});
+
+	describe('staleRunningApiNeedsRestart', () => {
+		const now = 1_000_000;
+		const startingTimeoutMs = 10_000;
+
+		function runningApi(overrides: Partial<RuntimeState['api']> = {}): RuntimeState['api'] {
+			return {
+				...createState('running').api,
+				startSuppressed: false,
+				lastSeenAt: now,
+				...overrides
+			};
+		}
+
+		it('restarts a running API whose pid is dead', () => {
+			expect(
+				staleRunningApiNeedsRestart(runningApi(), {
+					now,
+					pidAlive: false,
+					portHealthy: false,
+					startingTimeoutMs
+				})
+			).toBe(true);
+		});
+
+		it('restarts a running API whose IPv4 health check fails', () => {
+			expect(
+				staleRunningApiNeedsRestart(runningApi(), {
+					now,
+					pidAlive: true,
+					portHealthy: false,
+					startingTimeoutMs
+				})
+			).toBe(true);
+		});
+
+		it('restarts a running API that has no pid', () => {
+			expect(
+				staleRunningApiNeedsRestart(runningApi({ pid: null }), {
+					now,
+					pidAlive: false,
+					portHealthy: true,
+					startingTimeoutMs
+				})
+			).toBe(true);
+		});
+
+		it('leaves a healthy running API', () => {
+			expect(
+				staleRunningApiNeedsRestart(runningApi(), {
+					now,
+					pidAlive: true,
+					portHealthy: true,
+					startingTimeoutMs
+				})
+			).toBe(false);
+		});
+
+		it('leaves a fresh starting API alone', () => {
+			expect(
+				staleRunningApiNeedsRestart(runningApi({ status: 'starting', ownerWindowId: 'other-window' }), {
+					now: now + 1_000,
+					pidAlive: false,
+					portHealthy: false,
+					startingTimeoutMs
+				})
+			).toBe(false);
+		});
+
+		it('restarts a starting API after the startup timeout', () => {
+			expect(
+				staleRunningApiNeedsRestart(runningApi({ status: 'starting' }), {
+					now: now + startingTimeoutMs,
+					pidAlive: false,
+					portHealthy: false,
+					startingTimeoutMs
+				})
+			).toBe(true);
+		});
+
+		it('does not restart a suppressed or stopped API', () => {
+			expect(
+				staleRunningApiNeedsRestart(runningApi({ startSuppressed: true }), {
+					now,
+					pidAlive: false,
+					portHealthy: false,
+					startingTimeoutMs
+				})
+			).toBe(false);
+			expect(
+				staleRunningApiNeedsRestart(runningApi({ status: 'stopped' }), {
+					now,
+					pidAlive: false,
+					portHealthy: false,
+					startingTimeoutMs
+				})
+			).toBe(false);
+		});
 	});
 });

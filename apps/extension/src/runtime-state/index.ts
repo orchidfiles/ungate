@@ -1,1 +1,1 @@
-export { RuntimeStateStore } from './runtime-state-store';
+export { isProcessAlive, RuntimeStateStore, staleRunningApiNeedsRestart } from './runtime-state-store';

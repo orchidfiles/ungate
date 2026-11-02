@@ -28,7 +28,9 @@ export const config = {
 		// Request timeout for periodic API health checks.
 		healthCheckRequestTimeoutMs: 2000,
 		// Request timeout used when validating an existing API port.
-		portHealthRequestTimeoutMs: 1500
+		portHealthRequestTimeoutMs: 1500,
+		// Another window's `starting` state is left alone until this age.
+		startingStateTimeoutMs: 10000
 	},
 	tunnelManager: {
 		// Interval for checking if tunnel should auto-stop without live windows.

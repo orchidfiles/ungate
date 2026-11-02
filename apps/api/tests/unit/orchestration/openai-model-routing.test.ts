@@ -4,7 +4,9 @@ import { CompletionModelRouting } from 'src/orchestration/openai';
 
 import type { ModelMappingConfig } from '@ungate/shared';
 
-function mapping(partial: Partial<ModelMappingConfig> & Pick<ModelMappingConfig, 'provider' | 'upstreamModel'>): ModelMappingConfig {
+function mapping(
+	partial: Partial<ModelMappingConfig> & Pick<ModelMappingConfig, 'provider' | 'upstreamModel'>
+): ModelMappingConfig {
 	return {
 		id: partial.id ?? 'id',
 		label: partial.label ?? 'label',
@@ -65,5 +67,21 @@ describe('CompletionModelRouting', () => {
 		expect(plain.model).toBe('gpt-2');
 		expect('reasoning' in plain).toBe(false);
 		expect('service_tier' in plain).toBe(false);
+	});
+
+	it('keeps GPT-6 Astra on its upstream id when the custom id is ungate-astra-medium', () => {
+		const body = { model: 'ungate-astra-medium', messages: [], stream: true } as const;
+		const astra = mapping({
+			id: 'ungate-astra-medium',
+			provider: 'openai',
+			upstreamModel: 'gpt-6-astra',
+			reasoningBudget: 'high',
+			serviceTier: 'default'
+		});
+		const upstream = CompletionModelRouting.buildOpenAiUpstreamBody(body as never, astra);
+
+		expect(upstream.model).toBe('gpt-6-astra');
+		expect(upstream.reasoning).toEqual({ effort: 'high' });
+		expect(upstream.service_tier).toBe('default');
 	});
 });

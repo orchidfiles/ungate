@@ -1,3 +1,12 @@
+/** IPv4 loopback. `localhost` is ::1 here, and the API listens on IPv4 only. */
+export function localApiBaseUrl(port: number): string {
+	return `http://127.0.0.1:${port}`;
+}
+
+export function localApiHealthUrl(port: number): string {
+	return `${localApiBaseUrl(port)}/health`;
+}
+
 function rejectAbort(reject: (reason?: unknown) => void): void {
 	reject(new DOMException('Aborted', 'AbortError'));
 }

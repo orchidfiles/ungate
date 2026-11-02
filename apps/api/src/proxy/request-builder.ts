@@ -10,7 +10,7 @@ import type { AnthropicRequest, ContentBlock, ThinkingEffort } from '../types';
 
 const VALID_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-// Opus 4.7/4.8 reject manual budget_tokens (400). They use adaptive thinking,
+// Opus 4.7, 4.8, and 5.5 reject manual budget_tokens (400). They use adaptive thinking,
 // controlled by the `effort` parameter in a top-level `output_config` object.
 // reasoning_budget is always a tier string ('low' | 'medium' | 'high' | 'xhigh')
 // set from the model mapping; pass it through verbatim as the effort level.
@@ -114,7 +114,7 @@ export class RequestBuilder {
 			const budgetValue = prepared.reasoning_budget;
 			delete prepared.reasoning_budget;
 
-			// Translate the tier into adaptive thinking + effort. Opus 4.7/4.8 only
+			// Translate the tier into adaptive thinking + effort. Opus 4.7, 4.8, and 5.5 only
 			// support this form; manual budget_tokens returns a 400. `effort` has no
 			// effect without `thinking.type: "adaptive"`, so both must be set.
 			const effort = resolveEffort(budgetValue);

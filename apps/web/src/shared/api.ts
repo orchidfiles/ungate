@@ -1,4 +1,5 @@
 import {
+	localApiBaseUrl,
 	sleep,
 	type AnalyticsSummary,
 	type AppSettings,
@@ -62,7 +63,7 @@ export class Api {
 	private static async baseUrl(): Promise<string> {
 		const port = await this.getPort();
 
-		return `http://localhost:${port}`;
+		return localApiBaseUrl(port);
 	}
 
 	private static async get<T>(path: string): Promise<T> {

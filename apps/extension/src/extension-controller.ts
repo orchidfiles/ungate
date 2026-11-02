@@ -15,7 +15,7 @@ import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar } from './extension-status-bar';
 import { OpenAiKeyFix } from './openai-key-fix';
-import { RuntimeStateStore } from './runtime-state';
+import { isProcessAlive, RuntimeStateStore, staleRunningApiNeedsRestart } from './runtime-state';
 import { config } from './runtime-state/config';
 import { TunnelManager } from './tunnel-manager';
 
@@ -452,6 +452,7 @@ export class ExtensionController {
 		}
 
 		runtimeState = await RuntimeStateStore.reconcileOrphanedTunnel(runtimeState);
+		runtimeState = await this.recoverDeadApi(runtimeState);
 
 		await this.keyFix.applySharedState(runtimeState.keyFix.enabled);
 		this.applyRuntimeState(runtimeState);
@@ -579,6 +580,35 @@ export class ExtensionController {
 		const leaderWindowId = RuntimeStateStore.getLeaderWindowId(state);
 
 		return leaderWindowId === this.windowId;
+	}
+
+	private async recoverDeadApi(runtimeState: RuntimeState): Promise<RuntimeState> {
+		if (!this.isLeaderWindow(runtimeState)) {
+			return runtimeState;
+		}
+
+		if (this.apiServer.getPort() !== null || this.apiServer.isStartupInProgress()) {
+			return runtimeState;
+		}
+
+		const api = runtimeState.api;
+		const portHealthy = api.port != null ? await RuntimeStateStore.isApiPortHealthy(api.port) : false;
+		const needsRestart = staleRunningApiNeedsRestart(api, {
+			now: Date.now(),
+			pidAlive: isProcessAlive(api.pid),
+			portHealthy,
+			startingTimeoutMs: config.apiServer.startingStateTimeoutMs
+		});
+
+		if (!needsRestart) {
+			return runtimeState;
+		}
+
+		await RuntimeStateStore.resetApiForRestart();
+		const next = RuntimeStateStore.read();
+		this.startApiAsLeaderIfNeeded(next);
+
+		return next;
 	}
 
 	private startApiAsLeaderIfNeeded(runtimeState: RuntimeState): void {
