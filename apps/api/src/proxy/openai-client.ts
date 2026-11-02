@@ -1,13 +1,18 @@
 import { logger } from 'src/utils/logger';
 
+import { OpenAIOAuthService } from '../auth/openai/openai-oauth-service';
 import { config } from '../config';
 import { Settings } from '../database/app-settings';
-import { ProviderSettings } from '../database/provider-settings';
+import { Requests } from '../database/requests';
 
+import { AccountFallback } from './account-fallback';
 import { ResponsesBodyBuilder } from './responses-input-normalizer/build-body';
 import { ResponsesModelResolver } from './responses-input-normalizer/resolve-model';
-import { ResponsesSseProcessor, StreamDiagnostics, StreamStateFactory } from './responses-stream-mapper';
+import { ResponsesSseProcessor, StreamDiagnostics, StreamStateFactory, type StreamState } from './responses-stream-mapper';
+import { SsePrecommitGate } from './sse-precommit-gate';
+import { UsageLimitClassifier } from './usage-limit-classifier';
 
+import type { OAuthCredentials } from '../auth/base-provider';
 import type { OpenAIChatRequest } from '../types/openai';
 import type { RequestContext } from '../types/proxy';
 
@@ -23,51 +28,108 @@ interface ProxyOpenAiResult {
 }
 
 export class OpenAiClient {
-	static async proxy(body: OpenAIChatRequest): Promise<ProxyOpenAiResult> {
+	static async proxy(body: OpenAIChatRequest, signal?: AbortSignal): Promise<ProxyOpenAiResult> {
 		const startTime = Date.now();
 		const model = body.model;
 		const resolvedModel = ResponsesModelResolver.resolveModel(model);
 		const normalizedModel = resolvedModel.model;
-		const creds = ProviderSettings.get('openai');
+		const requestBody = JSON.stringify(this.buildCodexBody(body, model, normalizedModel));
+		let missingWorkspace = false;
+		let outcome: Awaited<ReturnType<typeof AccountFallback.run<OAuthCredentials>>>;
 
-		if (!creds?.accessToken) {
-			return this.authErrorResult(model, startTime, 'Not authenticated with OpenAI');
+		try {
+			// Each attempt is pinned to one local account; usage limits rotate via the shared coordinator.
+			outcome = await AccountFallback.run<OAuthCredentials>({
+				provider: 'openai',
+				// Account-scoped refresh service (dedupes concurrent refreshes, respects needs-login state).
+				getCredentials: async (localAccountId) => {
+					const creds = await OpenAIOAuthService.getValidToken(localAccountId);
+					if (creds?.accessToken && !creds.accountId) missingWorkspace = true;
+
+					return creds?.accessToken && creds.accountId ? creds : null;
+				},
+				send: (creds) => this.sendPinned(requestBody, creds, signal),
+				// Codex always streams SSE: explicit early usage-limit events rotate before commit.
+				inspect: SsePrecommitGate.inspector('openai', { signal }),
+				signal
+			});
+		} catch (error) {
+			if (signal?.aborted) {
+				logger.log('ChatGPT Codex request aborted by client; fallback stopped');
+
+				return this.errorResult(model, startTime, 499, { message: 'Client closed request', type: 'client_closed_request' });
+			}
+			logger.error(`ChatGPT Codex request failed: ${String(error)}`);
+
+			return this.errorResult(model, startTime, 502, { message: `ChatGPT request failed: ${String(error)}`, type: 'api_error' });
 		}
 
-		const accountId = creds.accountId;
-
-		if (!accountId) {
-			return this.authErrorResult(model, startTime, 'ChatGPT account id missing. Re-login to refresh your ChatGPT token.');
+		if (outcome.kind === 'no_credentials') {
+			return this.authErrorResult(
+				model,
+				startTime,
+				missingWorkspace ? 'ChatGPT account id missing. Re-login to refresh your ChatGPT token.' : 'Not authenticated with OpenAI'
+			);
 		}
 
-		const response = await this.fetchCodexResponses(body, model, normalizedModel, creds.accessToken, accountId);
+		if (outcome.kind === 'limited') {
+			logger.log(`ChatGPT Codex usage limit: no eligible account (${outcome.reason})`);
 
-		if (!response.ok) {
-			return this.upstreamErrorResult(response, model, startTime);
+			return this.errorResult(model, startTime, 429, { message: outcome.message, type: 'usage_limit_reached' }, outcome.headers);
 		}
 
-		return this.successResult(body, response, model, normalizedModel, startTime);
+		if (!outcome.response.ok) {
+			return this.upstreamErrorResult(outcome.response, model, startTime);
+		}
+
+		const onStreamError = SsePrecommitGate.cooldownOnStreamLimit(
+			'openai',
+			outcome.accountId,
+			outcome.credentials.credentialVersion,
+			outcome.response.headers
+		);
+
+		return this.successResult(body, outcome.response, model, normalizedModel, startTime, onStreamError);
 	}
 
-	private static authErrorResult(model: string, startTime: number, message: string): ProxyOpenAiResult {
-		const errorResponse = new Response(JSON.stringify({ error: { message, type: 'authentication_error' } }), {
-			status: 401,
-			headers: { 'Content-Type': 'application/json' }
-		});
+	/** One Codex attempt pinned to `creds`' account, with one same-account refresh retry on 401. */
+	private static async sendPinned(
+		requestBody: string,
+		creds: OAuthCredentials,
+		signal?: AbortSignal
+	): Promise<{ response: Response; credentials: OAuthCredentials }> {
+		const response = await this.fetchCodexResponses(requestBody, creds.accessToken, creds.accountId!, signal);
+
+		if (response.status !== 401 || !creds.localAccountId) return { response, credentials: creds };
+
+		await response.body?.cancel().catch(() => undefined);
+		logger.log(`ChatGPT Codex 401: refreshing token for account ${creds.localAccountId}`);
+		const refreshed = await OpenAIOAuthService.refreshAccountToken(creds.localAccountId, creds.credentialVersion);
+
+		if (!refreshed?.accessToken || !refreshed.accountId) {
+			return {
+				response: new Response(
+					JSON.stringify({ error: { message: 'ChatGPT OAuth token invalid', type: 'authentication_error' } }),
+					{
+						status: 401,
+						headers: { 'content-type': 'application/json' }
+					}
+				),
+				credentials: creds
+			};
+		}
 
 		return {
-			response: errorResponse,
-			context: this.errorContext(model, startTime)
+			response: await this.fetchCodexResponses(requestBody, refreshed.accessToken, refreshed.accountId, signal),
+			credentials: refreshed
 		};
 	}
 
-	private static async fetchCodexResponses(
-		body: OpenAIChatRequest,
-		model: string,
-		normalizedModel: string,
-		accessToken: string,
-		accountId: string
-	): Promise<Response> {
+	private static authErrorResult(model: string, startTime: number, message: string): ProxyOpenAiResult {
+		return this.errorResult(model, startTime, 401, { message, type: 'authentication_error' });
+	}
+
+	private static buildCodexBody(body: OpenAIChatRequest, model: string, normalizedModel: string): unknown {
 		const rawExtraInstruction = Settings.get().extraInstruction;
 		const extraInstruction = rawExtraInstruction ?? undefined;
 		const buildResult = ResponsesBodyBuilder.buildBody(body, model, {
@@ -84,7 +146,17 @@ export class OpenAiClient {
 
 		logger.log(`OpenAI Codex proxy: ${model} → ${normalizedModel} tools=${incomingToolCount} stream=${body.stream ?? false}`);
 
+		return requestBody;
+	}
+
+	private static fetchCodexResponses(
+		requestBody: string,
+		accessToken: string,
+		accountId: string,
+		signal?: AbortSignal
+	): Promise<Response> {
 		return fetch(`${config.openai.codexUrl}/responses`, {
+			signal,
 			method: 'POST',
 			headers: {
 				'content-type': 'application/json',
@@ -93,49 +165,60 @@ export class OpenAiClient {
 				originator: 'codex_cli_rs',
 				accept: 'text/event-stream'
 			},
-			body: JSON.stringify(requestBody)
+			body: requestBody
 		});
 	}
 
-	private static async upstreamErrorResult(response: Response, model: string, startTime: number): Promise<ProxyOpenAiResult> {
-		const errorText = await response.text();
-		logger.error('ChatGPT Codex upstream error:', response.status, errorText);
-		const errorMessage = this.parseUpstreamError(response.status, errorText);
-		const errorResponse = new Response(JSON.stringify({ error: { message: errorMessage, type: 'api_error' } }), {
-			status: response.status,
-			headers: { 'Content-Type': 'application/json' }
-		});
-
+	private static errorResult(
+		model: string,
+		startTime: number,
+		status: number,
+		error: { message: string; type: string; code?: string },
+		headers: Record<string, string> = {}
+	): ProxyOpenAiResult {
 		return {
-			response: errorResponse,
+			response: new Response(JSON.stringify({ error }), {
+				status,
+				headers: { ...headers, 'Content-Type': 'application/json' }
+			}),
 			context: this.errorContext(model, startTime)
 		};
 	}
 
-	private static parseUpstreamError(status: number, errorText: string): string {
-		let errorMessage = `ChatGPT API error (${status})`;
+	/** Keeps upstream status, message, error type/code and safe retry hints; drops stale length/encoding. */
+	private static async upstreamErrorResult(response: Response, model: string, startTime: number): Promise<ProxyOpenAiResult> {
+		const errorText = await response.text().catch(() => '');
+		logger.error('ChatGPT Codex upstream error:', response.status, errorText.slice(0, 2000));
+		const error = this.parseUpstreamError(response.status, errorText);
+
+		return this.errorResult(model, startTime, response.status, error, AccountFallback.safeRetryHeaders(response.headers));
+	}
+
+	private static parseUpstreamError(status: number, errorText: string): { message: string; type: string; code?: string } {
+		let message = `ChatGPT API error (${status})`;
+		let type = 'api_error';
+		let code: string | undefined;
 
 		try {
 			const errBody = JSON.parse(errorText) as {
-				error?: { message?: string };
-				message?: string;
-				detail?: string;
+				error?: { message?: unknown; type?: unknown; code?: unknown };
+				message?: unknown;
+				detail?: unknown;
 			};
+			const candidate = [errBody.error?.message, errBody.message, errBody.detail].find(
+				(value): value is string => typeof value === 'string' && value.trim() !== ''
+			);
 
-			if (errBody.error?.message) {
-				errorMessage = errBody.error.message;
-			} else if (errBody.message) {
-				errorMessage = errBody.message;
-			} else if (errBody.detail) {
-				errorMessage = errBody.detail;
-			}
+			if (candidate) message = candidate;
+			if (typeof errBody.error?.type === 'string' && errBody.error.type) type = errBody.error.type;
+			if (typeof errBody.error?.code === 'string' && errBody.error.code) code = errBody.error.code;
 		} catch {
 			if (errorText.trim()) {
-				errorMessage = `${errorMessage}: ${errorText.slice(0, 500)}`;
+				message = `${message}: ${errorText.slice(0, 500)}`;
 			}
 		}
 
-		return errorMessage;
+		return code ? { message, type, code } : { message, type };
 	}
 
 	private static async successResult(
@@ -143,56 +226,109 @@ export class OpenAiClient {
 		response: Response,
 		model: string,
 		normalizedModel: string,
-		startTime: number
+		startTime: number,
+		onStreamError: (error: Record<string, unknown> | undefined) => void
 	): Promise<ProxyOpenAiResult> {
 		const stream = body.stream ?? false;
+		// Fresh conversion/tool state for the committed attempt only.
 		const state = StreamStateFactory.create(normalizedModel);
 
 		if (stream) {
-			const streamResponse = this.streamResponse(response, state);
+			const context: RequestContext = { ...this.openAiContext(model, startTime), telemetryDeferred: true };
 
-			return {
-				response: streamResponse,
-				context: this.openAiContext(model, startTime)
-			};
+			return { response: this.streamResponse(response, state, context, onStreamError), context };
 		}
 
-		const bufferedResponse = await this.bufferedResponse(response, state, normalizedModel);
+		const buffered = await this.bufferedResponse(response, state, normalizedModel, onStreamError);
 
-		return {
-			response: bufferedResponse,
-			context: this.openAiContext(model, startTime)
-		};
+		return buffered.failed
+			? { response: buffered.response, context: this.errorContext(model, startTime) }
+			: { response: buffered.response, context: this.openAiContext(model, startTime) };
 	}
 
-	private static streamResponse(response: Response, state: ReturnType<typeof StreamStateFactory.create>): Response {
+	/**
+	 * Converts the committed Codex SSE body to OpenAI chunks. Post-commit failures are never
+	 * replayed: `response.failed` / `error` reach the client as an error event without `[DONE]`,
+	 * and a stream ending without any terminal event is reported as an error, not success.
+	 * Records exactly one analytics row with the terminal outcome when the stream ends.
+	 */
+	private static streamResponse(
+		response: Response,
+		state: StreamState,
+		context: RequestContext,
+		onStreamError: (error: Record<string, unknown> | undefined) => void
+	): Response {
 		const reader = response.body!.getReader();
 		const decoder = new TextDecoder();
+		let cancelled = false;
+		let recorded = false;
 
-		const streamBody = new ReadableStream({
+		const recordOutcome = (error?: string) => {
+			if (recorded) return;
+			recorded = true;
+			Requests.record({
+				model: context.model,
+				source: error ? 'error' : context.source,
+				inputTokens: state.usage?.prompt_tokens ?? 0,
+				outputTokens: state.usage?.completion_tokens ?? 0,
+				stream: true,
+				latencyMs: Date.now() - context.startTime,
+				error: error?.slice(0, 500) ?? null
+			});
+		};
+
+		const streamBody = new ReadableStream<string>({
 			async start(controller) {
-				while (true) {
-					const { done, value } = await reader.read();
+				const emit = (text: string) => {
+					if (!cancelled) controller.enqueue(text);
+				};
 
-					if (done) {
-						break;
-					}
+				try {
+					while (!cancelled && !state.terminal) {
+						const { done, value } = await reader.read();
+						if (done || cancelled) break;
 
-					const text = decoder.decode(value, { stream: true });
-					const results = ResponsesSseProcessor.process(state, text);
-
-					for (const result of results) {
-						if (result.type === 'chunk') {
-							controller.enqueue(`data: ${JSON.stringify(result.data)}\n\n`);
-						} else if (result.type === 'done') {
-							controller.enqueue('data: [DONE]\n\n');
+						for (const result of ResponsesSseProcessor.process(state, decoder.decode(value, { stream: true }))) {
+							if (result.type === 'chunk') {
+								emit(`data: ${JSON.stringify(result.data)}\n\n`);
+							} else if (result.type === 'done') {
+								emit('data: [DONE]\n\n');
+							} else {
+								onStreamError(result.upstreamError);
+								emit(`data: ${JSON.stringify(result.data)}\n\n`);
+							}
 						}
 					}
-				}
 
-				reader.releaseLock();
-				StreamDiagnostics.logFinished(state, 'stream');
-				controller.close();
+					if (cancelled) return;
+					if (state.terminal === 'failed') {
+						recordOutcome(state.failure?.message ?? 'ChatGPT stream failed');
+					} else if (!state.terminal) {
+						const message = 'ChatGPT stream ended before completion';
+						logger.error(`[Codex] ${message}`);
+						emit(`data: ${JSON.stringify({ error: { message, type: 'api_error', code: 'stream_incomplete' } })}\n\n`);
+						recordOutcome(message);
+					} else {
+						recordOutcome();
+					}
+					StreamDiagnostics.logFinished(state, 'stream');
+					controller.close();
+				} catch (error) {
+					if (cancelled) return;
+					logger.error(`[Codex] stream processing failed: ${String(error)}`);
+					recordOutcome(`Stream processing failed: ${String(error)}`);
+					controller.error(error);
+				} finally {
+					// Stops the upstream body after a terminal event or failure (no-op when already done).
+					await reader.cancel().catch(() => undefined);
+				}
+			},
+			cancel(reason) {
+				cancelled = true;
+				logger.log(`[Codex] downstream cancelled stream: ${String(reason)}`);
+				recordOutcome('Client cancelled stream');
+
+				return reader.cancel(reason).catch(() => undefined);
 			}
 		});
 
@@ -202,65 +338,87 @@ export class OpenAiClient {
 		});
 	}
 
+	/**
+	 * Buffered (non-streaming) completion from the always-SSE Codex upstream. `response.failed` /
+	 * `error` / a missing terminal event become an OpenAI error response (429 for a recognized
+	 * usage limit, which also cools the account down; 502 otherwise) instead of an empty success.
+	 * `response.incomplete` keeps the partial text with `finish_reason: "length"`.
+	 */
 	private static async bufferedResponse(
 		response: Response,
-		state: ReturnType<typeof StreamStateFactory.create>,
-		normalizedModel: string
-	): Promise<Response> {
+		state: StreamState,
+		normalizedModel: string,
+		onStreamError: (error: Record<string, unknown> | undefined) => void
+	): Promise<{ response: Response; failed: boolean }> {
 		let fullContent = '';
+		let finishReason = 'stop';
 		const reader = response.body!.getReader();
 		const decoder = new TextDecoder();
 
-		while (true) {
-			const { done, value } = await reader.read();
+		try {
+			while (!state.terminal) {
+				const { done, value } = await reader.read();
 
-			if (done) {
-				break;
-			}
+				if (done) {
+					break;
+				}
 
-			const text = decoder.decode(value, { stream: true });
-			const results = ResponsesSseProcessor.process(state, text);
-
-			for (const result of results) {
-				if (result.type === 'chunk') {
-					const chunkData = result.data as
-						| {
-								choices?: {
-									delta?: {
-										content?: string | null;
-									};
-								}[];
-						  }
-						| undefined;
-
-					if (chunkData?.choices?.[0]?.delta) {
-						const delta = chunkData.choices[0].delta;
-
-						if (typeof delta.content === 'string') {
-							fullContent += delta.content;
-						}
+				for (const result of ResponsesSseProcessor.process(state, decoder.decode(value, { stream: true }))) {
+					if (result.type === 'error') {
+						onStreamError(result.upstreamError);
+						continue;
 					}
+					if (result.type !== 'chunk') continue;
+					const choice = (result.data as { choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[] })
+						?.choices?.[0];
+					if (typeof choice?.delta?.content === 'string') fullContent += choice.delta.content;
+					if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason;
 				}
 			}
+		} finally {
+			await reader.cancel().catch(() => undefined);
 		}
 
-		reader.releaseLock();
 		StreamDiagnostics.logFinished(state, 'buffer');
 
-		return new Response(
-			JSON.stringify({
-				id: state.id,
-				object: 'chat.completion',
-				created: state.created,
-				model: normalizedModel,
-				choices: [{ index: 0, message: { role: 'assistant', content: fullContent || null }, finish_reason: 'stop' }],
-				usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-			}),
-			{
-				status: 200,
-				headers: { 'Content-Type': 'application/json' }
-			}
-		);
+		if (state.terminal === 'failed' || !state.terminal) {
+			const failure = state.failure ?? {
+				message: 'ChatGPT stream ended before completion',
+				type: 'api_error',
+				code: 'stream_incomplete'
+			};
+			const limited =
+				UsageLimitClassifier.classifyStreamError('openai', response.headers, failure.upstream).kind === 'usage_limit';
+			const error = failure.code
+				? { message: failure.message, type: failure.type, code: failure.code }
+				: { message: failure.message, type: failure.type };
+
+			return {
+				response: new Response(JSON.stringify({ error }), {
+					status: limited ? 429 : 502,
+					headers: { 'Content-Type': 'application/json' }
+				}),
+				failed: true
+			};
+		}
+
+		return {
+			response: new Response(
+				JSON.stringify({
+					id: state.id,
+					object: 'chat.completion',
+					created: state.created,
+					model: normalizedModel,
+					choices: [{ index: 0, message: { role: 'assistant', content: fullContent || null }, finish_reason: finishReason }],
+					usage: state.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				}
+			),
+			failed: false
+		};
 	}
 
 	private static errorContext(model: string, startTime: number): RequestContext {
