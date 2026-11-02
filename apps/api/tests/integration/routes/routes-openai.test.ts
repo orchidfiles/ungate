@@ -162,7 +162,8 @@ describe('routes-openai', () => {
 				reasoning: { effort: 'high' },
 				service_tier: 'priority'
 			}),
-			'openai'
+			'openai',
+			expect.any(AbortSignal)
 		);
 		await app.close();
 	});
