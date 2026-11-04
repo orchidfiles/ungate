@@ -6,6 +6,7 @@ import { localApiBaseUrl } from '@ungate/shared';
 import { bin, use, Tunnel } from 'cloudflared';
 
 import { RuntimeStateStore } from './runtime-state';
+import { findServingCloudflared } from './runtime-state/cloudflared-process';
 import { config } from './runtime-state/config';
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
 
@@ -27,6 +28,7 @@ function getCloudflaredConfigArg(): string {
 
 export class TunnelManager {
 	private tunnel: Tunnel | null = null;
+	private adoptedPid: number | null = null;
 	private state: TunnelState = { status: 'stopped', url: null, error: null };
 	private readonly windowId: string;
 	private autoStopTimer: NodeJS.Timeout | null = null;
@@ -46,6 +48,10 @@ export class TunnelManager {
 
 	async start(port: number): Promise<void> {
 		if (this.state.status === 'running') {
+			return;
+		}
+
+		if (this.adoptRunningTunnel(port)) {
 			return;
 		}
 
@@ -77,7 +83,42 @@ export class TunnelManager {
 			this.tunnel = null;
 		}
 
+		this.stopAdoptedProcess();
 		this.setState({ status: 'stopped', url: null, error: null });
+	}
+
+	/**
+	 * A cloudflared process is already proxying this port and the shared state
+	 * still has its public URL. Reuse that URL instead of requesting a new quick tunnel.
+	 */
+	private adoptRunningTunnel(port: number): boolean {
+		const serving = findServingCloudflared(port);
+		const recordedUrl = RuntimeStateStore.read().tunnel?.url ?? null;
+
+		if (!serving || !recordedUrl) {
+			return false;
+		}
+
+		this.adoptedPid = serving.pid;
+		this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${recordedUrl}` });
+		this.setState({ status: 'running', url: recordedUrl, error: null });
+		this.scheduleAutoStop();
+
+		return true;
+	}
+
+	private stopAdoptedProcess(): void {
+		if (this.adoptedPid == null) {
+			return;
+		}
+
+		try {
+			process.kill(this.adoptedPid);
+		} catch {
+			// The process already exited.
+		}
+
+		this.adoptedPid = null;
 	}
 
 	async restart(port: number): Promise<void> {

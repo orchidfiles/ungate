@@ -217,12 +217,17 @@ function createController(windowId: string): {
 	statusBar: { text: string; tooltip: string; show: ReturnType<typeof vi.fn> };
 } {
 	const controller = new ExtensionController(createContext() as never);
+	const isStartupInProgress = vi.fn().mockReturnValue(false);
 	const apiServer: MockApiServer = {
-		start: vi.fn().mockResolvedValue(undefined),
+		start: vi.fn().mockImplementation(() => {
+			isStartupInProgress.mockReturnValue(true);
+
+			return Promise.resolve();
+		}),
 		stop: vi.fn().mockResolvedValue(undefined),
 		restart: vi.fn().mockResolvedValue(undefined),
 		getPort: vi.fn().mockReturnValue(null),
-		isStartupInProgress: vi.fn().mockReturnValue(false),
+		isStartupInProgress,
 		syncLeaderHealthMonitor: vi.fn()
 	};
 	const tunnelManager: MockTunnelManager = {
@@ -323,7 +328,11 @@ describe('ExtensionController', () => {
 		apiServerIsStartupInProgressMock.mockReturnValue(false);
 		apiServerSyncLeaderHealthMonitorMock.mockClear();
 		apiServerGetPortMock.mockReturnValue(null);
-		apiServerStartMock.mockResolvedValue(undefined);
+		apiServerStartMock.mockImplementation(() => {
+			apiServerIsStartupInProgressMock.mockReturnValue(true);
+
+			return Promise.resolve();
+		});
 		isProcessAliveMock.mockReset();
 		isProcessAliveMock.mockReturnValue(true);
 		isApiPortHealthyMock.mockReset();
@@ -389,8 +398,8 @@ describe('ExtensionController', () => {
 		});
 	});
 
-	it('does not start api from periodic sync', async () => {
-		const { controller } = createController('window-a');
+	it('starts a stopped api from leader sync when the port is down', async () => {
+		const { controller, apiServer } = createController('window-a');
 		const runtimeState = createRuntimeState(['window-a'], null);
 		runtimeReadMock.mockReturnValue(runtimeState);
 		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a']);
@@ -399,7 +408,8 @@ describe('ExtensionController', () => {
 
 		await getInternals(controller).syncFromRuntimeState();
 
-		expect(apiServerStartMock).not.toHaveBeenCalled();
+		expect(resetApiForRestartMock).toHaveBeenCalledTimes(1);
+		expect(apiServer.start).toHaveBeenCalledTimes(1);
 	});
 
 	it('does not start api from sync while start is suppressed', async () => {

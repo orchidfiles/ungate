@@ -1,5 +1,6 @@
 import { localApiHealthUrl } from '@ungate/shared';
 
+import { findServingCloudflared } from './cloudflared-process';
 import { config } from './config';
 import { RuntimeStateFileStore } from './file-store';
 import { RuntimeStateNormalizer } from './normalizer';
@@ -7,8 +8,10 @@ import { RuntimeStateNormalizer } from './normalizer';
 import type { RuntimeCommand, RuntimeState } from '@ungate/shared/frontend';
 
 /**
- * A saved `running` API is stale when its pid is gone or IPv4 health fails.
- * A fresh `starting` state belongs to a window that is still booting, so it is left alone.
+ * A saved API needs a leader start when it is `running` but its pid or IPv4 health is gone,
+ * or when it is `stopped` / `error` and the port is down. A fresh `starting` state belongs
+ * to a window that is still booting. `startSuppressed` stays down: that latch is for a
+ * spawn that cannot run, not for a missed health check.
  */
 export function staleRunningApiNeedsRestart(
 	api: RuntimeState['api'],
@@ -20,6 +23,10 @@ export function staleRunningApiNeedsRestart(
 
 	if (api.status === 'starting' && input.now - api.lastSeenAt < input.startingTimeoutMs) {
 		return false;
+	}
+
+	if (api.status === 'stopped' || api.status === 'error') {
+		return api.port == null || !input.portHealthy;
 	}
 
 	if (api.status !== 'running' && api.status !== 'starting') {
@@ -117,8 +124,14 @@ export class RuntimeStateStore {
 			return state;
 		}
 
+		// The owner window is gone, but cloudflared may still be proxying the API.
+		// Dropping the URL here is what mints a new quick-tunnel name on the next start.
+		if (state.tunnel.url && findServingCloudflared(state.api.port)) {
+			return state;
+		}
+
 		return await this.mutate((current) => {
-			if (!this.isOrphanedTunnel(current)) {
+			if (!this.isOrphanedTunnel(current) || (current.tunnel.url && findServingCloudflared(current.api.port))) {
 				return current;
 			}
 

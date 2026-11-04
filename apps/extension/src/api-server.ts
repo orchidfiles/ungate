@@ -34,6 +34,7 @@ export class ApiServer {
 	private addressInUsePort: number | null = null;
 	private startPromise: Promise<void> | null = null;
 	private restartInProgress = false;
+	private healthMisses = 0;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -317,7 +318,15 @@ export class ApiServer {
 
 		const message = `[process] exit code=${code} signal=${signal}`;
 
-		void this.recordApiFailure(message).catch(() => {});
+		// A crash is not a spawn that cannot run. Leave start unlatched so the leader can start again.
+		this.callbacks.onLog('error', message);
+		this.lastStatus = 'error';
+		this.port = null;
+		void this.writeRuntimeState('error', message)
+			.then(() => {
+				this.callbacks.onStatusChange('error');
+			})
+			.catch(() => {});
 	}
 
 	private shouldRespawn(): boolean {
@@ -350,6 +359,7 @@ export class ApiServer {
 
 	private startHealthCheck(): void {
 		this.stopHealthCheck();
+		this.healthMisses = 0;
 
 		this.healthCheckTimer = setInterval(() => {
 			void this.runHealthCheckCycle().catch(() => {});
@@ -388,25 +398,65 @@ export class ApiServer {
 			return;
 		}
 
+		const healthy = await this.probeHealth(this.port);
+
+		if (healthy) {
+			this.healthMisses = 0;
+			const wasDown = this.lastStatus !== 'running';
+
+			await this.setStatus('running');
+
+			if (wasDown) {
+				this.callbacks.onPortDetected(this.port);
+			}
+
+			return;
+		}
+
+		this.healthMisses += 1;
+
+		if (this.healthMisses < config.apiServer.healthCheckFailureLimit) {
+			this.callbacks.onLog(
+				'warn',
+				`[process] health check missed (${this.healthMisses}/${config.apiServer.healthCheckFailureLimit})`
+			);
+
+			return;
+		}
+
+		await this.notePersistentHealthFailure('[process] health check failed');
+	}
+
+	private async probeHealth(port: number): Promise<boolean> {
 		try {
-			const res = await fetch(HEALTH_CHECK_URL(this.port), {
+			const res = await fetch(HEALTH_CHECK_URL(port), {
 				signal: AbortSignal.timeout(config.apiServer.healthCheckRequestTimeoutMs)
 			});
 
-			if (res.ok) {
-				const wasDown = this.lastStatus !== 'running';
-
-				await this.setStatus('running');
-
-				if (wasDown) {
-					this.callbacks.onPortDetected(this.port);
-				}
-			} else {
-				await this.recordApiFailure(`[process] health check failed with status ${res.status}`);
-			}
+			return res.ok;
 		} catch {
-			await this.recordApiFailure('[process] health check failed');
+			return false;
 		}
+	}
+
+	/**
+	 * The API stopped answering. Leave startSuppressed alone so the leader can
+	 * start it again. That latch is reserved for a spawn that cannot run.
+	 */
+	private async notePersistentHealthFailure(message: string): Promise<void> {
+		this.healthMisses = 0;
+		this.lastStatus = 'error';
+		this.callbacks.onLog('error', message);
+
+		if (this.process) {
+			this.shutDownDeliberately = true;
+			this.process.kill();
+			this.process = null;
+		}
+
+		this.port = null;
+		await this.writeRuntimeState('error', message);
+		this.callbacks.onStatusChange('error');
 	}
 
 	private stopHealthCheck(): void {

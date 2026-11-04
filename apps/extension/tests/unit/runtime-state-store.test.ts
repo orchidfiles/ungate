@@ -4,10 +4,17 @@ import { RuntimeStateStore, staleRunningApiNeedsRestart } from '../../src/runtim
 
 import type { RuntimeState, TunnelStatus } from '@ungate/shared/frontend';
 
-const { runtimeMutateMock, runtimeReadMock } = vi.hoisted(() => {
+const { runtimeMutateMock, runtimeReadMock, findServingCloudflaredMock } = vi.hoisted(() => {
 	return {
 		runtimeMutateMock: vi.fn<(mutator: (current: RuntimeState) => RuntimeState) => Promise<RuntimeState>>(),
-		runtimeReadMock: vi.fn<() => RuntimeState>()
+		runtimeReadMock: vi.fn<() => RuntimeState>(),
+		findServingCloudflaredMock: vi.fn<(port: number | null) => { pid: number; command: string } | null>(() => null)
+	};
+});
+
+vi.mock('../../src/runtime-state/cloudflared-process', () => {
+	return {
+		findServingCloudflared: (port: number | null) => findServingCloudflaredMock(port)
 	};
 });
 
@@ -61,6 +68,8 @@ describe('RuntimeStateStore', () => {
 	beforeEach(() => {
 		runtimeMutateMock.mockReset();
 		runtimeReadMock.mockReset();
+		findServingCloudflaredMock.mockReset();
+		findServingCloudflaredMock.mockReturnValue(null);
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(() => Promise.resolve({ ok: false }))
@@ -111,6 +120,21 @@ describe('RuntimeStateStore', () => {
 		expect(next.tunnel.lastError).toBeNull();
 		expect(next.tunnel.ownerWindowId).toBeNull();
 		expect(next.tunnel.lastSeenAt).toBeGreaterThan(initial.tunnel.lastSeenAt);
+	});
+
+	it('keeps an orphaned tunnel url while cloudflared is still serving the api', async () => {
+		const state = createOrphanedTunnelState('running');
+		findServingCloudflaredMock.mockReturnValue({
+			pid: 42,
+			command: 'cloudflared tunnel --url http://127.0.0.1:47821'
+		});
+
+		const next = await RuntimeStateStore.reconcileOrphanedTunnel(state);
+
+		expect(next).toBe(state);
+		expect(next.tunnel.url).toBe('https://example.trycloudflare.com');
+		expect(runtimeMutateMock).not.toHaveBeenCalled();
+		expect(findServingCloudflaredMock).toHaveBeenCalledWith(47821);
 	});
 
 	it('returns live-owned tunnel unchanged without mutate', async () => {
@@ -221,20 +245,42 @@ describe('RuntimeStateStore', () => {
 			).toBe(true);
 		});
 
-		it('does not restart a suppressed or stopped API', () => {
+		it('does not restart a suppressed API', () => {
 			expect(
-				staleRunningApiNeedsRestart(runningApi({ startSuppressed: true }), {
+				staleRunningApiNeedsRestart(runningApi({ startSuppressed: true, status: 'error' }), {
 					now,
 					pidAlive: false,
 					portHealthy: false,
 					startingTimeoutMs
 				})
 			).toBe(false);
+		});
+
+		it('restarts a stopped or error API whose port is down', () => {
+			expect(
+				staleRunningApiNeedsRestart(runningApi({ status: 'stopped', port: null }), {
+					now,
+					pidAlive: false,
+					portHealthy: false,
+					startingTimeoutMs
+				})
+			).toBe(true);
+			expect(
+				staleRunningApiNeedsRestart(runningApi({ status: 'error', port: 47821 }), {
+					now,
+					pidAlive: false,
+					portHealthy: false,
+					startingTimeoutMs
+				})
+			).toBe(true);
+		});
+
+		it('leaves a stopped API whose port is still healthy', () => {
 			expect(
 				staleRunningApiNeedsRestart(runningApi({ status: 'stopped' }), {
 					now,
 					pidAlive: false,
-					portHealthy: false,
+					portHealthy: true,
 					startingTimeoutMs
 				})
 			).toBe(false);
