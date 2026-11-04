@@ -47,21 +47,23 @@ export class Settings {
 
 	static update(settings: Partial<AppSettings>): void {
 		const db = getDb();
+		const set = {
+			...(settings.port !== undefined && { port: settings.port }),
+			...(settings.apiKey !== undefined && { apiKey: settings.apiKey }),
+			...(settings.quiet !== undefined && { quiet: settings.quiet }),
+			...(settings.extraInstruction !== undefined && { extraInstruction: settings.extraInstruction }),
+			...(settings.claudeCliVersionMode !== undefined && { claudeCliVersionMode: settings.claudeCliVersionMode }),
+			...(settings.claudeCliVersionCustom !== undefined && { claudeCliVersionCustom: settings.claudeCliVersionCustom })
+		};
+		const write = db.insert(appSettings).values({ id: 1 });
 
-		db.insert(appSettings)
-			.values({ id: 1 })
-			.onConflictDoUpdate({
-				target: appSettings.id,
-				set: {
-					...(settings.port !== undefined && { port: settings.port }),
-					...(settings.apiKey !== undefined && { apiKey: settings.apiKey }),
-					...(settings.quiet !== undefined && { quiet: settings.quiet }),
-					...(settings.extraInstruction !== undefined && { extraInstruction: settings.extraInstruction }),
-					...(settings.claudeCliVersionMode !== undefined && { claudeCliVersionMode: settings.claudeCliVersionMode }),
-					...(settings.claudeCliVersionCustom !== undefined && { claudeCliVersionCustom: settings.claudeCliVersionCustom })
-				}
-			})
-			.run();
+		// A models-only save has nothing to write on the settings row. An empty conflict
+		// update throws "No values to set" and the request becomes a 500.
+		if (Object.keys(set).length > 0) {
+			write.onConflictDoUpdate({ target: appSettings.id, set }).run();
+		} else {
+			write.onConflictDoNothing().run();
+		}
 
 		if (settings.models !== undefined) {
 			ModelMappings.replace(settings.models);

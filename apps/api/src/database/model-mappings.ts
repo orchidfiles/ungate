@@ -14,9 +14,31 @@ import { modelMappings } from './schema';
 
 import { getDb } from './index';
 
+export class DuplicateModelIdError extends Error {
+	constructor(readonly modelId: string) {
+		super(`Model ID "${modelId}" is used more than once`);
+		this.name = 'DuplicateModelIdError';
+	}
+}
+
 export class ModelMappings {
 	private static clone(models: ModelMappingConfig[]): ModelMappingConfig[] {
 		return cloneDeep(models);
+	}
+
+	// Ids are the primary key, and Cursor also treats them as case-insensitive.
+	private static assertUniqueIds(models: ModelMappingConfig[]): void {
+		const seen = new Set<string>();
+
+		for (const model of models) {
+			const key = model.id.toLowerCase();
+
+			if (seen.has(key)) {
+				throw new DuplicateModelIdError(model.id);
+			}
+
+			seen.add(key);
+		}
 	}
 
 	static sanitize(models: ModelMappingConfig[]): ModelMappingConfig[] {
@@ -138,6 +160,7 @@ export class ModelMappings {
 	static replace(models: ModelMappingConfig[]): void {
 		const db = getDb();
 		const sanitized = this.sanitize(models);
+		this.assertUniqueIds(sanitized);
 		db.transaction((tx) => {
 			tx.delete(modelMappings).run();
 
