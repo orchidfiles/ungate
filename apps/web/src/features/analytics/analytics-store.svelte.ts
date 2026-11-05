@@ -12,6 +12,8 @@ import { SvelteSet } from 'svelte/reactivity';
 import { Api } from '$shared/api';
 import { DEFAULTS } from '$shared/constants';
 
+import { insightsStore } from './insights/insights-store.svelte';
+
 interface AnalyticsStore {
 	readonly summary: AnalyticsSummary | null;
 	readonly requests: RequestRecord[];
@@ -110,7 +112,7 @@ async function loadConfiguredModels(): Promise<void> {
 async function load(): Promise<void> {
 	loading = true;
 	error = null;
-	await Promise.all([loadSummary(), loadRequests(), loadConfiguredModels(), loadTokenSeries()]);
+	await Promise.all([loadSummary(), loadRequests(), loadConfiguredModels(), loadTokenSeries(), insightsStore.load(period)]);
 	loading = false;
 }
 
@@ -314,6 +316,7 @@ export function getAnalyticsStore(): AnalyticsStore {
 			period = v;
 			void loadSummary();
 			void loadTokenSeries();
+			void insightsStore.load(v);
 		},
 		get tokenSeries() {
 			return tokenSeries;

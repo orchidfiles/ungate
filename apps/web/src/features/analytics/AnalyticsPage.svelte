@@ -6,6 +6,7 @@ import IconTrash2 from 'virtual:icons/lucide/trash-2';
 import { PERIODS } from '$shared/constants';
 import { Formatter } from '$shared/formatter';
 
+import InsightsSection from './insights/InsightsSection.svelte';
 import { getAnalyticsStore } from './analytics-store.svelte';
 import RequestList from './RequestList.svelte';
 import StatCard from './StatCard.svelte';
@@ -91,6 +92,8 @@ function handleConfirmReset() {
 		<TokenChart
 			series={store.tokenSeries}
 			period={store.period} />
+
+		<InsightsSection />
 	{/if}
 
 	<RequestList />
