@@ -1,4 +1,5 @@
 import type { RequestSource, Tool } from './index';
+import type { RequestTelemetry } from '@ungate/shared';
 
 export interface RequestContext {
 	model: string;
@@ -15,6 +16,11 @@ export interface RequestContext {
 	onStreamError?: (error: Record<string, unknown> | undefined) => void;
 	/** The response body records its own single analytics row at stream end (success or failure). */
 	telemetryDeferred?: boolean;
+	/**
+	 * Usage heuristics merged into the analytics row: account/attempts from the proxy client,
+	 * session/turn from the router. Mutated before the response body is consumed.
+	 */
+	telemetry?: RequestTelemetry;
 }
 
 export interface ProxyResult {

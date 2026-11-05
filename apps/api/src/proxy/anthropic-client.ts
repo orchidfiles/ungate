@@ -2,6 +2,7 @@ import { logger } from 'src/utils/logger';
 
 import { OAuth } from '../auth/oauth';
 import { config } from '../config';
+import { RequestHeuristics } from '../metrics/request-heuristics';
 
 import { AccountFallback } from './account-fallback';
 import { RequestBuilder } from './request-builder';
@@ -10,6 +11,7 @@ import { ToolMapper } from './tool-mapper';
 
 import type { RequestSource, AnthropicRequest, AnthropicError, ContentBlock, Tool } from '../types';
 import type { ProxyResult, ToolUseBlock } from '../types/proxy';
+import type { RequestTelemetry } from '@ungate/shared';
 
 type AccountTokenInfo = NonNullable<Awaited<ReturnType<typeof OAuth.getValidToken>>>;
 
@@ -20,8 +22,16 @@ type RequestResult =
 			source: RequestSource;
 			reverseToolMapping: Record<string, string>;
 			onStreamError: (error: Record<string, unknown> | undefined) => void;
+			telemetry: RequestTelemetry;
 	  }
-	| { success: false; error: string; status: number; errorType?: string; headers?: Record<string, string> };
+	| {
+			success: false;
+			error: string;
+			status: number;
+			errorType?: string;
+			headers?: Record<string, string>;
+			telemetry?: RequestTelemetry;
+	  };
 
 interface UpstreamErrorDetail {
 	message: string;
@@ -155,10 +165,27 @@ async function makeClaudeCodeRequest(
 		if (outcome.kind === 'limited') {
 			logger.log(`Claude Code usage limit: no eligible account (${outcome.reason})`);
 
-			return { success: false, error: outcome.message, status: 429, errorType: 'rate_limit_error', headers: outcome.headers };
+			return {
+				success: false,
+				error: outcome.message,
+				status: 429,
+				errorType: 'rate_limit_error',
+				headers: outcome.headers,
+				telemetry: {
+					accountId: outcome.accountId,
+					attempts: outcome.attempts,
+					rotationReason: outcome.reason,
+					stopReason: 'error'
+				}
+			};
 		}
 
 		const { response } = outcome;
+		const telemetry: RequestTelemetry = {
+			accountId: outcome.accountId,
+			attempts: outcome.attempts,
+			rotationReason: outcome.rotationReason
+		};
 
 		if (response.status === 429) {
 			// Ordinary throttling (not a subscription usage limit): no rotation, keep upstream detail.
@@ -170,7 +197,8 @@ async function makeClaudeCodeRequest(
 				error: detail.message || 'Rate limited',
 				status: 429,
 				errorType: detail.type || 'rate_limit_error',
-				headers: AccountFallback.safeRetryHeaders(response.headers)
+				headers: AccountFallback.safeRetryHeaders(response.headers),
+				telemetry
 			};
 		}
 
@@ -181,7 +209,8 @@ async function makeClaudeCodeRequest(
 				success: false,
 				error: detail.message ? `OAuth token invalid: ${detail.message}` : 'OAuth token invalid',
 				status: 401,
-				errorType: 'authentication_error'
+				errorType: 'authentication_error',
+				telemetry
 			};
 		}
 
@@ -193,7 +222,8 @@ async function makeClaudeCodeRequest(
 				success: false,
 				error: detail.message ? `Permission denied: ${detail.message}` : 'Permission denied',
 				status: 403,
-				errorType: detail.type || 'permission_error'
+				errorType: detail.type || 'permission_error',
+				telemetry
 			};
 		}
 
@@ -207,10 +237,10 @@ async function makeClaudeCodeRequest(
 			}
 
 			if (errorMessage.includes('only authorized for use with Claude Code')) {
-				return { success: false, error: 'OAuth not authorized for API', status: 403, errorType: 'permission_error' };
+				return { success: false, error: 'OAuth not authorized for API', status: 403, errorType: 'permission_error', telemetry };
 			}
 
-			return { success: false, error: errorMessage || 'Bad request', status: 400, errorType: errorType || undefined };
+			return { success: false, error: errorMessage || 'Bad request', status: 400, errorType: errorType || undefined, telemetry };
 		}
 
 		const onStreamError = SsePrecommitGate.cooldownOnStreamLimit(
@@ -220,7 +250,7 @@ async function makeClaudeCodeRequest(
 			response.headers
 		);
 
-		return { success: true, response, source: 'claude', reverseToolMapping, onStreamError };
+		return { success: true, response, source: 'claude', reverseToolMapping, onStreamError, telemetry };
 	} catch (error) {
 		if (signal?.aborted) {
 			logger.log('Claude Code request aborted by client; fallback stopped');
@@ -233,22 +263,63 @@ async function makeClaudeCodeRequest(
 	}
 }
 
-async function extractUsage(response: Response, stream: boolean): Promise<{ inputTokens: number; outputTokens: number }> {
+interface NonStreamUsage {
+	inputTokens: number;
+	outputTokens: number;
+	telemetry: RequestTelemetry;
+}
+
+/**
+ * Usage of a buffered Anthropic response. `inputTokens` includes cache reads/writes so it matches
+ * the streaming path (total prompt size); the split is kept in telemetry.
+ */
+async function extractUsage(
+	response: Response,
+	stream: boolean,
+	reverseToolMapping: Record<string, string>
+): Promise<NonStreamUsage> {
 	if (stream) {
-		return { inputTokens: 0, outputTokens: 0 };
+		return { inputTokens: 0, outputTokens: 0, telemetry: {} };
 	}
 
 	try {
-		const json = await response.clone().json();
-		const data = json as { usage?: { input_tokens?: number; output_tokens?: number } };
-		const usage = data.usage ?? {};
+		const parsed: unknown = await response.clone().json();
+		const json = parsed as {
+			usage?: {
+				input_tokens?: number;
+				output_tokens?: number;
+				cache_read_input_tokens?: number;
+				cache_creation_input_tokens?: number;
+			};
+			stop_reason?: string | null;
+			content?: { type?: string; name?: string; thinking?: string }[];
+		};
+		const usage = json.usage ?? {};
+		const cacheRead = usage.cache_read_input_tokens ?? 0;
+		const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+		const blocks = Array.isArray(json.content) ? json.content : [];
+		const toolNames = blocks
+			.filter((block) => block.type === 'tool_use' && typeof block.name === 'string')
+			.map((block) => reverseToolMapping[block.name!] ?? block.name!);
+		const reasoningChars = blocks.reduce(
+			(sum, block) => sum + (block.type === 'thinking' ? (block.thinking?.length ?? 0) : 0),
+			0
+		);
 
 		return {
-			inputTokens: usage.input_tokens ?? 0,
-			outputTokens: usage.output_tokens ?? 0
+			inputTokens: (usage.input_tokens ?? 0) + cacheRead + cacheCreation,
+			outputTokens: usage.output_tokens ?? 0,
+			telemetry: {
+				cacheReadTokens: cacheRead,
+				cacheCreationTokens: cacheCreation,
+				stopReason: RequestHeuristics.normalizeStopReason(json.stop_reason),
+				toolCallCount: toolNames.length,
+				toolNames,
+				reasoningChars: reasoningChars || null
+			}
 		};
 	} catch {
-		return { inputTokens: 0, outputTokens: 0 };
+		return { inputTokens: 0, outputTokens: 0, telemetry: {} };
 	}
 }
 
@@ -267,7 +338,8 @@ export async function proxyRequest(
 	if (claudeResult.success) {
 		logger.log('✓ Request served via Claude Code');
 
-		const { inputTokens, outputTokens } = await extractUsage(claudeResult.response, stream);
+		const usage = await extractUsage(claudeResult.response, stream, claudeResult.reverseToolMapping);
+		const { inputTokens, outputTokens } = usage;
 
 		return {
 			response: claudeResult.response,
@@ -278,7 +350,8 @@ export async function proxyRequest(
 				reverseToolMapping: claudeResult.reverseToolMapping,
 				inputTokens,
 				outputTokens,
-				onStreamError: claudeResult.onStreamError
+				onStreamError: claudeResult.onStreamError,
+				telemetry: { ...claudeResult.telemetry, ...usage.telemetry }
 			}
 		};
 	}
@@ -299,7 +372,8 @@ export async function proxyRequest(
 			startTime,
 			reverseToolMapping: {},
 			inputTokens: 0,
-			outputTokens: 0
+			outputTokens: 0,
+			telemetry: claudeResult.telemetry
 		}
 	};
 }

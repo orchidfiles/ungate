@@ -4,21 +4,15 @@ import type { RequestRecord } from '@ungate/shared';
 import type { FastifyReply } from 'fastify';
 
 export class CompletionRequestTelemetry {
-	static recordAndApplyProxyHeaders(
-		reply: FastifyReply,
-		latencyMs: number,
-		record: RequestRecord,
-		cacheReadTokens?: number,
-		cacheCreationTokens?: number
-	): number {
-		const requestId = this.record(record, cacheReadTokens, cacheCreationTokens);
+	static recordAndApplyProxyHeaders(reply: FastifyReply, latencyMs: number, record: RequestRecord): number {
+		const requestId = this.record(record);
 		this.applyProxyHeaders(reply, latencyMs);
 
 		return requestId;
 	}
 
-	static record(record: RequestRecord, cacheReadTokens?: number, cacheCreationTokens?: number): number {
-		return Requests.record(record, cacheReadTokens, cacheCreationTokens);
+	static record(record: RequestRecord): number {
+		return Requests.record(record);
 	}
 
 	static applyProxyHeaders(reply: FastifyReply, latencyMs: number): void {
