@@ -27,6 +27,8 @@ export interface LoginState {
 }
 
 const LIST_POLL_MS = 5000;
+/** Live usage fetch interval; proxied responses update usage between fetches via the list poll. */
+const USAGE_POLL_MS = 5 * 60_000;
 const SESSION_POLL_MS = 1000;
 const NOTICE_MS = 6000;
 
@@ -58,9 +60,12 @@ export class AccountStore {
 	/** Clock used to expire cooldowns client-side between polls. */
 	now = $state(Date.now());
 	login = $state<LoginState>({ ...idleLogin });
+	/** True while a live usage fetch is in flight. */
+	usageBusy = $state(false);
 
 	private attachments = 0;
 	private listTimer: ReturnType<typeof setTimeout> | null = null;
+	private usageTimer: ReturnType<typeof setTimeout> | null = null;
 	private sessionTimer: ReturnType<typeof setTimeout> | null = null;
 	private noticeTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Bumped by every list write; stale responses with an older sequence are dropped. */
@@ -71,6 +76,9 @@ export class AccountStore {
 		if (document.visibilityState === 'visible' && this.attachments > 0) {
 			void this.refresh();
 			this.scheduleListPoll();
+			// The server skips accounts fetched within the last minute, so focus changes stay cheap.
+			void this.refreshUsage();
+			this.scheduleUsagePoll();
 		}
 	};
 
@@ -122,6 +130,8 @@ export class AccountStore {
 				void this.refresh();
 				this.scheduleListPoll();
 				this.ensureSessionPolling();
+				void this.refreshUsage();
+				this.scheduleUsagePoll();
 			});
 		}
 
@@ -139,9 +149,34 @@ export class AccountStore {
 				document.removeEventListener('visibilitychange', this.onVisibilityChange);
 				window.removeEventListener('focus', this.onVisibilityChange);
 				this.clearListTimer();
+				this.clearUsageTimer();
 				this.stopSessionPolling();
 			}
 		};
+	}
+
+	/** Fetches live usage from the provider (all accounts, or one). Errors are shown per account. */
+	async refreshUsage(accountId?: string): Promise<void> {
+		if (this.usageBusy) {
+			return;
+		}
+
+		this.usageBusy = true;
+		const seq = ++this.listSeq;
+
+		try {
+			const data = await Api.accountUsageRefresh(this.provider, accountId);
+
+			if (seq === this.listSeq) {
+				this.apply(data);
+			}
+		} catch (e) {
+			if (seq === this.listSeq) {
+				this.loadError = `Cannot refresh usage: ${errorMessage(e)}`;
+			}
+		} finally {
+			this.usageBusy = false;
+		}
 	}
 
 	async refresh(): Promise<void> {
@@ -442,7 +477,8 @@ export class AccountStore {
 			this.now = Date.now();
 
 			// Skip network work while the webview is hidden; refresh resumes on visibility.
-			if (document.visibilityState === 'visible' && this.busy === null) {
+			// A usage refresh returns the full list itself; polling meanwhile would discard its result.
+			if (document.visibilityState === 'visible' && this.busy === null && !this.usageBusy) {
 				void this.refresh();
 			}
 
@@ -454,6 +490,30 @@ export class AccountStore {
 		if (this.listTimer) {
 			clearTimeout(this.listTimer);
 			this.listTimer = null;
+		}
+	}
+
+	private scheduleUsagePoll(): void {
+		this.clearUsageTimer();
+		this.usageTimer = setTimeout(() => {
+			this.usageTimer = null;
+
+			if (this.attachments === 0) {
+				return;
+			}
+
+			if (document.visibilityState === 'visible') {
+				void this.refreshUsage();
+			}
+
+			this.scheduleUsagePoll();
+		}, USAGE_POLL_MS);
+	}
+
+	private clearUsageTimer(): void {
+		if (this.usageTimer) {
+			clearTimeout(this.usageTimer);
+			this.usageTimer = null;
 		}
 	}
 

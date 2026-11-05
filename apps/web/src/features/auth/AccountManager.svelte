@@ -3,6 +3,7 @@ import { sleep } from '@ungate/shared/frontend';
 import IconCheck from 'virtual:icons/lucide/check';
 import IconClock from 'virtual:icons/lucide/clock';
 import IconCopy from 'virtual:icons/lucide/copy';
+import IconGauge from 'virtual:icons/lucide/gauge';
 import IconLoader from 'virtual:icons/lucide/loader-circle';
 import IconPencil from 'virtual:icons/lucide/pencil';
 import IconRefreshCw from 'virtual:icons/lucide/refresh-cw';
@@ -14,6 +15,7 @@ import IconUserRoundCheck from 'virtual:icons/lucide/user-round-check';
 import InfoTooltip from '$shared/InfoTooltip.svelte';
 
 import { accountSubtitle, formatCooldown, formatCooldownReason, formatSwitchReason } from './account-format';
+import UsageBars from './UsageBars.svelte';
 
 import type { AccountStore } from './account-store.svelte';
 import type { SubscriptionAccount } from '@ungate/shared/frontend';
@@ -165,18 +167,33 @@ async function copyLoginLink(): Promise<void> {
 			{/if}
 		</div>
 		{#if store.accounts.length > 0}
-			<button
-				class="btn btn-sm preset-filled-primary-500"
-				type="button"
-				onclick={() => void store.startLogin()}
-				disabled={store.loginActive}>
-				{#if store.login.phase === 'starting' && !store.login.reconnectAccountId}
-					<IconLoader class="size-4 animate-spin" />
-				{:else}
-					<IconUserPlus class="size-4" />
-				{/if}
-				Add account
-			</button>
+			<div class="flex flex-wrap items-center gap-2">
+				<button
+					class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+					type="button"
+					title="Fetch current usage limits from {providerName}"
+					onclick={() => void store.refreshUsage()}
+					disabled={store.usageBusy}>
+					{#if store.usageBusy}
+						<IconLoader class="size-4 animate-spin" />
+					{:else}
+						<IconGauge class="size-4" />
+					{/if}
+					Refresh usage
+				</button>
+				<button
+					class="btn btn-sm preset-filled-primary-500"
+					type="button"
+					onclick={() => void store.startLogin()}
+					disabled={store.loginActive}>
+					{#if store.login.phase === 'starting' && !store.login.reconnectAccountId}
+						<IconLoader class="size-4 animate-spin" />
+					{:else}
+						<IconUserPlus class="size-4" />
+					{/if}
+					Add account
+				</button>
+			</div>
 		{/if}
 	</div>
 
@@ -372,6 +389,24 @@ async function copyLoginLink(): Promise<void> {
 								</p>
 							{:else if store.availability(account) === 'needs_login'}
 								<p class="text-xs text-error-400">The saved login expired or was revoked. Reconnect to use this account.</p>
+							{/if}
+							{#if editingId !== account.id}
+								{#if account.usage}
+									<div class="pt-1">
+										<UsageBars
+											usage={account.usage}
+											now={store.now} />
+									</div>
+								{:else if store.availability(account) !== 'needs_login'}
+									<p class="flex items-center gap-1 text-xs text-surface-500">
+										{#if store.usageBusy}
+											<IconLoader class="size-3 animate-spin" />
+											Loading usage...
+										{:else}
+											Usage not loaded yet
+										{/if}
+									</p>
+								{/if}
 							{/if}
 						</div>
 
