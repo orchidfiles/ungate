@@ -1,6 +1,7 @@
 import { logger } from 'src/utils/logger';
 
 import { Requests } from '../database/requests';
+import { RequestHeuristics } from '../metrics/request-heuristics';
 
 import type { RequestContext, StreamResult } from '../types/proxy';
 
@@ -186,6 +187,9 @@ export class MiniMaxStreamHandler {
 					| undefined;
 				let streamState: MiniMaxStreamState = 'content';
 				let pendingTag = '';
+				let firstTokenAt: number | null = null;
+				let reasoningChars = 0;
+				const toolNames: string[] = [];
 
 				const safeEnqueue = (chunk: string) => {
 					try {
@@ -244,7 +248,9 @@ export class MiniMaxStreamHandler {
 
 								const toolCallDeltas = choice?.delta?.tool_calls;
 								if (toolCallDeltas && toolCallDeltas.length > 0) {
+									firstTokenAt ??= Date.now();
 									for (const tc of toolCallDeltas) {
+										if (tc.function?.name) toolNames.push(tc.function.name);
 										const toolCallChunk: Record<string, unknown> = { index: tc.index };
 										const toolFunction: Record<string, string> = {};
 
@@ -275,6 +281,7 @@ export class MiniMaxStreamHandler {
 									continue;
 								}
 
+								firstTokenAt ??= Date.now();
 								const parsed = parseMiniMaxDelta(deltaText, streamState, pendingTag);
 								streamState = parsed.state;
 								pendingTag = parsed.pendingTag;
@@ -283,6 +290,7 @@ export class MiniMaxStreamHandler {
 									if (!segment.text) continue;
 
 									if (segment.kind === 'reasoning') {
+										reasoningChars += segment.text.length;
 										safeEnqueue(buildChunk(streamId, modelName, { reasoning_content: segment.text }));
 										continue;
 									}
@@ -310,12 +318,18 @@ export class MiniMaxStreamHandler {
 					}
 
 					Requests.record({
+						...context.telemetry,
 						model: modelName,
 						source: 'minimax',
 						inputTokens: usage?.prompt_tokens ?? 0,
 						outputTokens: usage?.completion_tokens ?? 0,
 						stream: true,
-						latencyMs: Date.now() - context.startTime
+						latencyMs: Date.now() - context.startTime,
+						stopReason: RequestHeuristics.normalizeStopReason(finishReason ?? (toolNames.length > 0 ? 'tool_calls' : 'stop')),
+						toolCallCount: toolNames.length,
+						toolNames,
+						reasoningChars: reasoningChars || null,
+						firstTokenMs: firstTokenAt ? firstTokenAt - context.startTime : null
 					});
 
 					safeEnqueue('data: [DONE]\n\n');

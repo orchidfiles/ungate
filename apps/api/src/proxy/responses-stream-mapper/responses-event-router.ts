@@ -67,7 +67,8 @@ export class ResponsesEventRouter {
 			const reason = this.record(resp?.incomplete_details)?.reason;
 			const finish = reason === 'content_filter' ? 'content_filter' : 'length';
 			state.terminal = 'incomplete';
-			state.usage = StreamDiagnostics.mapUsage(resp?.usage as Record<string, number> | undefined);
+			if (typeof reason === 'string') state.incompleteReason = reason;
+			state.usage = StreamDiagnostics.mapUsage(resp?.usage as Record<string, unknown> | undefined);
 			logger.warn(`[Codex] response.incomplete reason=${typeof reason === 'string' ? reason : 'unknown'}`);
 			results.push({ type: 'chunk', data: StreamChunkMapper.chunk(state, {}, finish, state.usage) });
 			results.push({ type: 'done' });
@@ -162,6 +163,7 @@ export class ResponsesEventRouter {
 				deferred: !nameRaw
 			});
 			state.toolCallsSeen = true;
+			if (nameRaw) state.toolNames.push(nameRaw);
 
 			if (nameRaw) {
 				const delta: Record<string, unknown> = {
@@ -336,6 +338,7 @@ export class ResponsesEventRouter {
 
 			if (pending.deferred) {
 				const fnName = doneName || 'unknown';
+				state.toolNames.push(fnName);
 				const combinedArgs = argsStr || buffered;
 				const fcDelta: Record<string, unknown> = {
 					tool_calls: [
@@ -388,7 +391,7 @@ export class ResponsesEventRouter {
 			}
 		}
 
-		const usage = resp?.usage as Record<string, number> | undefined;
+		const usage = resp?.usage as Record<string, unknown> | undefined;
 		let finish: 'tool_calls' | 'stop' = 'stop';
 
 		if (state.toolCallsSeen) {
@@ -425,6 +428,8 @@ export class ResponsesEventRouter {
 	}
 
 	private static pushAssistantChunk(state: StreamState, results: StreamProcessResult[], delta: Record<string, unknown>): void {
+		state.firstTokenAt ??= Date.now();
+
 		if (!state.roleSent) {
 			delta.role = 'assistant';
 			state.roleSent = true;

@@ -42,7 +42,15 @@ export interface AccountFallbackOptions<C extends PinnedCredentials> {
 }
 
 export type AccountFallbackOutcome<C> =
-	| { kind: 'response'; response: Response; credentials: C; accountId: string; attempts: number }
+	| {
+			kind: 'response';
+			response: Response;
+			credentials: C;
+			accountId: string;
+			attempts: number;
+			/** Limit reason of the last account rotated away from, when the request was served by a fallback. */
+			rotationReason: string | null;
+	  }
 	/** No usable credentials at all (no account, needs login, refresh failed) — callers keep their 401. */
 	| { kind: 'no_credentials' }
 	/** Every candidate was usage-limited (or auto-switch is off): answer 429 locally. */
@@ -50,6 +58,9 @@ export type AccountFallbackOutcome<C> =
 			kind: 'limited';
 			message: string;
 			reason: string;
+			/** Last account tried before giving up. */
+			accountId: string;
+			attempts: number;
 			retryAt: number | null;
 			estimated: boolean;
 			headers: Record<string, string>;
@@ -137,7 +148,8 @@ export class AccountFallback {
 					response: inspected.response,
 					credentials: sent.credentials,
 					accountId: account.id,
-					attempts: attempted.size
+					attempts: attempted.size,
+					rotationReason: lastLimit?.reason ?? null
 				};
 			}
 
@@ -153,7 +165,7 @@ export class AccountFallback {
 			current = this.advance(provider, revision, account.id, limit.reason, attempted);
 		}
 
-		return lastLimit ? this.limitedOutcome(provider, lastLimit) : { kind: 'no_credentials' };
+		return lastLimit ? this.limitedOutcome(provider, lastLimit, attempted.size) : { kind: 'no_credentials' };
 	}
 
 	/**
@@ -270,7 +282,11 @@ export class AccountFallback {
 		return undefined;
 	}
 
-	private static limitedOutcome<C>(provider: SubscriptionProvider, last: LimitRecord): AccountFallbackOutcome<C> {
+	private static limitedOutcome<C>(
+		provider: SubscriptionProvider,
+		last: LimitRecord,
+		attempts: number
+	): AccountFallbackOutcome<C> {
 		const now = Date.now();
 		const label = PROVIDER_LABEL[provider];
 		const autoSwitch = OAuthAccounts.policy(provider).autoSwitch;
@@ -295,6 +311,6 @@ export class AccountFallback {
 		const headers: Record<string, string> = { ...last.headers };
 		if (retryAt) headers['retry-after'] = String(Math.max(1, Math.ceil((retryAt - now) / 1000)));
 
-		return { kind: 'limited', message, reason: last.reason, retryAt, estimated, headers };
+		return { kind: 'limited', message, reason: last.reason, accountId: last.accountId, attempts, retryAt, estimated, headers };
 	}
 }
