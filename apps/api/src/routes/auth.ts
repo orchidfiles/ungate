@@ -9,6 +9,7 @@ import { OpenAIOAuthUtils } from '../auth/openai/openai-oauth-utils';
 import { config } from '../config';
 import { OAuthAccounts } from '../database/oauth-accounts';
 import { ProviderSettings } from '../database/provider-settings';
+import { UsageFetcher } from '../usage/usage-fetcher';
 
 import type { AccountErrorCode, AccountErrorResponse, SubscriptionProvider } from '@ungate/shared';
 import type { FastifyPluginCallback, FastifyReply } from 'fastify';
@@ -18,6 +19,7 @@ const startSchema = z.object({ accountId: idSchema.optional() });
 const completeSchema = z.object({ code: z.string().trim().min(1).max(16384), sessionId: idSchema });
 const renameSchema = z.object({ label: z.string().trim().min(1).max(100) });
 const selectSchema = z.object({ revision: z.number().int().nonnegative().optional() });
+const usageRefreshSchema = z.object({ accountId: idSchema.optional() });
 const policySchema = z.object({ autoSwitch: z.boolean(), revision: z.number().int().nonnegative().optional() });
 
 interface IdParams {
@@ -100,6 +102,16 @@ const plugin: FastifyPluginCallback = (app) => {
 
 		app.delete<IdParams>(`${base}/accounts/:id`, (request, reply) => {
 			if (!OAuthAccounts.remove(provider, request.params.id)) return fail(reply, 404, 'account_not_found', 'Account not found');
+
+			return reply.send(OAuthAccounts.view(provider));
+		});
+
+		app.post(`${base}/usage/refresh`, async (request, reply) => {
+			const parsed = usageRefreshSchema.safeParse(request.body ?? {});
+			if (!parsed.success) return fail(reply, 400, 'invalid_request', 'Invalid usage refresh request');
+			const { accountId } = parsed.data;
+			if (accountId && !OAuthAccounts.get(accountId, provider)) return fail(reply, 404, 'account_not_found', 'Account not found');
+			await UsageFetcher.refresh(provider, accountId);
 
 			return reply.send(OAuthAccounts.view(provider));
 		});

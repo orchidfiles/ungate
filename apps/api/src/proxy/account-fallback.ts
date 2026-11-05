@@ -1,6 +1,7 @@
 import { logger } from 'src/utils/logger';
 
 import { OAuthAccounts, type OAuthAccountRow } from '../database/oauth-accounts';
+import { AccountUsageStore } from '../usage/usage-store';
 
 import { UsageLimitClassifier, type UsageLimitClassification } from './usage-limit-classifier';
 
@@ -125,6 +126,7 @@ export class AccountFallback {
 
 			options.signal?.throwIfAborted();
 			const sent = await options.send(credentials);
+			AccountUsageStore.recordHeaders(provider, account.id, sent.response.headers);
 			const inspected = await inspect(sent.response);
 
 			if (!inspected.limit) {
