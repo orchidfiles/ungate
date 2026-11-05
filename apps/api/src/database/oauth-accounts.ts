@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import { and, asc, eq, sql } from 'drizzle-orm';
 
+import { AccountUsageStore } from '../usage/usage-store';
+
 import { oauthAccounts, oauthPolicies } from './schema';
 
 import { getDb } from './index';
@@ -114,7 +116,8 @@ export class OAuthAccounts {
 			availability: account.needsLogin ? 'needs_login' : this.isEligible(account, now) ? 'available' : 'cooling_down',
 			cooldownUntil: account.cooldownUntil,
 			cooldownReason: account.cooldownReason,
-			cooldownEstimated: account.cooldownEstimated
+			cooldownEstimated: account.cooldownEstimated,
+			usage: AccountUsageStore.get(account.id) ?? null
 		};
 	}
 
@@ -217,6 +220,7 @@ export class OAuthAccounts {
 			// Successor follows stable saved order after the removed account.
 			const next = this.nextEligible(provider, id);
 			getDb().delete(oauthAccounts).where(eq(oauthAccounts.id, id)).run();
+			AccountUsageStore.delete(id);
 			const policy = this.policy(provider);
 			// Emptying the list is recorded too: legacy adoption reads it as "the user removed these".
 			if (policy.activeAccountId === id || this.list(provider).length === 0) {
