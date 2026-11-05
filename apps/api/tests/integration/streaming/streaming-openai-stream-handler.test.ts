@@ -391,6 +391,295 @@ describe('streaming-openai-stream-handler', () => {
 		expect(output).toContain('"finish_reason":"length"');
 	});
 
+	it('emits keepalive chunks while the upstream is silent, then finishes normally', async () => {
+		const encoder = new TextEncoder();
+		const event = (value: unknown) => encoder.encode(`data: ${JSON.stringify(value)}\n`);
+		const response = new Response(
+			new ReadableStream<Uint8Array>({
+				async start(controller) {
+					controller.enqueue(event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }));
+					controller.enqueue(event({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } }));
+					await new Promise((resolve) => setTimeout(resolve, 120));
+					controller.enqueue(event({ type: 'content_block_stop', index: 0 }));
+					controller.enqueue(event({ type: 'content_block_start', index: 1, content_block: { type: 'text' } }));
+					controller.enqueue(event({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'done' } }));
+					controller.enqueue(event({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 3 } }));
+					controller.enqueue(event({ type: 'message_stop' }));
+					controller.close();
+				}
+			})
+		);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(
+			response,
+			'st_keepalive',
+			'model_keepalive',
+			{ model: 'model_keepalive', source: 'claude', startTime: Date.now(), reverseToolMapping: {} },
+			{ keepaliveIntervalMs: 20 }
+		);
+
+		const output = await readStream(stream);
+		const keepalives = output.split('\n').filter((line) => line.includes('"delta":{"content":""}'));
+
+		expect(keepalives.length).toBeGreaterThanOrEqual(2);
+		expect(output.indexOf('"role":"assistant"')).toBeLessThan(output.indexOf('"delta":{"content":""}'));
+		expect(output).toContain('"content":"done"');
+		expect(output).toContain('"finish_reason":"stop"');
+		expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
+		expect(output.trimEnd().endsWith('data: [DONE]')).toBe(true);
+	});
+
+	it('keeps the stream alive while tool arguments are buffered and still emits them intact', async () => {
+		const encoder = new TextEncoder();
+		const event = (value: unknown) => encoder.encode(`data: ${JSON.stringify(value)}\n`);
+		const response = new Response(
+			new ReadableStream<Uint8Array>({
+				async start(controller) {
+					controller.enqueue(event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }));
+					controller.enqueue(event({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_slow', name: 'Write' } }));
+					controller.enqueue(event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"big.md",' } }));
+					await new Promise((resolve) => setTimeout(resolve, 120));
+					controller.enqueue(event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"contents":"x"}' } }));
+					controller.enqueue(event({ type: 'content_block_stop', index: 0 }));
+					controller.enqueue(event({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 9 } }));
+					controller.enqueue(event({ type: 'message_stop' }));
+					controller.close();
+				}
+			})
+		);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(
+			response,
+			'st_tool_keepalive',
+			'model_tool_keepalive',
+			{ model: 'model_tool_keepalive', source: 'claude', startTime: Date.now(), reverseToolMapping: {} },
+			{ keepaliveIntervalMs: 20 }
+		);
+
+		const output = await readStream(stream);
+		const headerAt = output.indexOf('"id":"tu_slow"');
+		const keepaliveAt = output.indexOf('"delta":{"content":""}');
+		const argsAt = output.indexOf('\\"contents\\":\\"x\\"');
+
+		expect(headerAt).toBeGreaterThan(-1);
+		expect(keepaliveAt).toBeGreaterThan(headerAt);
+		expect(argsAt).toBeGreaterThan(keepaliveAt);
+		expect(readToolCalls(output)).toEqual([
+			{ index: 0, id: 'tu_slow', type: 'function', function: { name: 'Write', arguments: '' } },
+			{ index: 0, function: { arguments: '{"path":"big.md","contents":"x"}' } }
+		]);
+		expect(output).toContain('"finish_reason":"tool_calls"');
+		expect(output.trimEnd().endsWith('data: [DONE]')).toBe(true);
+	});
+
+	it('does not emit keepalives when the upstream finishes before the interval', async () => {
+		const response = createResponseWithSse([
+			'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}',
+			'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"fast"}}',
+			'data: {"type":"message_stop"}'
+		]);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st_fast', 'model_fast', {
+			model: 'model_fast',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: {}
+		});
+
+		const output = await readStream(stream);
+
+		expect(output).not.toContain('"delta":{"content":""}');
+		expect(output).toContain('"content":"fast"');
+	});
+
+	it('stops keepalives once the client cancels', async () => {
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+		const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+		const encoder = new TextEncoder();
+		const response = new Response(
+			new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.enqueue(encoder.encode('data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}\n'));
+				}
+			})
+		);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(
+			response,
+			'st_cancel_keepalive',
+			'model_cancel',
+			{ model: 'model_cancel', source: 'claude', startTime: Date.now(), reverseToolMapping: {} },
+			{ keepaliveIntervalMs: 10 }
+		);
+
+		const reader = stream.getReader();
+		const decoder = new TextDecoder();
+		let out = '';
+
+		while (!out.includes('"delta":{"content":""}')) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+
+			out += decoder.decode(value, { stream: true });
+		}
+
+		await reader.cancel('client abort');
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		const intervalCount = setIntervalSpy.mock.calls.length;
+		const keepaliveTimer = setIntervalSpy.mock.results[0]?.value;
+		const clearedTimers = clearIntervalSpy.mock.calls.map((call) => call[0]);
+
+		errorSpy.mockRestore();
+		setIntervalSpy.mockRestore();
+		clearIntervalSpy.mockRestore();
+
+		expect(out).toContain('"delta":{"content":""}');
+		expect(intervalCount).toBe(1);
+		expect(keepaliveTimer).toBeDefined();
+		expect(clearedTimers).toContain(keepaliveTimer);
+	});
+
+	it('aborts a silent upstream after the idle timeout and ends the stream as incomplete', async () => {
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const encoder = new TextEncoder();
+		let upstreamCancelReason: unknown = null;
+		const response = new Response(
+			new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.enqueue(encoder.encode('data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}\n'));
+					controller.enqueue(
+						encoder.encode(
+							'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_dead","name":"Shell"}}\n'
+						)
+					);
+					controller.enqueue(
+						encoder.encode(
+							'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"command\\":\\"ls\\"}"}}\n'
+						)
+					);
+				},
+				cancel(reason) {
+					upstreamCancelReason = reason;
+				}
+			})
+		);
+
+		const started = Date.now();
+		const { stream } = OpenAIStreamHandler.createStreamResponse(
+			response,
+			'st_idle',
+			'model_idle',
+			{ model: 'model_idle', source: 'claude', startTime: Date.now(), reverseToolMapping: {} },
+			{ keepaliveIntervalMs: 10, upstreamIdleTimeoutMs: 60 }
+		);
+
+		const output = await readStream(stream);
+		const elapsed = Date.now() - started;
+		const errors = errorSpy.mock.calls.map((call) => call.map(String).join(' ')).join('\n');
+		errorSpy.mockRestore();
+
+		expect(elapsed).toBeLessThan(2000);
+		expect(String(upstreamCancelReason)).toContain('upstream idle');
+		expect(errors).toContain('Aborting upstream stream id=st_idle');
+		expect(output).toContain('"name":"Shell"');
+		expect(output).not.toContain('\\"command\\":\\"ls\\"');
+		expect(output).toContain('"finish_reason":"length"');
+		expect(output).not.toContain('"finish_reason":"tool_calls"');
+		expect(output.trimEnd().endsWith('data: [DONE]')).toBe(true);
+	});
+
+	it('never cuts off a long stream while the upstream keeps sending pings', async () => {
+		const encoder = new TextEncoder();
+		const event = (value: unknown) => encoder.encode(`data: ${JSON.stringify(value)}\n`);
+		let upstreamCancelled = false;
+		const response = new Response(
+			new ReadableStream<Uint8Array>({
+				async start(controller) {
+					controller.enqueue(event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }));
+					controller.enqueue(event({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } }));
+
+					// Run for 10x the idle timeout, only ever sending pings and thinking.
+					for (let i = 0; i < 25; i++) {
+						await new Promise((resolve) => setTimeout(resolve, 20));
+						controller.enqueue(
+							i % 2 === 0
+								? encoder.encode('event: ping\ndata: {"type":"ping"}\n')
+								: event({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'still working' } })
+						);
+					}
+
+					controller.enqueue(event({ type: 'content_block_stop', index: 0 }));
+					controller.enqueue(event({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'finished' } }));
+					controller.enqueue(event({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 4 } }));
+					controller.enqueue(event({ type: 'message_stop' }));
+					controller.close();
+				},
+				cancel() {
+					upstreamCancelled = true;
+				}
+			})
+		);
+
+		const started = Date.now();
+		const { stream } = OpenAIStreamHandler.createStreamResponse(
+			response,
+			'st_long_alive',
+			'model_long',
+			{ model: 'model_long', source: 'claude', startTime: Date.now(), reverseToolMapping: {} },
+			{ keepaliveIntervalMs: 10, upstreamIdleTimeoutMs: 50 }
+		);
+
+		const output = await readStream(stream);
+		const elapsed = Date.now() - started;
+
+		expect(elapsed).toBeGreaterThanOrEqual(450);
+		expect(upstreamCancelled).toBe(false);
+		expect(output).not.toContain('still working');
+		expect(output).toContain('"content":"finished"');
+		expect(output).toContain('"finish_reason":"stop"');
+		expect(output).not.toContain('"finish_reason":"length"');
+	});
+
+	it('does not abort a slow upstream that is still sending events', async () => {
+		const encoder = new TextEncoder();
+		const event = (value: unknown) => encoder.encode(`data: ${JSON.stringify(value)}\n`);
+		const response = new Response(
+			new ReadableStream<Uint8Array>({
+				async start(controller) {
+					controller.enqueue(event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }));
+
+					for (let i = 0; i < 6; i++) {
+						await new Promise((resolve) => setTimeout(resolve, 30));
+						controller.enqueue(encoder.encode('event: ping\ndata: {"type":"ping"}\n'));
+					}
+
+					controller.enqueue(event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'slow but alive' } }));
+					controller.enqueue(event({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 4 } }));
+					controller.enqueue(event({ type: 'message_stop' }));
+					controller.close();
+				}
+			})
+		);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(
+			response,
+			'st_slow_alive',
+			'model_slow',
+			{ model: 'model_slow', source: 'claude', startTime: Date.now(), reverseToolMapping: {} },
+			{ keepaliveIntervalMs: 10, upstreamIdleTimeoutMs: 80 }
+		);
+
+		const output = await readStream(stream);
+
+		expect(output).toContain('"content":"slow but alive"');
+		expect(output).toContain('"finish_reason":"stop"');
+		expect(output).not.toContain('"finish_reason":"length"');
+	});
+
 	it('logs downstream cancellation without flushing an open tool', async () => {
 		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 		const encoder = new TextEncoder();
