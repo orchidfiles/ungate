@@ -7,12 +7,25 @@ import { type ToolUseBlock, type StreamResult, type RequestContext } from '../ty
 
 import type { AnthropicStopReason, AnthropicStreamEvent } from '../types/anthropic-stream';
 
-interface StreamHandlerOptions {
+export interface StreamTimingOptions {
+	keepaliveIntervalMs: number;
+	upstreamIdleTimeoutMs: number;
+}
+
+interface StreamHandlerOptions extends StreamTimingOptions {
 	reader: ReadableStreamDefaultReader<Uint8Array>;
 	streamId: string;
 	modelName: string;
 	context: RequestContext;
 }
+
+// Cursor's backend aborts a completion after ~125s without a chunk. Thinking is not
+// forwarded and tool arguments are buffered, so send empty deltas while Claude works.
+// Abort only when the upstream sends no bytes at all; there is no total-duration cap.
+export const DEFAULT_STREAM_TIMING: StreamTimingOptions = {
+	keepaliveIntervalMs: 15_000,
+	upstreamIdleTimeoutMs: 180_000
+};
 
 interface ActiveToolCall {
 	id: string;
@@ -30,7 +43,13 @@ interface StreamUsage {
 }
 
 export class OpenAIStreamHandler {
-	static createStreamResponse(response: Response, streamId: string, modelName: string, context: RequestContext): StreamResult {
+	static createStreamResponse(
+		response: Response,
+		streamId: string,
+		modelName: string,
+		context: RequestContext,
+		timing: Partial<StreamTimingOptions> = {}
+	): StreamResult {
 		const headers: Record<string, string> = {
 			'Content-Type': 'text/event-stream',
 			'Cache-Control': 'no-cache',
@@ -46,16 +65,24 @@ export class OpenAIStreamHandler {
 			throw new Error('No response body');
 		}
 
-		const stream = this.createStream({ reader, streamId, modelName, context });
+		const stream = this.createStream({ reader, streamId, modelName, context, ...DEFAULT_STREAM_TIMING, ...timing });
 
 		return { stream, headers };
 	}
 
 	private static createStream(options: StreamHandlerOptions): ReadableStream {
-		const { reader, streamId, modelName, context } = options;
+		const { reader, streamId, modelName, context, keepaliveIntervalMs, upstreamIdleTimeoutMs } = options;
 
 		let cancelled = false;
+		let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 		const activeToolCalls = new Map<number, ActiveToolCall>();
+
+		const stopKeepalive = () => {
+			if (keepaliveTimer) {
+				clearInterval(keepaliveTimer);
+				keepaliveTimer = null;
+			}
+		};
 
 		const describeOpenTools = (): string => {
 			if (activeToolCalls.size === 0) {
@@ -78,16 +105,65 @@ export class OpenAIStreamHandler {
 				let stopReason: AnthropicStopReason | null = null;
 				let finalUsage: StreamUsage | null = null;
 				let salvageFailed = false;
+				const streamStartedAt = Date.now();
+				let lastEmitAt = streamStartedAt;
+				let lastUpstreamAt = streamStartedAt;
+				let maxUpstreamGapMs = 0;
+				let abortReason: string | null = null;
+
+				// Cancelling the reader unblocks a pending read; the loop then finishes as incomplete.
+				const abortUpstream = (reason: string) => {
+					if (abortReason || finalized || cancelled) {
+						return;
+					}
+
+					abortReason = reason;
+					stopKeepalive();
+					logger.error(`Aborting upstream stream id=${streamId} reason=${reason} ${describeOpenTools()}`);
+					reader.cancel(new Error(reason)).catch(() => {});
+				};
 
 				const safeEnqueue = (data: Uint8Array) => {
 					try {
 						if (!cancelled) {
 							controller.enqueue(data);
+							lastEmitAt = Date.now();
 						}
 					} catch {
 						cancelled = true;
 					}
 				};
+
+				if (keepaliveIntervalMs > 0) {
+					keepaliveTimer = setInterval(() => {
+						if (cancelled || finalized || abortReason) {
+							stopKeepalive();
+
+							return;
+						}
+
+						const now = Date.now();
+
+						if (upstreamIdleTimeoutMs > 0 && now - lastUpstreamAt >= upstreamIdleTimeoutMs) {
+							abortUpstream(`upstream idle for ${Math.round((now - lastUpstreamAt) / 1000)}s`);
+
+							return;
+						}
+
+						if (now - lastEmitAt < keepaliveIntervalMs) {
+							return;
+						}
+
+						if (!sentStart) {
+							safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamStart(streamId, modelName)));
+							sentStart = true;
+
+							return;
+						}
+
+						safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamChunk(streamId, modelName, '')));
+					}, keepaliveIntervalMs);
+				}
 
 				const flushToolCall = (toolCall: ActiveToolCall, mode: 'complete' | 'salvage'): boolean => {
 					if (mode === 'salvage' && !toolCall.inputJson) {
@@ -160,9 +236,10 @@ export class OpenAIStreamHandler {
 					}
 
 					finalized = true;
+					stopKeepalive();
 
 					logger.log(
-						`Stream stop_reason=${stopReason ?? 'none'} unexpectedEof=${unexpectedEof} completedToolCalls=${completedToolCallCount}`
+						`Stream stop_reason=${stopReason ?? 'none'} unexpectedEof=${unexpectedEof} completedToolCalls=${completedToolCallCount} maxUpstreamGapMs=${maxUpstreamGapMs}`
 					);
 
 					if (unexpectedEof && activeToolCalls.size > 0) {
@@ -214,6 +291,9 @@ export class OpenAIStreamHandler {
 							break;
 						}
 
+						const receivedAt = Date.now();
+						maxUpstreamGapMs = Math.max(maxUpstreamGapMs, receivedAt - lastUpstreamAt);
+						lastUpstreamAt = receivedAt;
 						buffer += decoder.decode(value, { stream: true });
 						const lines = buffer.split('\n');
 						buffer = lines.pop() ?? '';
@@ -360,6 +440,8 @@ export class OpenAIStreamHandler {
 						}
 					}
 				} finally {
+					stopKeepalive();
+
 					try {
 						if (!cancelled) reader.cancel().catch(() => {});
 					} catch {
@@ -375,6 +457,7 @@ export class OpenAIStreamHandler {
 			},
 			cancel(reason) {
 				cancelled = true;
+				stopKeepalive();
 				logger.error(`Downstream cancelled stream id=${streamId} reason=${String(reason)} ${describeOpenTools()}`);
 				reader.cancel(reason).catch(() => {});
 			}
