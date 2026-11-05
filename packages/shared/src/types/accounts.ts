@@ -16,6 +16,36 @@ export interface SubscriptionAccount {
 	cooldownUntil: number | null;
 	cooldownReason: string | null;
 	cooldownEstimated: boolean;
+	/** Last known subscription usage; null until a usage fetch or proxied response reported it. */
+	usage: AccountUsage | null;
+}
+
+/** One subscription rate-limit window (e.g. Claude's 5-hour window, ChatGPT's weekly window). */
+export interface UsageWindow {
+	/** '5h' | '7d' | '7d_opus' | '7d_sonnet' | … for Claude; 'primary' | 'secondary' for ChatGPT. */
+	id: string;
+	/** Human-readable name, e.g. "5-hour", "Weekly", "Weekly (Opus)". */
+	label: string;
+	/** 0–100. */
+	usedPercent: number;
+	/** Unix ms when the window resets, when known. */
+	resetsAt: number | null;
+	windowMinutes: number | null;
+}
+
+export interface AccountUsage {
+	windows: UsageWindow[];
+	planType: string | null;
+	/** Where the most recent update came from. */
+	source: 'endpoint' | 'headers';
+	/** Unix ms of the most recent update. */
+	updatedAt: number;
+	/** Last live-fetch error; previously known windows are kept. */
+	error: string | null;
+}
+
+export interface AccountUsageRefreshRequest {
+	accountId?: string;
 }
 
 export interface AccountPolicy {
