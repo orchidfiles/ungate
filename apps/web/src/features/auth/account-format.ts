@@ -56,7 +56,7 @@ export function formatCooldownReason(reason: string): string {
 	return formatLimitReason(reason) ?? knownSwitchReasons[reason] ?? humanize(reason);
 }
 
-function formatClock(timestamp: number, now: number): string {
+export function formatClock(timestamp: number, now: number): string {
 	const date = new Date(timestamp);
 	const sameDay = new Date(now).toDateString() === date.toDateString();
 
@@ -65,7 +65,7 @@ function formatClock(timestamp: number, now: number): string {
 		: date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function formatRemaining(ms: number): string {
+export function formatRemaining(ms: number): string {
 	const minutes = Math.ceil(ms / 60_000);
 
 	if (minutes < 1) {
@@ -97,6 +97,29 @@ export function formatCooldown(account: SubscriptionAccount, now: number): strin
 	const when = `${formatClock(account.cooldownUntil, now)} (in ${formatRemaining(account.cooldownUntil - now)})`;
 
 	return account.cooldownEstimated ? `Estimated retry after ${when}` : `Limit resets ${when}`;
+}
+
+/** e.g. "resets 14:05 (in 2 h)"; null when unknown or already past. */
+export function formatUsageReset(resetsAt: number | null, now: number): string | null {
+	if (resetsAt === null || resetsAt <= now) {
+		return null;
+	}
+
+	return `resets ${formatClock(resetsAt, now)} (in ${formatRemaining(resetsAt - now)})`;
+}
+
+/** e.g. "just now", "3 min ago", "2 h ago". */
+export function formatAge(timestamp: number, now: number): string {
+	const ms = now - timestamp;
+
+	return ms < 60_000 ? 'just now' : `${formatRemaining(ms)} ago`;
+}
+
+/** "plus" → "Plus", "chatgpt_pro" → "Chatgpt pro". */
+export function formatPlanType(planType: string): string {
+	const text = humanize(planType);
+
+	return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export function accountSubtitle(account: SubscriptionAccount): string | null {

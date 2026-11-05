@@ -11,6 +11,7 @@ import {
 	type AccountPolicyRequest,
 	type AccountRenameRequest,
 	type AccountSelectRequest,
+	type AccountUsageRefreshRequest,
 	type AnalyticsSummary,
 	type AppSettings,
 	type Period,
@@ -228,6 +229,13 @@ export class Api {
 		const body: AccountPolicyRequest = { autoSwitch };
 
 		return this.patch(`/auth/${provider}/policy`, body);
+	}
+
+	/** Fetches live subscription usage (all accounts, or one); the server throttles per account. */
+	static accountUsageRefresh(provider: SubscriptionProvider, accountId?: string): Promise<AccountListResponse> {
+		const body: AccountUsageRefreshRequest = accountId ? { accountId } : {};
+
+		return this.post(`/auth/${provider}/usage/refresh`, body);
 	}
 
 	static authMinimaxStatus(): Promise<{ authenticated: boolean; baseUrl?: string }> {
