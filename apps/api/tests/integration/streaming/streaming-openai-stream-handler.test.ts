@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { OpenAIStreamHandler } from 'src/streaming/openai-stream-handler';
 
+import type { RequestRecord } from '@ungate/shared';
+
 const recordMock = vi.fn();
 
 vi.mock('src/database/requests', () => ({
@@ -99,6 +101,49 @@ describe('streaming-openai-stream-handler', () => {
 		expect(output).toContain('"usage"');
 		expect(output).toContain('data: [DONE]');
 		expect(recordMock).toHaveBeenCalledTimes(1);
+		expect(recordMock.mock.calls[0][0]).toMatchObject({
+			inputTokens: 8,
+			outputTokens: 7,
+			cacheReadTokens: 1,
+			cacheCreationTokens: 2,
+			stopReason: 'end_turn',
+			toolCallCount: 0
+		});
+		expect((recordMock.mock.calls[0][0] as RequestRecord).firstTokenMs).toBeTypeOf('number');
+	});
+
+	it('records router telemetry, thinking chars and reverse-mapped tool names', async () => {
+		const response = createResponseWithSse([
+			'data: {"type":"message_start","message":{"usage":{"input_tokens":3,"output_tokens":0}}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"abcdef"}}',
+			'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu9","name":"Bash"}}',
+			'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}',
+			'data: {"type":"content_block_stop","index":1}',
+			'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4}}',
+			'data: {"type":"message_stop"}'
+		]);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st10', 'model10', {
+			model: 'model10',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: { Bash: 'Shell' },
+			telemetry: { accountId: 'acc-1', attempts: 2, rotationReason: 'five_hour', sessionKey: 'sess', turnIndex: 3 }
+		});
+
+		await readStream(stream);
+
+		expect(recordMock.mock.calls[0][0]).toMatchObject({
+			accountId: 'acc-1',
+			attempts: 2,
+			rotationReason: 'five_hour',
+			sessionKey: 'sess',
+			turnIndex: 3,
+			reasoningChars: 6,
+			stopReason: 'tool_use',
+			toolCallCount: 1,
+			toolNames: ['Shell']
+		});
 	});
 
 	it('handles tool_use flow and malformed chunks', async () => {
@@ -883,6 +928,14 @@ describe('streaming-openai-stream-handler', () => {
 		expect(errors).toContain('Downstream cancelled');
 		expect(errors).toContain('Write');
 		expect(errors).toContain('tu6');
-		expect(recordMock).not.toHaveBeenCalled();
+		// The abandoned work is still recorded once, as aborted, so "continue" follow-ups can be traced.
+		expect(recordMock).toHaveBeenCalledTimes(1);
+		expect(recordMock.mock.calls[0][0]).toMatchObject({
+			source: 'claude',
+			stopReason: 'aborted',
+			toolCallCount: 1,
+			toolNames: ['Write'],
+			error: 'Client cancelled stream'
+		});
 	});
 });

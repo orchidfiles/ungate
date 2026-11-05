@@ -38,6 +38,12 @@ export interface StreamState {
 	usage?: Record<string, number>;
 	/** Set when `terminal === 'failed'`. */
 	failure?: { message: string; type: string; code?: string; upstream?: Record<string, unknown> };
+	/** Wall-clock time of the first assistant chunk (text or tool call), for time-to-first-token. */
+	firstTokenAt?: number;
+	/** Tool names in call order (function_call and custom_tool_call). */
+	toolNames: string[];
+	/** `incomplete_details.reason` of a `response.incomplete` terminal. */
+	incompleteReason?: string;
 }
 
 export class StreamStateFactory {
@@ -56,7 +62,8 @@ export class StreamStateFactory {
 			sseKindCounts: new Map(),
 			outputItemTypeAdded: new Map(),
 			outputItemTypeDone: new Map(),
-			terminal: null
+			terminal: null,
+			toolNames: []
 		};
 
 		return state;
