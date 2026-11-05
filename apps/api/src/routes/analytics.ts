@@ -52,6 +52,14 @@ const plugin: FastifyPluginCallback = (app) => {
 		return reply.send({ period, series });
 	});
 
+	app.get('/analytics/insights', async (request, reply) => {
+		const period = toPeriod((request.query as Record<string, string>).period);
+		const now = Date.now();
+		const since = period === 'all' ? 0 : now - PERIOD_OFFSETS[period];
+
+		return reply.send(Analytics.getInsights(period, since, now));
+	});
+
 	app.post('/analytics/reset', async (_request, reply) => {
 		const result = Analytics.reset();
 
