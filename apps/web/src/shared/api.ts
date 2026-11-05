@@ -17,7 +17,8 @@ import {
 	type Period,
 	type RequestRecord,
 	type SubscriptionProvider,
-	type TokenSeriesPoint
+	type TokenSeriesPoint,
+	type UsageInsights
 } from '@ungate/shared/frontend';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -165,6 +166,10 @@ export class Api {
 
 	static fetchTokenSeries(period: Period): Promise<{ period: Period; series: TokenSeriesPoint[] }> {
 		return this.get(`/analytics/tokens?period=${period}`);
+	}
+
+	static fetchInsights(period: Period): Promise<UsageInsights> {
+		return this.get(`/analytics/insights?period=${period}`);
 	}
 
 	static resetAnalytics(): Promise<{ success: boolean; deletedCount: number }> {

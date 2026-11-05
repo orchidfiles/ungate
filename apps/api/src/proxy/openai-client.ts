@@ -9,12 +9,14 @@ import { AccountFallback } from './account-fallback';
 import { ResponsesBodyBuilder } from './responses-input-normalizer/build-body';
 import { ResponsesModelResolver } from './responses-input-normalizer/resolve-model';
 import { ResponsesSseProcessor, StreamDiagnostics, StreamStateFactory, type StreamState } from './responses-stream-mapper';
+import { StreamChunkMapper } from './responses-stream-mapper/stream-openai-chunks';
 import { SsePrecommitGate } from './sse-precommit-gate';
 import { UsageLimitClassifier } from './usage-limit-classifier';
 
 import type { OAuthCredentials } from '../auth/base-provider';
 import type { OpenAIChatRequest } from '../types/openai';
 import type { RequestContext } from '../types/proxy';
+import type { RequestTelemetry } from '@ungate/shared';
 
 /** Codex `/responses` requires non-empty `instructions` (api_error otherwise). */
 const CODEX_INSTRUCTIONS_FALLBACK =
@@ -75,11 +77,34 @@ export class OpenAiClient {
 		if (outcome.kind === 'limited') {
 			logger.log(`ChatGPT Codex usage limit: no eligible account (${outcome.reason})`);
 
-			return this.errorResult(model, startTime, 429, { message: outcome.message, type: 'usage_limit_reached' }, outcome.headers);
+			const limited = this.errorResult(
+				model,
+				startTime,
+				429,
+				{ message: outcome.message, type: 'usage_limit_reached' },
+				outcome.headers
+			);
+			limited.context.telemetry = {
+				accountId: outcome.accountId,
+				attempts: outcome.attempts,
+				rotationReason: outcome.reason,
+				stopReason: 'error'
+			};
+
+			return limited;
 		}
 
+		const telemetry: RequestTelemetry = {
+			accountId: outcome.accountId,
+			attempts: outcome.attempts,
+			rotationReason: outcome.rotationReason
+		};
+
 		if (!outcome.response.ok) {
-			return this.upstreamErrorResult(outcome.response, model, startTime);
+			const failed = await this.upstreamErrorResult(outcome.response, model, startTime);
+			failed.context.telemetry = { ...telemetry, stopReason: 'error' };
+
+			return failed;
 		}
 
 		const onStreamError = SsePrecommitGate.cooldownOnStreamLimit(
@@ -89,7 +114,10 @@ export class OpenAiClient {
 			outcome.response.headers
 		);
 
-		return this.successResult(body, outcome.response, model, normalizedModel, startTime, onStreamError);
+		const result = await this.successResult(body, outcome.response, model, normalizedModel, startTime, onStreamError);
+		result.context.telemetry = { ...telemetry, ...result.context.telemetry };
+
+		return result;
 	}
 
 	/** One Codex attempt pinned to `creds`' account, with one same-account refresh retry on 401. */
@@ -240,10 +268,12 @@ export class OpenAiClient {
 		}
 
 		const buffered = await this.bufferedResponse(response, state, normalizedModel, onStreamError);
+		const context = buffered.failed ? this.errorContext(model, startTime) : this.openAiContext(model, startTime);
+		context.inputTokens = state.usage?.prompt_tokens ?? 0;
+		context.outputTokens = state.usage?.completion_tokens ?? 0;
+		context.telemetry = StreamDiagnostics.telemetry(state, buffered.failed ? 'failed' : undefined);
 
-		return buffered.failed
-			? { response: buffered.response, context: this.errorContext(model, startTime) }
-			: { response: buffered.response, context: this.openAiContext(model, startTime) };
+		return { response: buffered.response, context };
 	}
 
 	/**
@@ -263,16 +293,19 @@ export class OpenAiClient {
 		let cancelled = false;
 		let recorded = false;
 
-		const recordOutcome = (error?: string) => {
+		const recordOutcome = (error?: string, aborted = false) => {
 			if (recorded) return;
 			recorded = true;
 			Requests.record({
+				...context.telemetry,
+				...StreamDiagnostics.telemetry(state, aborted ? 'aborted' : error ? 'failed' : undefined),
 				model: context.model,
 				source: error ? 'error' : context.source,
 				inputTokens: state.usage?.prompt_tokens ?? 0,
 				outputTokens: state.usage?.completion_tokens ?? 0,
 				stream: true,
 				latencyMs: Date.now() - context.startTime,
+				firstTokenMs: state.firstTokenAt ? state.firstTokenAt - context.startTime : null,
 				error: error?.slice(0, 500) ?? null
 			});
 		};
@@ -326,7 +359,7 @@ export class OpenAiClient {
 			cancel(reason) {
 				cancelled = true;
 				logger.log(`[Codex] downstream cancelled stream: ${String(reason)}`);
-				recordOutcome('Client cancelled stream');
+				recordOutcome('Client cancelled stream', true);
 
 				return reader.cancel(reason).catch(() => undefined);
 			}
@@ -410,7 +443,7 @@ export class OpenAiClient {
 					created: state.created,
 					model: normalizedModel,
 					choices: [{ index: 0, message: { role: 'assistant', content: fullContent || null }, finish_reason: finishReason }],
-					usage: state.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+					usage: StreamChunkMapper.openAiUsage(state.usage) ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
 				}),
 				{
 					status: 200,

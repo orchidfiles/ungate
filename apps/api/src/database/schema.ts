@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const appSettings = sqliteTable('app_settings', {
 	id: integer()
@@ -60,17 +60,41 @@ export const modelMappings = sqliteTable('model_mappings', {
 	serviceTier: text()
 });
 
-export const requests = sqliteTable('requests', {
-	id: integer().primaryKey({ autoIncrement: true }),
-	timestamp: integer().notNull(),
-	model: text().notNull(),
-	source: text().notNull(),
-	inputTokens: integer().notNull().default(0),
-	outputTokens: integer().notNull().default(0),
-	estimatedCost: real().notNull().default(0),
-	stream: integer({ mode: 'boolean' }).notNull().default(false),
-	latencyMs: integer(),
-	error: text()
-});
+export const requests = sqliteTable(
+	'requests',
+	{
+		id: integer().primaryKey({ autoIncrement: true }),
+		timestamp: integer().notNull(),
+		model: text().notNull(),
+		source: text().notNull(),
+		inputTokens: integer().notNull().default(0),
+		outputTokens: integer().notNull().default(0),
+		estimatedCost: real().notNull().default(0),
+		stream: integer({ mode: 'boolean' }).notNull().default(false),
+		latencyMs: integer(),
+		error: text(),
+		accountId: text(),
+		attempts: integer(),
+		rotationReason: text(),
+		cacheReadTokens: integer(),
+		cacheCreationTokens: integer(),
+		reasoningTokens: integer(),
+		reasoningChars: integer(),
+		reasoningTier: text(),
+		stopReason: text(),
+		toolCallCount: integer(),
+		toolNames: text(),
+		sessionKey: text(),
+		turnIndex: integer(),
+		messageCount: integer(),
+		continuation: integer({ mode: 'boolean' }),
+		firstTokenMs: integer()
+	},
+	(table) => [
+		index('requests_timestamp_idx').on(table.timestamp),
+		index('requests_session_key_idx').on(table.sessionKey, table.timestamp),
+		index('requests_account_timestamp_idx').on(table.accountId, table.timestamp)
+	]
+);
 
 export const schema = { appSettings, requests, providerSettings, modelMappings, oauthAccounts, oauthPolicies };

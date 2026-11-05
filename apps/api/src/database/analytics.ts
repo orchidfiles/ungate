@@ -2,11 +2,12 @@ import { sql } from 'drizzle-orm';
 
 import { logger } from 'src/utils/logger';
 
+import { UsageInsightsQuery } from './insights';
 import { requests } from './schema';
 
-import { getDb } from './index';
+import { getDb, getSqlite } from './index';
 
-import type { AnalyticsSummary, Period, TokenSeriesPoint } from '@ungate/shared';
+import type { AnalyticsSummary, Period, TokenSeriesPoint, UsageInsights } from '@ungate/shared';
 
 export class Analytics {
 	static getSummary(since: number, until: number = Date.now()): AnalyticsSummary {
@@ -83,6 +84,11 @@ export class Analytics {
 			inputTokens: row.inputTokens ?? 0,
 			outputTokens: row.outputTokens ?? 0
 		}));
+	}
+
+	/** Usage heuristics over the period; see `UsageInsightsQuery` for each aggregate. */
+	static getInsights(period: Period, since: number, until: number = Date.now()): UsageInsights {
+		return new UsageInsightsQuery(getSqlite(), period, { since, until }).run();
 	}
 
 	private static bucketExpression(period: Period) {
