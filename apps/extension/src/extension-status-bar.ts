@@ -40,6 +40,14 @@ export class ExtensionStatusBar {
 		return '$(circle-slash) OpenAI API Key: off';
 	}
 
+	public static formatAutoTunnelTip(autoTunnelEnabled: boolean): string {
+		if (autoTunnelEnabled) {
+			return '$(check) Auto-start tunnel: on';
+		}
+
+		return '$(circle-slash) Auto-start tunnel: off';
+	}
+
 	public static tunnelRestartLabel(tunnel: TunnelState): string {
 		if (tunnel.status === 'stopped') {
 			return 'Start tunnel';
@@ -52,7 +60,8 @@ export class ExtensionStatusBar {
 		apiState: ApiBarStatus,
 		tunnel: TunnelState,
 		tunnelApiUrl: string | null,
-		keyFixEnabled: boolean
+		keyFixEnabled: boolean,
+		autoTunnelEnabled = false
 	): vscode.MarkdownString {
 		const tip = new vscode.MarkdownString('', true);
 		tip.isTrusted = true;
@@ -60,6 +69,8 @@ export class ExtensionStatusBar {
 		tip.appendMarkdown(this.formatApiTip(apiState));
 		tip.appendMarkdown('\n\n');
 		tip.appendMarkdown(this.formatKeyFixTip(keyFixEnabled));
+		tip.appendMarkdown('\n\n');
+		tip.appendMarkdown(this.formatAutoTunnelTip(autoTunnelEnabled));
 		tip.appendMarkdown('\n\n');
 		tip.appendMarkdown(this.formatTunnelTip(tunnel, tunnelApiUrl));
 
@@ -82,6 +93,9 @@ export class ExtensionStatusBar {
 		}
 
 		actions.push(`[$(settings-gear) ${keyFixLabel}](command:${extensionCommands.toggleKeyFix})`);
+
+		const autoTunnelLabel = autoTunnelEnabled ? 'Turn off auto-start tunnel' : 'Turn on auto-start tunnel';
+		actions.push(`[$(rocket) ${autoTunnelLabel}](command:${extensionCommands.toggleAutoTunnel})`);
 
 		tip.appendMarkdown(actions.join(' · '));
 

@@ -1,5 +1,7 @@
 export const DEFAULT_KEY_FIX_ENABLED = false;
 
+export const DEFAULT_AUTO_TUNNEL_ENABLED = false;
+
 export const CLAUDE_CLI_STABLE_VERSION = '2.1.9';
 
 export const CLAUDE_CLI_LATEST_VERSION = '2.1.322';

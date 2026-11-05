@@ -1,4 +1,4 @@
-import { DEFAULT_KEY_FIX_ENABLED, type RuntimeState } from '@ungate/shared/frontend';
+import { DEFAULT_AUTO_TUNNEL_ENABLED, DEFAULT_KEY_FIX_ENABLED, type RuntimeState } from '@ungate/shared/frontend';
 
 export class RuntimeStateDefaults {
 	public static create(): RuntimeState {
@@ -23,6 +23,10 @@ export class RuntimeStateDefaults {
 			},
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED
+			},
+			autoTunnel: {
+				enabled: DEFAULT_AUTO_TUNNEL_ENABLED,
+				lastAppliedUrl: null
 			},
 			clients: {},
 			commands: []

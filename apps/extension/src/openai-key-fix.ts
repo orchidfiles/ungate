@@ -126,6 +126,23 @@ export class OpenAiKeyFix {
 		await this.disableByUser();
 	}
 
+	/** Turns Cursor's OpenAI API Key switch on once, regardless of whether the auto-fix toggle is on. */
+	public async ensureKeyEnabled(): Promise<void> {
+		const unavailableReason = await this.refreshReaderAvailability();
+
+		if (unavailableReason) {
+			this.log(`${config.logPrefix} cannot enable key: ${unavailableReason}`);
+
+			return;
+		}
+
+		try {
+			await this.enableOpenAiKeyIfNeeded();
+		} catch (error) {
+			this.log(`${config.logPrefix} failed to enable key: ${String(error)}`);
+		}
+	}
+
 	public stop(): void {
 		this.state.activated = false;
 		this.stopMonitoring();

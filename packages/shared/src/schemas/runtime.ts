@@ -44,10 +44,17 @@ export const runtimeKeyFixStateSchema = z.object({
 	enabled: z.boolean()
 });
 
+export const runtimeAutoTunnelStateSchema = z.object({
+	enabled: z.boolean(),
+	lastAppliedUrl: z.string().nullable()
+});
+
 export const runtimeStateSchema = z.object({
 	api: runtimeApiStateSchema,
 	tunnel: runtimeTunnelStateSchema,
 	keyFix: runtimeKeyFixStateSchema,
+	// State files written before auto-tunnel existed have no `autoTunnel`; the default keeps them parseable.
+	autoTunnel: runtimeAutoTunnelStateSchema.default({ enabled: false, lastAppliedUrl: null }),
 	clients: z.record(z.string(), runtimeClientEntrySchema),
 	commands: z.array(runtimeCommandSchema)
 });

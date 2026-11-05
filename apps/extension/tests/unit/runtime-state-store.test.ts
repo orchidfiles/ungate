@@ -50,6 +50,7 @@ function createState(apiStatus: RuntimeState['api']['status'], lastError: string
 			ownerWindowId: null
 		},
 		keyFix: { enabled: false },
+		autoTunnel: { enabled: false, lastAppliedUrl: null },
 		clients: {},
 		commands: []
 	};

@@ -41,6 +41,11 @@ function handleKeyFixChange(event: Event): void {
 	const target = event.currentTarget as HTMLInputElement;
 	store.setKeyFixEnabled(target.checked);
 }
+
+function handleAutoTunnelChange(event: Event): void {
+	const target = event.currentTarget as HTMLInputElement;
+	store.setAutoTunnelEnabled(target.checked);
+}
 </script>
 
 <div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
@@ -113,6 +118,22 @@ function handleKeyFixChange(event: Event): void {
 				Stop
 			</button>
 		{/if}
+	</div>
+
+	<div class="card preset-tonal-surface border border-surface-700/30 p-3 space-y-2">
+		<label class="flex items-start gap-3 cursor-pointer">
+			<input
+				class="checkbox mt-0.5"
+				type="checkbox"
+				checked={store.autoTunnelEnabled}
+				onchange={handleAutoTunnelChange} />
+			<span class="text-sm leading-5">Start tunnel automatically and set up Cursor</span>
+		</label>
+		<p class="text-xs text-surface-400">
+			Ungate starts the tunnel as soon as the API is up and turns on OpenAI API Key in Cursor. Cursor does not let extensions
+			change the base URL, so whenever the tunnel URL changes Ungate copies it and offers to open Cursor Settings → Models so you
+			can paste it.
+		</p>
 	</div>
 
 	<div class="card preset-tonal-surface border border-surface-700/30 p-3 space-y-2">

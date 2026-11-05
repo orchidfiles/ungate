@@ -58,6 +58,10 @@
 			{
 				"command": "ungate.toggleKeyFix",
 				"title": "Ungate: Toggle OpenAI Key Fix"
+			},
+			{
+				"command": "ungate.toggleAutoTunnel",
+				"title": "Ungate: Toggle Auto-start Tunnel"
 			}
 		]
 	},

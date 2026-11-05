@@ -1,4 +1,4 @@
-import { DEFAULT_KEY_FIX_ENABLED, type RuntimeState } from '@ungate/shared/frontend';
+import { DEFAULT_AUTO_TUNNEL_ENABLED, DEFAULT_KEY_FIX_ENABLED, type RuntimeState } from '@ungate/shared/frontend';
 import { vi } from 'vitest';
 
 export class TestHelper {
@@ -27,6 +27,10 @@ export class TestHelper {
 			},
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED
+			},
+			autoTunnel: {
+				enabled: DEFAULT_AUTO_TUNNEL_ENABLED,
+				lastAppliedUrl: null
 			},
 			clients,
 			commands: []

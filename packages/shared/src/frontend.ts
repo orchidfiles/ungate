@@ -13,6 +13,7 @@ export type ExtensionToWebview =
 	| { type: 'port'; port: number | null }
 	| { type: 'tunnel-status'; state: TunnelState }
 	| { type: 'key-fix-state'; enabled: boolean }
+	| { type: 'auto-tunnel-state'; enabled: boolean }
 	| { type: 'log'; source: 'api' | 'tunnel'; entry: LogEntry }
 	| { type: 'log-bulk'; source: 'api' | 'tunnel'; entries: LogEntry[] }
 	| { type: 'logs-cleared'; source: 'api' | 'tunnel' };
@@ -24,4 +25,5 @@ export type WebviewToExtension =
 	| { type: 'stop-tunnel' }
 	| { type: 'restart-tunnel' }
 	| { type: 'set-key-fix-enabled'; enabled: boolean }
+	| { type: 'set-auto-tunnel-enabled'; enabled: boolean }
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' };

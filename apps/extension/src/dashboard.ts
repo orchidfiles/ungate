@@ -16,6 +16,7 @@ const MSGS_SIMPLE = ['webview-ready', 'restart-server', 'start-tunnel', 'stop-tu
 export type Msg =
 	| { type: 'open-external-url'; url: string }
 	| { type: 'set-key-fix-enabled'; enabled: boolean }
+	| { type: 'set-auto-tunnel-enabled'; enabled: boolean }
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' }
 	| Extract<WebviewToExtension, { type: (typeof MSGS_SIMPLE)[number] }>;
 
@@ -113,6 +114,10 @@ export class Dashboard {
 		this.panel?.webview.postMessage({ type: 'key-fix-state', enabled });
 	}
 
+	sendAutoTunnelState(enabled: boolean): void {
+		this.panel?.webview.postMessage({ type: 'auto-tunnel-state', enabled });
+	}
+
 	sendTunnelState(state: TunnelState): void {
 		this.panel?.webview.postMessage({ type: 'tunnel-status', state });
 	}
@@ -143,14 +148,14 @@ export class Dashboard {
 			return { type: 'open-external-url', url };
 		}
 
-		if (type === 'set-key-fix-enabled') {
+		if (type === 'set-key-fix-enabled' || type === 'set-auto-tunnel-enabled') {
 			const enabled = record.enabled;
 
 			if (typeof enabled !== 'boolean') {
 				return null;
 			}
 
-			return { type: 'set-key-fix-enabled', enabled };
+			return { type, enabled };
 		}
 
 		if (type === 'clear-logs') {
