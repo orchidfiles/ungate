@@ -58,10 +58,11 @@ export class OpenAIOAuthService {
 		}
 
 		OpenAIPkceSessionStore.delete(sessionId);
-		const tokens = await OpenAIOAuthClient.exchangeCode(code, session.codeVerifier);
-
-		if (!tokens) {
-			return { ok: false, error: 'Token exchange failed' };
+		let tokens: Record<string, unknown>;
+		try {
+			tokens = await OpenAIOAuthClient.exchangeCode(code, session.codeVerifier);
+		} catch (error) {
+			return { ok: false, error: error instanceof Error ? error.message : 'Token exchange failed' };
 		}
 
 		const idToken = typeof tokens.id_token === 'string' ? tokens.id_token : null;
