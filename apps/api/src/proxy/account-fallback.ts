@@ -1,6 +1,7 @@
 import { logger } from 'src/utils/logger';
 
 import { OAuthAccounts, type OAuthAccountRow } from '../database/oauth-accounts';
+import { UsageFetcher } from '../usage/usage-fetcher';
 import { AccountUsageStore } from '../usage/usage-store';
 
 import { UsageLimitClassifier, type UsageLimitClassification } from './usage-limit-classifier';
@@ -157,7 +158,10 @@ export class AccountFallback {
 			await release(sent.response);
 			await release(inspected.response);
 			const until = limit.resetAt ?? Date.now();
-			OAuthAccounts.markCooldown(account.id, until, limit.reason, limit.estimated, sent.credentials.credentialVersion);
+			if (OAuthAccounts.markCooldown(account.id, until, limit.reason, limit.estimated, sent.credentials.credentialVersion)) {
+				// Picks up an upgrade promptly; the fetch can only lift the cooldown, never extend it.
+				UsageFetcher.refreshAfterCooldown(provider, account.id);
+			}
 			lastLimit = { accountId: account.id, reason: limit.reason, headers: this.safeRetryHeaders(sent.response.headers) };
 			logger.log(
 				`[accounts] ${provider} account ${account.id} usage limit (${limit.reason}); cooldown until ${new Date(until).toISOString()}${limit.estimated ? ' (estimated)' : ''}`

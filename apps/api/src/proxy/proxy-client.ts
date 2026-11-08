@@ -12,7 +12,10 @@ import type { OpenAIChatRequest } from '../types/openai';
 import type { ProxyResult, RequestContext } from '../types/proxy';
 
 function detectProvider(model: string): AIProviderName {
-	return detectProviderByModel(model);
+	// Cursor is reachable only through explicit mappings, never by model-name detection.
+	const detected = detectProviderByModel(model);
+
+	return detected === 'cursor' ? 'claude' : detected;
 }
 
 export async function proxyRequest(

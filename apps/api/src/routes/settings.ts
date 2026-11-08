@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
 	ClaudeCliVersion,
 	isClaudeCliVersionMode,
+	isCursorToolMode,
 	isModelMappingProvider,
 	isModelServiceTier,
 	isReasoningBudgetTier,
@@ -20,7 +21,7 @@ const ModelMappingUpdateSchema = z
 		id: z.string(),
 		label: z.string(),
 		provider: z.string().refine((value) => isModelMappingProvider(value), {
-			message: 'Model provider must be claude, openai or minimax'
+			message: 'Model provider must be claude, openai, minimax or cursor'
 		}),
 		upstreamModel: z.string(),
 		sortOrder: z.number().int(),
@@ -30,6 +31,9 @@ const ModelMappingUpdateSchema = z
 		]),
 		serviceTier: z
 			.union([z.null(), z.string().refine((value) => isModelServiceTier(value), { message: 'Invalid serviceTier' })])
+			.default(null),
+		toolMode: z
+			.union([z.null(), z.string().refine((value) => isCursorToolMode(value), { message: 'Invalid toolMode' })])
 			.default(null)
 	})
 	.strip();

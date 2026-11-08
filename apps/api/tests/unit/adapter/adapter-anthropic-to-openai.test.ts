@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { AnthropicToOpenai } from 'src/adapter/anthropic-to-openai';
 
+import type { AnthropicResponse } from 'src/types/anthropic';
+
 function parseSseChunk(raw: string): Record<string, unknown> {
 	const line = raw
 		.trim()
@@ -95,19 +97,18 @@ describe('anthropic-to-openai', () => {
 	});
 
 	it('maps unknown stop reason to stop and fills missing usage with zeroes', () => {
-		const converted = AnthropicToOpenai.convert(
-			{
-				id: 'msg_2',
-				type: 'message',
-				role: 'assistant',
-				model: 'claude-sonnet-4-6',
-				stop_reason: 'custom_reason',
-				stop_sequence: null,
-				content: [],
-				usage: undefined
-			},
-			'gpt-5.4'
-		);
+		// Deliberately off-contract: unknown stop reason and missing usage.
+		const malformed = {
+			id: 'msg_2',
+			type: 'message',
+			role: 'assistant',
+			model: 'claude-sonnet-4-6',
+			stop_reason: 'custom_reason',
+			stop_sequence: null,
+			content: [],
+			usage: undefined
+		} as unknown as AnthropicResponse;
+		const converted = AnthropicToOpenai.convert(malformed, 'gpt-5.4');
 
 		expect(converted.choices[0].finish_reason).toBe('stop');
 		expect(converted.choices[0].message.content).toBe('');

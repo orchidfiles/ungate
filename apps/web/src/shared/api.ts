@@ -14,12 +14,19 @@ import {
 	type AccountUsageRefreshRequest,
 	type AnalyticsSummary,
 	type AppSettings,
+	type CursorBridgeError,
+	type CursorModelInfo,
+	type CursorSessionStatus,
+	type ModelMappingConfig,
 	type Period,
+	type ReasoningBudgetTier,
 	type RequestRecord,
 	type SubscriptionProvider,
 	type TokenSeriesPoint,
 	type UsageInsights
 } from '@ungate/shared/frontend';
+
+export type CursorModelListItem = CursorModelInfo & { imported: boolean };
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -262,6 +269,27 @@ export class Api {
 	/** Legacy status: reflects the provider's active account only. */
 	static authChatGPTStatus(): Promise<{ authenticated: boolean; email?: string }> {
 		return this.get('/auth/openai/status');
+	}
+
+	static cursorStatus(): Promise<CursorSessionStatus> {
+		return this.get('/auth/cursor/status');
+	}
+
+	static cursorModels(): Promise<{ models: CursorModelListItem[]; error: CursorBridgeError | null }> {
+		return this.get('/auth/cursor/models');
+	}
+
+	static cursorImportModel(body: {
+		upstreamModel: string;
+		label: string;
+		reasoningBudget?: ReasoningBudgetTier | null;
+	}): Promise<{ model: ModelMappingConfig; models: ModelMappingConfig[] }> {
+		return this.post('/auth/cursor/models/import', body);
+	}
+
+	/** Lifts a cooling-down account immediately (manual override). */
+	static accountClearCooldown(provider: SubscriptionProvider, accountId: string): Promise<AccountListResponse> {
+		return this.post(`/auth/${provider}/accounts/${encodeURIComponent(accountId)}/clear-cooldown`);
 	}
 
 	static async healthCheck(): Promise<boolean> {

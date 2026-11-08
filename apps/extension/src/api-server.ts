@@ -19,6 +19,8 @@ interface ApiServerCallbacks {
 	isLeaderWindow(): boolean;
 	isExtensionHostActive(): boolean;
 	getWindowId(): string;
+	/** Called with the API child this window spawned (IPC channel attached). Adopted APIs never get one. */
+	onChildSpawned?(child: cp.ChildProcess): void;
 }
 
 export class ApiServer {
@@ -203,8 +205,12 @@ export class ApiServer {
 
 		this.callbacks.onLog('info', `[process] starting api via ${runtime}`);
 
-		this.process = cp.spawn(runtime, nodeArgs, { cwd, env, stdio: 'pipe', detached: true });
+		// The extra `ipc` slot is the private Cursor bridge channel. Unref it too so the detached
+		// child keeps not holding the extension host open.
+		this.process = cp.spawn(runtime, nodeArgs, { cwd, env, stdio: ['pipe', 'pipe', 'pipe', 'ipc'], detached: true });
 		this.process.unref();
+		(this.process.channel as { unref?: () => void } | undefined)?.unref?.();
+		this.callbacks.onChildSpawned?.(this.process);
 		void this.writeRuntimeState('starting', null).catch(() => {});
 
 		this.process.stdout?.on('data', (data: Buffer) => this.onStdout(data));

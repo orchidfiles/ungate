@@ -12,13 +12,17 @@ const MAX_TOOL_NAMES = 32;
 export class Requests {
 	static record(record: RequestRecord): number {
 		const db = getDb();
-		const estimatedCost = Pricing.calculateCost(
-			record.model,
-			record.inputTokens,
-			record.outputTokens,
-			record.cacheReadTokens ?? 0,
-			record.cacheCreationTokens ?? 0
-		);
+		// Cursor subscription models have no published API price; never show an estimate for them.
+		const estimatedCost =
+			record.source === 'cursor'
+				? 0
+				: Pricing.calculateCost(
+						record.model,
+						record.inputTokens,
+						record.outputTokens,
+						record.cacheReadTokens ?? 0,
+						record.cacheCreationTokens ?? 0
+					);
 		const toolNames = record.toolNames?.length ? JSON.stringify(record.toolNames.slice(0, MAX_TOOL_NAMES)) : null;
 
 		const result = db
@@ -72,11 +76,11 @@ export class Requests {
 
 	static updateTokens(id: number, inputTokens: number, outputTokens: number): void {
 		const db = getDb();
-		const row = db.select({ model: requests.model }).from(requests).where(eq(requests.id, id)).get();
+		const row = db.select({ model: requests.model, source: requests.source }).from(requests).where(eq(requests.id, id)).get();
 
 		if (!row) return;
 
-		const estimatedCost = Pricing.calculateCost(row.model, inputTokens, outputTokens);
+		const estimatedCost = row.source === 'cursor' ? 0 : Pricing.calculateCost(row.model, inputTokens, outputTokens);
 
 		db.update(requests).set({ inputTokens, outputTokens, estimatedCost }).where(eq(requests.id, id)).run();
 	}

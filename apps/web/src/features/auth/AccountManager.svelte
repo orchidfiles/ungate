@@ -7,6 +7,7 @@ import IconGauge from 'virtual:icons/lucide/gauge';
 import IconLoader from 'virtual:icons/lucide/loader-circle';
 import IconPencil from 'virtual:icons/lucide/pencil';
 import IconRefreshCw from 'virtual:icons/lucide/refresh-cw';
+import IconTimerReset from 'virtual:icons/lucide/timer-reset';
 import IconTrash2 from 'virtual:icons/lucide/trash-2';
 import IconTriangleAlert from 'virtual:icons/lucide/triangle-alert';
 import IconUserPlus from 'virtual:icons/lucide/user-plus';
@@ -425,6 +426,21 @@ async function copyLoginLink(): Promise<void> {
 											<IconUserRoundCheck class="size-4" />
 										{/if}
 										Use account
+									</button>
+								{/if}
+								{#if store.availability(account) === 'cooling_down'}
+									<button
+										class="btn btn-sm preset-outlined-warning-500"
+										type="button"
+										title="Make this account available now, e.g. after upgrading its plan"
+										disabled={store.busy !== null}
+										onclick={() => void store.clearCooldown(account)}>
+										{#if isBusy('clear-cooldown', account)}
+											<IconLoader class="size-4 animate-spin" />
+										{:else}
+											<IconTimerReset class="size-4" />
+										{/if}
+										Clear cooldown
 									</button>
 								{/if}
 								<button

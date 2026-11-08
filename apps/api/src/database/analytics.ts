@@ -19,6 +19,7 @@ export class Analytics {
 				claudeRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'claude' THEN 1 ELSE 0 END)`,
 				minimaxRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'minimax' THEN 1 ELSE 0 END)`,
 				openaiRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'openai' THEN 1 ELSE 0 END)`,
+				cursorRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'cursor' THEN 1 ELSE 0 END)`,
 				errorRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'error' THEN 1 ELSE 0 END)`,
 				totalInputTokens: sql<number>`SUM(${requests.inputTokens})`,
 				totalOutputTokens: sql<number>`SUM(${requests.outputTokens})`
@@ -32,6 +33,7 @@ export class Analytics {
 			claudeRequests: totals?.claudeRequests ?? 0,
 			minimaxRequests: totals?.minimaxRequests ?? 0,
 			openaiRequests: totals?.openaiRequests ?? 0,
+			cursorRequests: totals?.cursorRequests ?? 0,
 			errorRequests: totals?.errorRequests ?? 0,
 			totalInputTokens: totals?.totalInputTokens ?? 0,
 			totalOutputTokens: totals?.totalOutputTokens ?? 0,
