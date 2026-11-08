@@ -46,6 +46,10 @@ export class RuntimeStateNormalizer {
 			};
 		}
 
+		if (parsed.success && parsed.data.cursorProvider) {
+			next.cursorProvider = { enabled: parsed.data.cursorProvider.enabled === true };
+		}
+
 		if (typeof next.api.lastSeenAt !== 'number') {
 			next.api.lastSeenAt = now;
 		}

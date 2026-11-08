@@ -6,10 +6,11 @@ import { config } from '../config';
 import { OAuthAccounts, type OAuthAccountRow } from '../database/oauth-accounts';
 import { RequestBuilder } from '../proxy/request-builder';
 
-import { parseClaudeUsageBody, parseCodexUsageBody, type UsageEndpointResult } from './usage-parsers';
+import { shouldLiftCooldown } from './upgrade-detector';
+import { parseClaudeProfilePlan, parseClaudeUsageBody, parseCodexUsageBody, type UsageEndpointResult } from './usage-parsers';
 import { AccountUsageStore } from './usage-store';
 
-import type { SubscriptionProvider } from '@ungate/shared';
+import type { SubscriptionProvider, UsageWindow } from '@ungate/shared';
 
 /** Accounts fetched (successfully or not) more recently than this are not fetched again. */
 export const USAGE_FETCH_THROTTLE_MS = 60_000;
@@ -27,9 +28,10 @@ type FetchResult = ({ ok: true } & UsageEndpointResult) | { ok: false; status: n
 class UsageFetchError extends Error {}
 
 /**
- * Live usage fetches from the providers' subscription usage endpoints. Read-only with respect to
- * account state: never cools an account down or marks it as needing login (token refresh still
- * goes through the shared account token service, so a rejected refresh token is recorded there).
+ * Live usage fetches from the providers' subscription usage endpoints. Never cools an account down
+ * or marks it as needing login (token refresh still goes through the shared account token service,
+ * so a rejected refresh token is recorded there). The only state it writes is the last known plan
+ * tier and, when that tier went up or every endpoint window is back under 100%, an early cooldown lift.
  */
 export class UsageFetcher {
 	private static lastAttempt = new Map<string, number>();
@@ -42,6 +44,18 @@ export class UsageFetcher {
 			: OAuthAccounts.list(provider);
 		await Promise.all(rows.filter((row) => !row.needsLogin).map((row) => this.refreshAccount(provider, row.id)));
 	}
+
+	/**
+	 * Fire-and-forget refresh when an account enters cooldown, so an upgrade made in response to the
+	 * limit is noticed without waiting for the dashboard poll. The per-account throttle still applies.
+	 */
+	static refreshAfterCooldown(provider: SubscriptionProvider, accountId: string): void {
+		if (!this.cooldownRefreshEnabled) return;
+		setImmediate(() => void this.refresh(provider, accountId).catch(() => undefined));
+	}
+
+	/** Disabled in tests that count upstream fetches. */
+	static cooldownRefreshEnabled = process.env.VITEST === undefined;
 
 	/** Test helper. */
 	static reset(): void {
@@ -72,16 +86,47 @@ export class UsageFetcher {
 		const token = await this.token(provider, accountId);
 		if (!token) throw new UsageFetchError('No valid login for this account');
 
+		let used = token;
 		let result = await this.request(provider, token);
 		if (!result.ok && result.status === 401) {
 			const refreshed = await this.refreshToken(provider, accountId, token.credentialVersion);
 			if (!refreshed) throw new UsageFetchError('Login expired; reconnect this account');
+			used = refreshed;
 			result = await this.request(provider, refreshed);
 		}
 		if (!result.ok) throw new UsageFetchError(result.error);
 		// The account may have been removed while the request was in flight.
-		if (!OAuthAccounts.get(accountId, provider)) return;
+		const row = OAuthAccounts.get(accountId, provider);
+		if (!row) return;
 		AccountUsageStore.recordEndpoint(accountId, result);
+		this.liftCooldownIfUpgraded(row, result.windows, result.planType, used.credentialVersion);
+	}
+
+	/**
+	 * The one place usage data touches account state: it may clear an existing cooldown (plan upgrade
+	 * or every endpoint window back under 100%), never create or extend one, and never touches
+	 * needs-login.
+	 */
+	private static liftCooldownIfUpgraded(
+		row: OAuthAccountRow,
+		windows: UsageWindow[],
+		planType: string | null,
+		credentialVersion: number | undefined
+	): void {
+		const now = Date.now();
+		const reason = shouldLiftCooldown({
+			previousPlan: row.planType,
+			newPlan: planType,
+			windows,
+			cooldownReason: row.cooldownReason,
+			cooldownUntil: row.cooldownUntil,
+			now
+		});
+		if (planType && planType !== row.planType) OAuthAccounts.setPlanType(row.id, planType);
+		if (!reason) return;
+		if (OAuthAccounts.clearCooldown(row.id, credentialVersion, row.provider as SubscriptionProvider)) {
+			logger.log(`[usage] ${row.provider} account ${row.id} cooldown lifted (${reason})`);
+		}
 	}
 
 	private static async token(provider: SubscriptionProvider, accountId: string): Promise<Token | null> {
@@ -140,8 +185,32 @@ export class UsageFetcher {
 		const body: unknown = await response.json().catch(() => undefined);
 		if (body === undefined) return { ok: false, status: response.status, error: 'Usage response was not JSON' };
 
-		if (provider === 'claude') return { ok: true, planType: null, ...parseClaudeUsageBody(body) };
+		if (provider === 'claude') {
+			return { ok: true, ...parseClaudeUsageBody(body), planType: await this.claudePlan(headers) };
+		}
 
 		return { ok: true, ...parseCodexUsageBody(body) };
+	}
+
+	/** Best effort: a failed profile fetch only means the tier is unknown for this refresh. */
+	private static async claudePlan(headers: Record<string, string>): Promise<string | null> {
+		try {
+			const response = await fetch(config.anthropic.profileUrl, {
+				method: 'GET',
+				headers,
+				signal: AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS)
+			});
+			if (!response.ok) {
+				await response.body?.cancel().catch(() => undefined);
+
+				return null;
+			}
+
+			const body: unknown = await response.json().catch(() => undefined);
+
+			return parseClaudeProfilePlan(body);
+		} catch {
+			return null;
+		}
 	}
 }

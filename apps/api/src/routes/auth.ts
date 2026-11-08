@@ -116,6 +116,16 @@ const plugin: FastifyPluginCallback = (app) => {
 			return reply.send(OAuthAccounts.view(provider));
 		});
 
+		app.post<IdParams>(`${base}/accounts/:id/clear-cooldown`, (request, reply) => {
+			const account = OAuthAccounts.get(request.params.id, provider);
+			if (!account) return fail(reply, 404, 'account_not_found', 'Account not found');
+			if (OAuthAccounts.clearCooldown(account.id, undefined, provider)) {
+				logger.log(`[accounts] ${provider} account ${account.id} cooldown cleared manually`);
+			}
+
+			return reply.send(OAuthAccounts.view(provider));
+		});
+
 		app.patch(`${base}/policy`, (request, reply) => {
 			const parsed = policySchema.safeParse(request.body);
 			if (!parsed.success) return fail(reply, 400, 'invalid_request', 'Invalid policy');

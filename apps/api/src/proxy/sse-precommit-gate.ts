@@ -1,6 +1,7 @@
 import { logger } from 'src/utils/logger';
 
 import { OAuthAccounts } from '../database/oauth-accounts';
+import { UsageFetcher } from '../usage/usage-fetcher';
 
 import { AccountFallback, type InspectedAttempt } from './account-fallback';
 import { UsageLimitClassifier } from './usage-limit-classifier';
@@ -227,7 +228,9 @@ export class SsePrecommitGate {
 			const limit = UsageLimitClassifier.classifyStreamError(provider, headers, error);
 			if (limit.kind !== 'usage_limit') return;
 			const until = limit.resetAt ?? Date.now();
-			OAuthAccounts.markCooldown(accountId, until, limit.reason, limit.estimated, credentialVersion);
+			if (OAuthAccounts.markCooldown(accountId, until, limit.reason, limit.estimated, credentialVersion)) {
+				UsageFetcher.refreshAfterCooldown(provider, accountId);
+			}
 			logger.log(
 				`[accounts] ${provider} account ${accountId} usage limit after stream commit (${limit.reason}); no retry, cooldown until ${new Date(until).toISOString()}`
 			);

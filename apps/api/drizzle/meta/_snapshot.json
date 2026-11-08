@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "70d75e72-c4d6-4947-8d65-803dda873d08",
+  "id": "a29b5a0f-9b5b-4a0a-bda2-332c804f6dff",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "app_settings": {
@@ -114,6 +114,13 @@
         },
         "service_tier": {
           "name": "service_tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tool_mode": {
+          "name": "tool_mode",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -243,6 +250,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
+        },
+        "plan_type": {
+          "name": "plan_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},

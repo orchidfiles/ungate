@@ -78,7 +78,7 @@ export class Sqlite3CliResolver {
 	}
 
 	private static async findOnPath(): Promise<string | null> {
-		const commands =
+		const commands: [string, string[]][] =
 			process.platform === 'win32'
 				? [
 						['where.exe', ['sqlite3']],
