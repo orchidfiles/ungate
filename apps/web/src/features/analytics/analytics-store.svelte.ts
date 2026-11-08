@@ -164,7 +164,8 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
 	{ value: 'all', label: 'All Providers' },
 	{ value: 'claude', label: getProviderLabel('claude') },
 	{ value: 'openai', label: getProviderLabel('openai') },
-	{ value: 'minimax', label: getProviderLabel('minimax') }
+	{ value: 'minimax', label: getProviderLabel('minimax') },
+	{ value: 'cursor', label: getProviderLabel('cursor') }
 ];
 
 // Labels map — exact model names from DB (after normalizeModelName).

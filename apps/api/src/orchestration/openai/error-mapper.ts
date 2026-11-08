@@ -1,5 +1,12 @@
 import { openaiChatErrorMessages } from './error-messages';
 
+import type { CursorBridgeError } from '@ungate/shared';
+
+export interface MappedCompletionError {
+	status: number;
+	body: { error: { message: string; type: string; code: string } };
+}
+
 interface MiniMaxErrorContext {
 	bodyJson?: unknown;
 }
@@ -55,6 +62,48 @@ export class CompletionErrorMapper {
 		}
 
 		return openaiChatErrorMessages.unknownUpstream;
+	}
+
+	/** Maps a sanitized Cursor bridge error (`invocationEnd.error`, transport, gate) to an OpenAI error. */
+	static cursorError(error: CursorBridgeError): MappedCompletionError {
+		const build = (status: number, type: string, code: string, message = error.message) => ({
+			status,
+			body: { error: { message, type, code } }
+		});
+
+		switch (error.kind) {
+			case 'tool_schema':
+				return build(
+					502,
+					'api_error',
+					'upstream_tool_schema_rejected',
+					`Cursor rejected the tool schema: ${error.message}. Try toolMode "embedded" for this model.`
+				);
+			case 'auth':
+				return build(401, 'authentication_error', 'cursor_not_signed_in', 'Sign in to Cursor to use Cursor models.');
+			case 'disabled':
+				return build(403, 'permission_error', 'cursor_provider_disabled');
+			case 'unavailable':
+				return build(503, 'api_error', 'cursor_provider_unavailable');
+			case 'permission':
+				return build(403, 'permission_error', 'cursor_permission_denied');
+			case 'rate_limit':
+				return build(429, 'rate_limit_error', 'rate_limit_exceeded');
+			case 'bad_model':
+				return build(404, 'invalid_request_error', 'model_not_found');
+			case 'input_too_long':
+				return build(400, 'invalid_request_error', 'context_length_exceeded');
+			case 'content_filter':
+				return build(400, 'invalid_request_error', 'content_filter');
+			case 'overloaded':
+				return build(503, 'api_error', 'upstream_overloaded');
+			case 'timeout':
+				return build(504, 'api_error', 'upstream_timeout');
+			case 'cancelled':
+				return build(499, 'api_error', 'request_cancelled');
+			default:
+				return build(502, 'api_error', 'upstream_error');
+		}
 	}
 
 	static claudeApiErrorPayload(errorJson: unknown): { message: string; type?: string } {

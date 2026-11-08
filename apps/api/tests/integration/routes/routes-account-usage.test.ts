@@ -55,9 +55,10 @@ describe('account usage', () => {
 		const a = add('claude', 'a');
 		const b = add('claude', 'b');
 		const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-			expect(urlOf(input)).toBe(config.anthropic.usageUrl);
 			expect(headerOf(init, 'anthropic-beta')).toBe(config.anthropic.usageBeta);
 			expect(headerOf(init, 'user-agent')).toMatch(/^claude-cli\//);
+			if (urlOf(input) === config.anthropic.profileUrl) return Promise.resolve(json({ organization: {} }));
+			expect(urlOf(input)).toBe(config.anthropic.usageUrl);
 
 			return Promise.resolve(json(claudeUsageBody(headerOf(init, 'authorization') === 'Bearer token-a' ? 10 : 80)));
 		});
@@ -74,10 +75,11 @@ describe('account usage', () => {
 				windows: [{ id: '5h', usedPercent: 10 }, { id: '7d' }]
 			});
 			expect(usageOf(b.id)?.windows[0]).toMatchObject({ id: '5h', usedPercent: 80 });
-			expect(fetchMock).toHaveBeenCalledTimes(2);
+			// Usage + profile per account.
+			expect(fetchMock).toHaveBeenCalledTimes(4);
 
 			await app.inject({ method: 'POST', url: '/auth/claude/usage/refresh', payload: { accountId: a.id } });
-			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(fetchMock).toHaveBeenCalledTimes(4);
 
 			const list = await app.inject({ method: 'GET', url: '/auth/claude/accounts' });
 			expect(list.json<AccountListResponse>().accounts[0].usage?.windows).toHaveLength(2);
@@ -196,6 +198,88 @@ describe('account usage', () => {
 
 			await app.inject({ method: 'DELETE', url: `/auth/claude/accounts/${a.id}` });
 			expect(AccountUsageStore.get(a.id)).toBeUndefined();
+		} finally {
+			await app.close();
+		}
+	});
+});
+
+describe('cooldown lift on upgrade', () => {
+	const HOUR = 3_600_000;
+	const codexBody = (plan: string, used: number) => ({
+		plan_type: plan,
+		rate_limit: { primary_window: { used_percent: used, limit_window_seconds: 18000, reset_after_seconds: 600 } }
+	});
+
+	it('lifts a ChatGPT cooldown when the plan tier goes up and leaves needsLogin alone', async () => {
+		const a = add('openai', 'a');
+		OAuthAccounts.setPlanType(a.id, 'plus');
+		OAuthAccounts.markCooldown(a.id, Date.now() + 5 * HOUR, 'codex_usage_limit_reached', false);
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(json(codexBody('pro', 100)));
+		const app = await withPlugin(authPlugin);
+		try {
+			const response = await app.inject({ method: 'POST', url: '/auth/openai/usage/refresh', payload: { accountId: a.id } });
+			expect(response.json<AccountListResponse>().accounts[0].availability).toBe('available');
+			expect(OAuthAccounts.get(a.id)).toMatchObject({ cooldownUntil: null, planType: 'pro', needsLogin: false });
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('lifts a usage-limit cooldown when every endpoint window is back under 100%', async () => {
+		const a = add('claude', 'a');
+		OAuthAccounts.markCooldown(a.id, Date.now() + 5 * HOUR, 'anthropic_usage_limit_5h', false);
+		vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+			Promise.resolve(
+				urlOf(input) === config.anthropic.profileUrl
+					? json({ organization: { organization_type: 'claude_max', rate_limit_tier: 'default_claude_max_20x' } })
+					: json(claudeUsageBody(20))
+			)
+		);
+		const app = await withPlugin(authPlugin);
+		try {
+			await app.inject({ method: 'POST', url: '/auth/claude/usage/refresh', payload: { accountId: a.id } });
+			expect(OAuthAccounts.get(a.id)).toMatchObject({ cooldownUntil: null, planType: 'claude_max_20x' });
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('keeps the cooldown while a window is still exhausted on the same plan', async () => {
+		const a = add('openai', 'a');
+		OAuthAccounts.setPlanType(a.id, 'plus');
+		const until = Date.now() + 5 * HOUR;
+		OAuthAccounts.markCooldown(a.id, until, 'codex_usage_limit_reached', false);
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(json(codexBody('plus', 100)));
+		const app = await withPlugin(authPlugin);
+		try {
+			await app.inject({ method: 'POST', url: '/auth/openai/usage/refresh', payload: { accountId: a.id } });
+			expect(OAuthAccounts.get(a.id)?.cooldownUntil).toBe(until);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('does not clear the cooldown for a stale credential version', () => {
+		const a = add('claude', 'a');
+		OAuthAccounts.markCooldown(a.id, Date.now() + HOUR, 'anthropic_usage_limit', false);
+		expect(OAuthAccounts.clearCooldown(a.id, a.credentialVersion - 1)).toBe(false);
+		expect(OAuthAccounts.get(a.id)?.cooldownUntil).not.toBeNull();
+		expect(OAuthAccounts.clearCooldown(a.id, a.credentialVersion)).toBe(true);
+		expect(OAuthAccounts.get(a.id)?.cooldownUntil).toBeNull();
+	});
+
+	it('clears a cooldown manually and returns the account list', async () => {
+		const a = add('claude', 'a');
+		OAuthAccounts.markCooldown(a.id, Date.now() + HOUR, 'anthropic_rate_limited', false);
+		const app = await withPlugin(authPlugin);
+		try {
+			const response = await app.inject({ method: 'POST', url: `/auth/claude/accounts/${a.id}/clear-cooldown` });
+			expect(response.statusCode).toBe(200);
+			expect(response.body).not.toMatch(/token-/);
+			expect(response.json<AccountListResponse>().accounts[0]).toMatchObject({ availability: 'available', cooldownUntil: null });
+			const crossProvider = await app.inject({ method: 'POST', url: `/auth/openai/accounts/${a.id}/clear-cooldown` });
+			expect(crossProvider.statusCode).toBe(404);
 		} finally {
 			await app.close();
 		}

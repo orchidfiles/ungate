@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { Settings } from 'src/database/app-settings';
 import { ModelMappings } from 'src/database/model-mappings';
-import { getDb, schema } from 'src/database';
-
 describe('database-app-settings', () => {
 	it('creates defaults when row is missing', () => {
 		const expectedModels = [
@@ -14,7 +12,8 @@ describe('database-app-settings', () => {
 				upstreamModel: 'claude-test-default-model',
 				sortOrder: 0,
 				reasoningBudget: null,
-				serviceTier: null
+				serviceTier: null,
+				toolMode: null
 			}
 		];
 		ModelMappings.replace(expectedModels);
@@ -34,7 +33,8 @@ describe('database-app-settings', () => {
 			upstreamModel: 'u',
 			sortOrder: 0,
 			reasoningBudget: null,
-			serviceTier: null
+			serviceTier: null,
+			toolMode: null
 		};
 
 		Settings.update({

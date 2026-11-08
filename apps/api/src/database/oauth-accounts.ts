@@ -262,15 +262,29 @@ export class OAuthAccounts {
 		);
 	}
 
-	/** Clears a cooldown early (e.g. a later successful request proved the account usable). */
-	static clearCooldown(id: string): boolean {
+	/**
+	 * Clears a cooldown early (an upgrade or fresh usage data proved the account usable, or a manual
+	 * override). With `credentialVersion`, a check made with an older credential generation is ignored.
+	 */
+	static clearCooldown(id: string, credentialVersion?: number, provider?: SubscriptionProvider): boolean {
 		return (
 			getDb()
 				.update(oauthAccounts)
 				.set({ cooldownUntil: null, cooldownReason: null, cooldownEstimated: false, updatedAt: Date.now() })
-				.where(eq(oauthAccounts.id, id))
+				.where(
+					and(
+						eq(oauthAccounts.id, id),
+						provider === undefined ? undefined : eq(oauthAccounts.provider, provider),
+						credentialVersion === undefined ? undefined : eq(oauthAccounts.credentialVersion, credentialVersion)
+					)
+				)
 				.run().changes === 1
 		);
+	}
+
+	/** Persists the last detected subscription tier (used to detect upgrades across restarts). */
+	static setPlanType(id: string, planType: string): void {
+		getDb().update(oauthAccounts).set({ planType }).where(eq(oauthAccounts.id, id)).run();
 	}
 
 	static markNeedsLogin(id: string, credentialVersion: number): boolean {
