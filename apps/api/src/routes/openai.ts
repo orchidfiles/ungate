@@ -2,7 +2,12 @@ import { ModelMappings } from 'src/database/model-mappings';
 import { Requests } from 'src/database/requests';
 import { RequestHeuristics } from 'src/metrics';
 import { CompletionModelRouting } from 'src/orchestration/openai';
-import { ClaudeChatHandler, MiniMaxChatHandler, OpenAiMappedChatHandler } from 'src/orchestration/openai/provider-handlers';
+import {
+	ClaudeChatHandler,
+	CursorChatHandler,
+	MiniMaxChatHandler,
+	OpenAiMappedChatHandler
+} from 'src/orchestration/openai/provider-handlers';
 import { apiKeyAuth } from 'src/plugins/auth';
 import { logger } from 'src/utils/logger';
 
@@ -34,13 +39,18 @@ const plugin: FastifyPluginCallback = (app) => {
 			const resolvedModel = ModelMappings.resolveForChatCompletion(openaiBody.model);
 			const telemetry = requestTelemetry(openaiBody, resolvedModel?.reasoningBudget);
 
-			// Branch order matters: MiniMax (mapping or name prefix) before DB-mapped OpenAI, then default Claude path.
+			// Branch order matters: MiniMax (mapping or name prefix) -> DB-mapped OpenAI -> DB-mapped Cursor -> default Claude.
+			// A Cursor mapping never falls through to Claude.
 			if (CompletionModelRouting.shouldRouteMiniMax(resolvedModel, openaiBody.model)) {
 				return MiniMaxChatHandler.handle(openaiBody, resolvedModel, reply, telemetry);
 			}
 
 			if (CompletionModelRouting.isOpenAiMapped(resolvedModel)) {
 				return OpenAiMappedChatHandler.handle(openaiBody, resolvedModel, reply, telemetry);
+			}
+
+			if (CompletionModelRouting.isCursorMapped(resolvedModel)) {
+				return CursorChatHandler.handle(openaiBody, resolvedModel, reply, telemetry);
 			}
 
 			return ClaudeChatHandler.handle(request, openaiBody, resolvedModel, reply, telemetry);

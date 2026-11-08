@@ -39,7 +39,9 @@ export const oauthAccounts = sqliteTable('oauth_accounts', {
 	cooldownUntil: integer(),
 	cooldownReason: text(),
 	cooldownEstimated: integer({ mode: 'boolean' }).notNull().default(false),
-	needsLogin: integer({ mode: 'boolean' }).notNull().default(false)
+	needsLogin: integer({ mode: 'boolean' }).notNull().default(false),
+	/** Last detected subscription tier (e.g. `plus`, `claude_max_20x`); used to notice upgrades. */
+	planType: text()
 });
 
 export const oauthPolicies = sqliteTable('oauth_policies', {
@@ -57,7 +59,9 @@ export const modelMappings = sqliteTable('model_mappings', {
 	upstreamModel: text().notNull(),
 	sortOrder: integer().notNull().default(0),
 	reasoningBudget: text(),
-	serviceTier: text()
+	serviceTier: text(),
+	/** Cursor tool schema mode override: `auto | structured | embedded`. Null = auto. */
+	toolMode: text()
 });
 
 export const requests = sqliteTable(

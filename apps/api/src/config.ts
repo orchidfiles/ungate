@@ -17,6 +17,8 @@ export const config = {
 		/** Subscription usage (what Claude Code `/usage` shows). */
 		usageUrl: 'https://api.anthropic.com/api/oauth/usage',
 		usageBeta: 'oauth-2025-04-20',
+		/** Subscription tier (`organization.rate_limit_tier`); same token and beta as usage. */
+		profileUrl: 'https://api.anthropic.com/api/oauth/profile',
 		betas: CLAUDE_CODE_OPUS_PACKET.betas
 	},
 	minimax: {

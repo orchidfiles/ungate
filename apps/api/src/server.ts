@@ -11,6 +11,7 @@ import { Settings } from './database/settings';
 import analyticsPlugin from './routes/analytics';
 import anthropicPlugin from './routes/anthropic';
 import authPlugin from './routes/auth';
+import cursorPlugin from './routes/cursor';
 import healthPlugin from './routes/health';
 import modelsPlugin from './routes/models';
 import openaiPlugin from './routes/openai';
@@ -49,6 +50,7 @@ export async function startServer(): Promise<void> {
 	globalThis.console.log('[startup] register plugins...');
 	await app.register(healthPlugin);
 	await app.register(authPlugin);
+	await app.register(cursorPlugin);
 	await app.register(anthropicPlugin);
 	await app.register(openaiPlugin);
 	await app.register(modelsPlugin);
