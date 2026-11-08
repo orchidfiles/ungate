@@ -20,9 +20,9 @@ const {
 	const runtimeHasLiveClientsMock = vi.fn<(state: RuntimeState) => boolean>();
 	const runtimeMutateMock = vi.fn<(mutator: (current: RuntimeState) => RuntimeState) => Promise<RuntimeState>>();
 	const sleepMock = vi.fn<(ms: number) => Promise<void>>();
-	const ensureInstalledMock = vi.fn<() => Promise<void>>();
+	const ensureInstalledMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 	const spawnSyncMock = vi.fn();
-	const spawnMock = vi.fn(() => {
+	const spawnMock = vi.fn((..._args: unknown[]) => {
 		const handlers = new Map<string, ((value?: unknown) => void)[]>();
 		const child = {
 			stderr: { on: vi.fn() },
@@ -92,9 +92,9 @@ vi.mock('vscode', () => {
 	};
 });
 
-const isApiStartSuppressedMock = vi.fn<() => boolean>(() => false);
-const suppressApiAutoStartMock = vi.fn<() => Promise<void>>(() => Promise.resolve());
-const resetApiForRestartMock = vi.fn<() => Promise<void>>(() => Promise.resolve());
+const isApiStartSuppressedMock = vi.fn<(...args: unknown[]) => boolean>(() => false);
+const suppressApiAutoStartMock = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve());
+const resetApiForRestartMock = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve());
 
 vi.mock('../../src/runtime-state', () => {
 	return {
@@ -126,8 +126,8 @@ interface ApiServerInternals {
 	shouldRespawn(): boolean;
 }
 
-function createRuntimeState(): RuntimeState {
-	const runtimeState = TestHelper.createRuntimeState([], 4783);
+function createRuntimeState(windowIds: string[] = [], apiPort: number | null = 4783): RuntimeState {
+	const runtimeState = TestHelper.createRuntimeState(windowIds, apiPort);
 
 	return runtimeState;
 }
@@ -186,7 +186,7 @@ describe('ApiServer.runHealthCheckCycle', () => {
 		sleepMock.mockReset();
 		ensureInstalledMock.mockReset();
 		spawnSyncMock.mockReset();
-		spawnSyncMock.mockImplementation((runtime, args) => {
+		spawnSyncMock.mockImplementation((_runtime, args) => {
 			if (Array.isArray(args) && args[0] === '-p' && typeof args[1] === 'string' && args[1].includes('process.execPath')) {
 				return {
 					error: undefined,

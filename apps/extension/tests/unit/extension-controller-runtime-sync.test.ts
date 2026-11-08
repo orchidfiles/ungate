@@ -26,6 +26,7 @@ interface MockDashboard {
 	pushLog: ReturnType<typeof vi.fn>;
 	sendKeyFixState: ReturnType<typeof vi.fn>;
 	sendAutoTunnelState: ReturnType<typeof vi.fn>;
+	sendCursorProviderState: ReturnType<typeof vi.fn>;
 	show: ReturnType<typeof vi.fn>;
 }
 
@@ -66,7 +67,7 @@ const runtimeGetLeaderWindowIdMock = vi.fn<(state: RuntimeState) => string | nul
 const runtimePeekCommandMock = vi.fn<() => RuntimeCommand | null>();
 const runtimeReconcileOrphanedTunnelMock = vi.fn<(state?: RuntimeState) => Promise<RuntimeState>>();
 const runtimeRemoveCommandMock = vi.fn<(commandId: string) => Promise<RuntimeState>>();
-const prepareApiForBootstrapMock = vi.fn(() => Promise.resolve(runtimeReadMock()));
+const prepareApiForBootstrapMock = vi.fn((..._args: unknown[]) => Promise.resolve(runtimeReadMock()));
 const isProcessAliveMock = vi.fn<(pid: number | null) => boolean>(() => true);
 const isApiPortHealthyMock = vi.fn<(port: number) => Promise<boolean>>(() => Promise.resolve(true));
 const resetApiForRestartMock = vi.fn<() => Promise<void>>(() => Promise.resolve());
@@ -106,7 +107,8 @@ vi.mock('vscode', () => {
 				public readonly pattern: string
 			) {}
 		},
-		MarkdownString: TestHelper.createMarkdownStringClass()
+		MarkdownString: TestHelper.createMarkdownStringClass(),
+		cursor: undefined
 	};
 });
 
@@ -146,6 +148,7 @@ vi.mock('../../src/dashboard', () => {
 		Dashboard: class {
 			sendKeyFixState = vi.fn();
 			sendAutoTunnelState = vi.fn();
+			sendCursorProviderState = vi.fn();
 			pushLog = vi.fn();
 			setPort = vi.fn();
 			sendTunnelState = vi.fn();
@@ -244,6 +247,7 @@ function createController(windowId: string): {
 		pushLog: vi.fn(),
 		sendKeyFixState: vi.fn(),
 		sendAutoTunnelState: vi.fn(),
+		sendCursorProviderState: vi.fn(),
 		show: vi.fn()
 	};
 	const statusBar = {
