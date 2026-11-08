@@ -33,7 +33,8 @@ describe('database-requests', () => {
 			source: 'claude',
 			inputTokens: 1,
 			outputTokens: 2,
-			stream: false
+			stream: false,
+			latencyMs: null
 		});
 
 		Requests.updateTokens(id, 100, 200);

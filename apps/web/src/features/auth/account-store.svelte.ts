@@ -199,6 +199,13 @@ export class AccountStore {
 		}
 	}
 
+	/** Manual override: makes a cooling-down account available again (e.g. after an upgrade). */
+	async clearCooldown(account: SubscriptionAccount): Promise<void> {
+		await this.mutate(`clear-cooldown:${account.id}`, () => Api.accountClearCooldown(this.provider, account.id), {
+			notice: `${account.label} is available again`
+		});
+	}
+
 	async select(account: SubscriptionAccount): Promise<void> {
 		await this.mutate(`select:${account.id}`, () => Api.accountSelect(this.provider, account.id, this.policy?.revision), {
 			notice: `Now using ${account.label}`,

@@ -1,12 +1,13 @@
 export type Period = 'hour' | 'day' | 'week' | 'month' | 'all';
 
-export type RequestSource = 'claude' | 'minimax' | 'openai' | 'error';
+export type RequestSource = 'claude' | 'minimax' | 'openai' | 'cursor' | 'error';
 
 export interface AnalyticsSummary {
 	totalRequests: number;
 	claudeRequests: number;
 	minimaxRequests: number;
 	openaiRequests: number;
+	cursorRequests: number;
 	errorRequests: number;
 	totalInputTokens: number;
 	totalOutputTokens: number;

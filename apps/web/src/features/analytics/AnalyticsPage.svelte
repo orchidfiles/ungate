@@ -83,6 +83,12 @@ function handleConfirmReset() {
 				label={getProviderLabel('openai')}
 				value={Formatter.number(store.summary.openaiRequests)}
 				variant="success" />
+			{#if store.summary.cursorRequests}
+				<StatCard
+					label={getProviderLabel('cursor')}
+					value={Formatter.number(store.summary.cursorRequests)}
+					variant="success" />
+			{/if}
 			<StatCard
 				label="Errors"
 				value={Formatter.number(store.summary.errorRequests)}

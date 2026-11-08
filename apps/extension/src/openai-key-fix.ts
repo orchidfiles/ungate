@@ -68,7 +68,7 @@ export class OpenAiKeyFix {
 	private lastUnavailableReason: string | null = null;
 
 	constructor(
-		private readonly context: vscode.ExtensionContext,
+		context: vscode.ExtensionContext,
 		private readonly onStateChange: StateChangeHandler,
 		private readonly log: Logger,
 		private readonly isLeaderWindow: () => boolean

@@ -73,7 +73,8 @@ describe('routes: health/settings/models/analytics', () => {
 					upstreamModel: 'claude-test-model',
 					sortOrder: 0,
 					reasoningBudget: null,
-					serviceTier: null
+					serviceTier: null,
+					toolMode: null
 				}
 			]
 		});

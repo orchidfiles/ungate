@@ -204,3 +204,27 @@ export function parseCodexUsageHeaders(headers: Headers, now = Date.now()): Usag
 export function parseCodexPlanHeader(headers: Headers): string | null {
 	return header(headers, 'x-codex-plan-type') ?? null;
 }
+
+/**
+ * Claude `GET /api/oauth/profile` → normalized tier: `claude_max_20x`, `claude_max_5x`,
+ * `claude_pro`, `claude_team`, `claude_enterprise`, … Shape (Claude Code 2.x):
+ * `{ account: { has_claude_max, has_claude_pro }, organization: { organization_type, rate_limit_tier } }`
+ * where `rate_limit_tier` is e.g. `default_claude_max_20x`.
+ */
+export function parseClaudeProfilePlan(body: unknown): string | null {
+	const root = record(body);
+	if (!root) return null;
+	const organization = record(root.organization);
+	const account = record(root.account);
+	const tier = typeof organization?.rate_limit_tier === 'string' ? organization.rate_limit_tier.toLowerCase() : '';
+	const orgType = typeof organization?.organization_type === 'string' ? organization.organization_type.toLowerCase() : '';
+
+	if (orgType === 'claude_team' || orgType === 'claude_enterprise') return orgType;
+	if (tier.includes('max_20x')) return 'claude_max_20x';
+	if (tier.includes('max_5x')) return 'claude_max_5x';
+	if (orgType === 'claude_max' || account?.has_claude_max === true) return 'claude_max_5x';
+	if (orgType === 'claude_pro' || account?.has_claude_pro === true) return 'claude_pro';
+	if (orgType) return orgType;
+
+	return null;
+}
