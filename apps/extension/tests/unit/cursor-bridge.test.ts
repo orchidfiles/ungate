@@ -266,6 +266,26 @@ describe('CursorBridge', () => {
 		expect(other.sent[0]).toMatchObject({ kind: 'end', error: { kind: 'auth' } });
 	});
 
+	it('re-reads a token Cursor cached as missing before reporting not_signed_in', async () => {
+		let token: string | undefined;
+		const refresh = vi.fn(() => {
+			token = TOKEN;
+		});
+		const recovering = new CursorSession({
+			getCursorAuthToken: () => token,
+			getAllRequestHeadersExceptAccessToken: () => undefined,
+			triggerRefreshCursorAuthToken: refresh,
+			membershipType: () => 'ultra'
+		});
+		const { child, sent } = fakeChild();
+		const bridge = new CursorBridge({ session: recovering, isEnabled: () => true });
+		bridge.attach(child);
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'status', id: 's1' });
+		await tick();
+		expect(refresh).toHaveBeenCalledTimes(1);
+		expect(sent[0]).toMatchObject({ kind: 'status', status: { connected: true, reason: 'ok' } });
+	});
+
 	it('streams events back without ever sending credentials, and cancels on child exit', async () => {
 		const server = fakeCursor((message, reply) => {
 			if (message.runRequest) reply(envelope({ runReady: {} }));
