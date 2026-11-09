@@ -117,21 +117,21 @@ export class ModelMappings {
 	// separate field, so a mapping saved as "gpt-5.6-sol-fast-medium" arrives as
 	// "gpt-5.6-sol-fast". Only re-attach a suffix that matches the row's own budget, and
 	// keep sortOrder precedence so the first matching mapping wins.
-	private static findByDroppedReasoningSuffix(mappings: ModelMappingConfig[], lowerRequested: string): ModelMappingConfig | null {
-		for (const mapping of mappings) {
-			if (!mapping.reasoningBudget) {
-				continue;
-			}
+	// When several tiers share the stripped id (`grok-4.7-medium` / `-high`), the effort Cursor
+	// sent alongside picks the tier.
+	private static findByDroppedReasoningSuffix(
+		mappings: ModelMappingConfig[],
+		lowerRequested: string,
+		requestedEffort: string | null
+	): ModelMappingConfig | null {
+		const candidates = mappings.filter(
+			(mapping) => mapping.reasoningBudget && mapping.id.toLowerCase() === `${lowerRequested}-${mapping.reasoningBudget}`
+		);
 
-			if (mapping.id.toLowerCase() === `${lowerRequested}-${mapping.reasoningBudget}`) {
-				return mapping;
-			}
-		}
-
-		return null;
+		return candidates.find((mapping) => mapping.reasoningBudget === requestedEffort) ?? candidates[0] ?? null;
 	}
 
-	static resolveForChatCompletion(requestedModel: string): ModelMappingConfig | null {
+	static resolveForChatCompletion(requestedModel: string, requestedEffort: string | null = null): ModelMappingConfig | null {
 		const mappings = this.list();
 		const t = requestedModel.trim();
 
@@ -151,7 +151,7 @@ export class ModelMappings {
 		// Must stay ahead of the upstream match: mappings that differ only by service tier
 		// share one upstream model, so matching upstream first collapses the priority-tier
 		// row onto the default-tier one.
-		const byDroppedSuffix = this.findByDroppedReasoningSuffix(mappings, lower);
+		const byDroppedSuffix = this.findByDroppedReasoningSuffix(mappings, lower, requestedEffort?.toLowerCase() ?? null);
 
 		if (byDroppedSuffix) {
 			return byDroppedSuffix;

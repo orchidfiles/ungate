@@ -95,7 +95,7 @@ export class CursorBridge {
 
 		switch (request.kind) {
 			case 'status':
-				this.emit(request.id, { kind: 'status', status: this.status() });
+				void this.recoverToken().then(() => this.emit(request.id, { kind: 'status', status: this.status() }));
 
 				return;
 			case 'cancel':
@@ -116,7 +116,15 @@ export class CursorBridge {
 		}
 	}
 
-	private gate(): CursorBridgeError | null {
+	/** Re-reads a missing session token from Cursor when the provider is opted in. */
+	private async recoverToken(): Promise<void> {
+		const { session } = this.options;
+		if (!this.child || !session.hasApi() || !this.options.isEnabled()) return;
+		await session.ensureSignedIn();
+	}
+
+	private async gate(): Promise<CursorBridgeError | null> {
+		await this.recoverToken();
 		const status = this.status();
 		if (status.connected) return null;
 		if (status.reason === 'disabled')
@@ -127,7 +135,7 @@ export class CursorBridge {
 	}
 
 	private async listModels(id: string): Promise<void> {
-		const blocked = this.gate();
+		const blocked = await this.gate();
 		if (blocked) {
 			this.emit(id, { kind: 'models', models: [], error: blocked });
 
@@ -161,7 +169,8 @@ export class CursorBridge {
 	}
 
 	private async invoke(id: string, request: CursorInferenceRequest): Promise<void> {
-		const blocked = this.gate() ?? this.validate(id, request);
+		const gated = await this.gate();
+		const blocked = gated ?? this.validate(id, request);
 		if (blocked) {
 			this.emit(id, { kind: 'end', error: blocked });
 

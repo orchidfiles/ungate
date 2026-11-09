@@ -4,6 +4,7 @@ import { assertCursorOrigin } from './connect-transport';
 
 const DEFAULT_BACKEND_URL = 'https://api2.cursor.sh';
 const DEFAULT_AGENT_URL = 'https://agentn.api5.cursor.sh';
+const TOKEN_RECOVERY_INTERVAL_MS = 10_000;
 
 /** Everything needed for one upstream call. Lives only in the extension host, never serialized. */
 export interface CursorRequestCredentials {
@@ -51,6 +52,7 @@ function safeOrigin(raw: string | null, fallback: string): string {
  */
 export class CursorSession {
 	private readonly api: CursorApi | null;
+	private lastRecoveryAt = 0;
 
 	constructor(candidate: unknown) {
 		this.api = asApi(candidate);
@@ -66,6 +68,21 @@ export class CursorSession {
 
 	isSignedIn(): boolean {
 		return this.readToken() !== null;
+	}
+
+	/**
+	 * Cursor's extension host caches the token at startup and stops polling after 30 s, so a
+	 * window whose auth loaded late keeps reporting `undefined` until the next login change.
+	 * When the cached value is missing, ask Cursor to re-read it (throttled) before giving up.
+	 */
+	async ensureSignedIn(): Promise<boolean> {
+		if (this.isSignedIn()) return true;
+		const now = Date.now();
+		if (now - this.lastRecoveryAt < TOKEN_RECOVERY_INTERVAL_MS) return false;
+		this.lastRecoveryAt = now;
+		await this.refresh();
+
+		return this.isSignedIn();
 	}
 
 	membershipType(): string | null {
