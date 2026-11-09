@@ -36,7 +36,10 @@ const plugin: FastifyPluginCallback = (app) => {
 	app.post('/v1/chat/completions', { onRequest: apiKeyAuth(config) }, async (request, reply) => {
 		try {
 			const openaiBody = request.body as OpenAIChatRequest;
-			const resolvedModel = ModelMappings.resolveForChatCompletion(openaiBody.model);
+			const resolvedModel = ModelMappings.resolveForChatCompletion(
+				openaiBody.model,
+				openaiBody.reasoning_effort ?? openaiBody.reasoning?.effort ?? null
+			);
 			const telemetry = requestTelemetry(openaiBody, resolvedModel?.reasoningBudget);
 
 			// Branch order matters: MiniMax (mapping or name prefix) -> DB-mapped OpenAI -> DB-mapped Cursor -> default Claude.
