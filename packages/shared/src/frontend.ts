@@ -7,13 +7,14 @@ export * from './helpers/provider-labels';
 export * from './helpers/utils';
 export * from './schemas';
 
-import type { LogEntry, TunnelState } from './types';
+import type { LogEntry, TunnelProvider, TunnelState } from './types';
 
 export type ExtensionToWebview =
 	| { type: 'port'; port: number | null }
 	| { type: 'tunnel-status'; state: TunnelState }
 	| { type: 'key-fix-state'; enabled: boolean }
 	| { type: 'auto-tunnel-state'; enabled: boolean }
+	| { type: 'tunnel-config'; provider: TunnelProvider; tokenSet: boolean }
 	| { type: 'log'; source: 'api' | 'tunnel'; entry: LogEntry }
 	| { type: 'log-bulk'; source: 'api' | 'tunnel'; entries: LogEntry[] }
 	| { type: 'logs-cleared'; source: 'api' | 'tunnel' };
@@ -26,4 +27,6 @@ export type WebviewToExtension =
 	| { type: 'restart-tunnel' }
 	| { type: 'set-key-fix-enabled'; enabled: boolean }
 	| { type: 'set-auto-tunnel-enabled'; enabled: boolean }
+	| { type: 'set-tunnel-provider'; provider: TunnelProvider }
+	| { type: 'set-ngrok-auth-token'; token: string }
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' };
