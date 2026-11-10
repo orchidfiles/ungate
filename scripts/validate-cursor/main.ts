@@ -2,7 +2,7 @@
 // session status, model list, plain stream, a sandboxed multi-turn tool loop, tier routing, cancel.
 // Tool calls are answered from an in-memory sandbox; nothing the model asks for is executed.
 //
-// Usage: pnpm --filter @ungate/scripts validate-cursor [--model cursor-grok-4.7-high] [--only status,loop]
+// Usage: pnpm --filter @ungate/scripts validate-cursor [--model ungate-grok-4.7-high] [--only status,loop]
 
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -60,7 +60,7 @@ const flag = (name: string, fallback: string): string => {
 	return index >= 0 ? (args[index + 1] ?? fallback) : fallback;
 };
 
-const MODEL = flag('model', 'cursor-grok-4.7-high');
+const MODEL = flag('model', 'ungate-grok-4.7-high');
 const ONLY = flag('only', '').split(',').filter(Boolean);
 const DB_PATH = process.env.DB_PATH ?? join(homedir(), '.ungate', 'data.db');
 const RUNTIME = JSON.parse(readFileSync(join(homedir(), '.ungate', 'runtime-state.json'), 'utf8')) as {
