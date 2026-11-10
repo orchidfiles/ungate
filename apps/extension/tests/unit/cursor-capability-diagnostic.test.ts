@@ -8,8 +8,11 @@ describe('local Cursor capability diagnostic', () => {
 			apiAvailable: false,
 			credentialsReadable: false,
 			sessionTokenAvailable: false,
+			sessionTokenType: null,
 			headerHelperWorks: false,
 			refreshAvailable: false,
+			spaceXMode: null,
+			failedSteps: {},
 			failed: false
 		});
 	});
@@ -23,27 +26,36 @@ describe('local Cursor capability diagnostic', () => {
 				req.header.set('x-cursor-checksum', 'secret-checksum');
 				req.header.set('x-cursor-client-version', 'test');
 			},
+			getSpaceXMode: () => 'off',
 			triggerRefreshCursorAuthToken: refresh
 		});
 		expect(report).toEqual({
 			apiAvailable: true,
 			credentialsReadable: true,
 			sessionTokenAvailable: true,
+			sessionTokenType: 'string',
 			headerHelperWorks: true,
 			refreshAvailable: true,
+			spaceXMode: 'off',
+			failedSteps: {},
 			failed: false
 		});
 		expect(refresh).not.toHaveBeenCalled();
 		expect(JSON.stringify(report)).not.toContain('secret');
 	});
 
-	it('redacts thrown errors from restricted APIs', () => {
+	it('names the failing step without leaking the error message, and keeps checking later steps', () => {
 		const report = inspectCursorCapabilities({
 			getCursorCreds: () => {
-				throw new Error('secret-token');
-			}
+				throw new TypeError('secret-token');
+			},
+			getCursorAuthToken: () => 'tok',
+			getSpaceXMode: () => 'signedOut'
 		});
 		expect(report.failed).toBe(true);
+		expect(report.failedSteps).toEqual({ credentials: 'TypeError' });
+		expect(report.sessionTokenAvailable).toBe(true);
+		expect(report.spaceXMode).toBe('signedOut');
 		expect(JSON.stringify(report)).not.toContain('secret-token');
 	});
 
@@ -55,6 +67,8 @@ describe('local Cursor capability diagnostic', () => {
 		});
 		expect(report.credentialsReadable).toBe(false);
 		expect(report.sessionTokenAvailable).toBe(false);
+		expect(report.sessionTokenType).toBe('object');
 		expect(report.headerHelperWorks).toBe(false);
+		expect(JSON.stringify(report)).not.toContain('secret');
 	});
 });
