@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
@@ -16,7 +17,9 @@ import * as vscode from 'vscode';
 import { ApiServer } from './api-server';
 import { AutoTunnel } from './auto-tunnel';
 import { CursorBridge } from './cursor/cursor-bridge';
+import { CursorDiskSession } from './cursor/cursor-disk-session';
 import { CursorSession } from './cursor/cursor-session';
+import { createStateDbItemReader } from './cursor/state-db-item-reader';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar } from './extension-status-bar';
@@ -120,7 +123,7 @@ export class ExtensionController {
 		);
 
 		this.cursorBridge = new CursorBridge({
-			session: new CursorSession((vscode as unknown as { cursor?: unknown }).cursor),
+			session: new CursorSession((vscode as unknown as { cursor?: unknown }).cursor, this.createCursorDiskSession()),
 			isEnabled: () => RuntimeStateStore.read().cursorProvider.enabled,
 			onLog: (level, message) => {
 				this.log(message);
@@ -230,6 +233,39 @@ export class ExtensionController {
 
 	private log(msg: string): void {
 		this.outputChannel.appendLine(`[${new Date().toISOString()}] ${msg}`);
+	}
+
+	/** Fallback session source for Cursor builds that block `vscode.cursor` for extensions. */
+	private createCursorDiskSession(): CursorDiskSession | null {
+		const storageUri = this.context.globalStorageUri as vscode.Uri | undefined;
+		if (!storageUri) return null;
+		const readItem = createStateDbItemReader();
+		if (!readItem) {
+			this.log('[cursor] node:sqlite unavailable; Cursor session can only come from vscode.cursor');
+
+			return null;
+		}
+		const globalStorageDir = path.dirname(storageUri.fsPath);
+
+		return new CursorDiskSession({
+			stateDbPath: path.join(globalStorageDir, 'state.vscdb'),
+			storageJsonPath: path.join(globalStorageDir, 'storage.json'),
+			cursorVersion: this.cursorVersion(),
+			readItem
+		});
+	}
+
+	/** Cursor's own version (product.json), which differs from the VS Code API version. */
+	private cursorVersion(): string {
+		try {
+			const product = JSON.parse(fs.readFileSync(path.join(vscode.env.appRoot, 'product.json'), 'utf8')) as {
+				version?: unknown;
+			};
+
+			return typeof product.version === 'string' ? product.version : vscode.version;
+		} catch {
+			return vscode.version;
+		}
 	}
 
 	private formatError(err: unknown): string {
