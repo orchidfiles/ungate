@@ -1,19 +1,20 @@
 /**
- * Sanitized Claude Code 2.1.317 Opus 5.5 packet.
+ * Sanitized Claude Code 2.1.322 Opus 5.5 packet.
  *
  * Body fields are from a successful `api-request` (model `claude-opus-5-5`,
  * `output_config.effort: medium`) logged by Claude Code 2.1.317. No tokens
- * and no message text.
+ * and no message text. Captured 2.1.317 and 2.1.322 requests differ only in
+ * the version, so only `cliVersion` and `userAgent` moved to 2.1.322.
  *
- * The log does not record HTTP headers. The 2.1.317 binary builds
+ * The log does not record HTTP headers. The 2.1.322 binary builds
  * `User-Agent` as `claude-cli/<version> (external, <entrypoint>)`, and the
  * VS Code host sets the entrypoint to `claude-vscode` without
  * `CLAUDE_AGENT_SDK_VERSION`, so there is no `agent-sdk` segment.
  * `agent-sdk/0.2.7` is not in this binary.
  */
 export const CLAUDE_CODE_OPUS_PACKET = {
-	cliVersion: '2.1.317',
-	userAgent: 'claude-cli/2.1.317 (external, claude-vscode)',
+	cliVersion: '2.1.322',
+	userAgent: 'claude-cli/2.1.322 (external, claude-vscode)',
 	identity: "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.",
 	betas: [
 		'claude-code-20250219',

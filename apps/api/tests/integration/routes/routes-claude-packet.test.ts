@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Settings } from 'src/database/app-settings';
 import { ModelMappings } from 'src/database/model-mappings';
-import { OAuthAccounts } from 'src/database/oauth-accounts';
+import { ProviderSettings } from 'src/database/provider-settings';
 import { CLAUDE_CODE_OPUS_PACKET } from 'src/proxy/claude-code-packet';
 import openaiPlugin from 'src/routes/openai';
 
@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe('Claude Code Opus packet', () => {
-	it('sends the 2.1.317 headers and body for opus-5.5-medium', async () => {
+	it('sends the 2.1.322 headers and body for opus-5.5-medium', async () => {
 		Settings.get();
 		Settings.update({ claudeCliVersionMode: 'latest' });
 		ModelMappings.replace([
@@ -42,12 +42,12 @@ describe('Claude Code Opus packet', () => {
 				serviceTier: null
 			}
 		]);
-		OAuthAccounts.saveLogin(
-			'claude',
-			{ accessToken: 'token-opus', refreshToken: 'refresh-opus', expiresAt: Date.now() + 3_600_000 },
-			{ providerUserId: 'opus-user', providerAccountId: null, email: 'opus@example.com' },
-			[]
-		);
+		ProviderSettings.upsertOAuth('claude', {
+			accessToken: 'token-opus',
+			refreshToken: 'refresh-opus',
+			expiresAt: Date.now() + 3_600_000,
+			email: 'opus@example.com'
+		});
 
 		let captured: { url: string; headers: Record<string, string>; body: string } | undefined;
 		vi.stubGlobal(

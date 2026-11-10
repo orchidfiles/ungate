@@ -9,7 +9,7 @@ describe('ClaudeCliVersion', () => {
 
 	it('resolves stable, latest, and custom versions', () => {
 		expect(ClaudeCliVersion.resolve('stable', null)).toBe('2.1.9');
-		expect(ClaudeCliVersion.resolve('latest', null)).toBe('2.1.317');
+		expect(ClaudeCliVersion.resolve('latest', null)).toBe('2.1.322');
 		expect(ClaudeCliVersion.resolve('custom', '2.1.280')).toBe('2.1.280');
 	});
 
