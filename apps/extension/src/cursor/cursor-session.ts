@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import { assertCursorOrigin } from './connect-transport';
 
+import type { CursorDiskSession } from './cursor-disk-session';
+
 const DEFAULT_BACKEND_URL = 'https://api2.cursor.sh';
 const DEFAULT_AGENT_URL = 'https://agentn.api5.cursor.sh';
 const TOKEN_RECOVERY_INTERVAL_MS = 10_000;
@@ -46,24 +48,26 @@ function safeOrigin(raw: string | null, fallback: string): string {
 }
 
 /**
- * Reads the signed-in Cursor session from the internal `vscode.cursor` API, fresh for every
- * request so token rotation is picked up. Nothing read here is cached, logged or returned to
- * the API child.
+ * Reads the signed-in Cursor session, fresh for every request so token rotation is picked up.
+ * Prefers the internal `vscode.cursor` API; Cursor ≥ 3.29 makes every call on it throw for
+ * non-builtin extensions, and then the session falls back to Cursor's persisted state on disk.
+ * Nothing read here is logged or returned to the API child.
  */
 export class CursorSession {
 	private readonly api: CursorApi | null;
 	private lastRecoveryAt = 0;
+	/** Flips to false the first time Cursor rejects an API call; it never recovers in-process. */
+	private apiUsable = true;
 
-	constructor(candidate: unknown) {
+	constructor(
+		candidate: unknown,
+		private readonly disk: CursorDiskSession | null = null
+	) {
 		this.api = asApi(candidate);
 	}
 
 	hasApi(): boolean {
-		return (
-			this.api !== null &&
-			typeof this.api.getCursorAuthToken === 'function' &&
-			typeof this.api.getAllRequestHeadersExceptAccessToken === 'function'
-		);
+		return this.hasCursorApi() || this.disk !== null;
 	}
 
 	isSignedIn(): boolean {
@@ -74,8 +78,10 @@ export class CursorSession {
 	 * Cursor's extension host caches the token at startup and stops polling after 30 s, so a
 	 * window whose auth loaded late keeps reporting `undefined` until the next login change.
 	 * When the cached value is missing, ask Cursor to re-read it (throttled) before giving up.
+	 * The disk snapshot is refreshed here too (it self-throttles).
 	 */
 	async ensureSignedIn(): Promise<boolean> {
+		await this.disk?.refresh();
 		if (this.isSignedIn()) return true;
 		const now = Date.now();
 		if (now - this.lastRecoveryAt < TOKEN_RECOVERY_INTERVAL_MS) return false;
@@ -86,83 +92,110 @@ export class CursorSession {
 	}
 
 	membershipType(): string | null {
-		try {
-			const value = this.api?.membershipType?.();
+		const value = this.callApi(() => this.api?.membershipType?.());
+		if (typeof value === 'string' && value.length > 0) return value;
 
-			return typeof value === 'string' && value.length > 0 ? value : null;
-		} catch {
-			return null;
-		}
+		return this.disk?.current()?.membershipType ?? null;
 	}
 
 	/** Builds request headers (auth + Cursor client headers), or null when signed out. */
 	credentials(requestId: string = randomUUID()): CursorRequestCredentials | null {
-		if (!this.hasApi()) return null;
-		const token = this.readToken();
-		if (!token) return null;
+		const apiToken = this.apiToken();
+		if (apiToken) {
+			const header = new Headers();
+			const ok = this.callApi(() => {
+				this.api?.getAllRequestHeadersExceptAccessToken?.({ req: { header }, backupRequestId: requestId });
 
-		const header = new Headers();
-
-		try {
-			this.api?.getAllRequestHeadersExceptAccessToken?.({ req: { header }, backupRequestId: requestId });
-		} catch {
-			return null;
+				return true;
+			});
+			if (ok) return this.finish(Object.fromEntries(header.entries()), apiToken, requestId, this.apiCreds());
 		}
 
-		const headers: Record<string, string> = {};
-		header.forEach((value, key) => {
-			headers[key.toLowerCase()] = value;
-		});
-		headers.authorization = `Bearer ${token}`;
-		headers['x-request-id'] ??= requestId;
-		headers['x-cursor-streaming'] = 'true';
+		const snap = this.disk?.current();
+		if (!snap || !this.disk) return null;
 
-		return { headers, ...this.urls() };
+		return this.finish(this.disk.headers(snap, requestId), snap.token, requestId, {
+			backendUrl: snap.backendUrl,
+			privacyMode: snap.privacyMode === true
+		});
 	}
 
 	/** Asks Cursor to refresh its session token. Callers invoke this at most once per request. */
 	async refresh(): Promise<void> {
-		try {
-			await this.api?.triggerRefreshCursorAuthToken?.();
-		} catch {
-			// The next credentials() read reports whether a token is available.
+		if (this.hasCursorApi()) {
+			try {
+				await this.api?.triggerRefreshCursorAuthToken?.();
+			} catch {
+				this.apiUsable = false;
+			}
 		}
+		await this.disk?.refresh(true);
+	}
+
+	private hasCursorApi(): boolean {
+		return (
+			this.apiUsable &&
+			this.api !== null &&
+			typeof this.api.getCursorAuthToken === 'function' &&
+			typeof this.api.getAllRequestHeadersExceptAccessToken === 'function'
+		);
+	}
+
+	private callApi<T>(run: () => T): T | undefined {
+		if (!this.hasCursorApi()) return undefined;
+
+		try {
+			return run();
+		} catch {
+			this.apiUsable = false;
+
+			return undefined;
+		}
+	}
+
+	private apiToken(): string | null {
+		const token = this.callApi(() => this.api?.getCursorAuthToken?.());
+
+		return typeof token === 'string' && token.length > 0 ? token : null;
 	}
 
 	private readToken(): string | null {
-		try {
-			const token = this.api?.getCursorAuthToken?.();
-
-			return typeof token === 'string' && token.length > 0 ? token : null;
-		} catch {
-			return null;
-		}
+		return this.apiToken() ?? this.disk?.current()?.token ?? null;
 	}
 
-	private urls(): { backendUrl: string; agentUrl: string } {
-		let creds: unknown = null;
+	private apiCreds(): { creds: unknown; privacyMode: boolean } {
+		return {
+			creds: this.callApi(() => this.api?.getCursorCreds?.()) ?? null,
+			privacyMode: this.callApi(() => this.api?.getPrivacyMode?.()) === true
+		};
+	}
 
-		try {
-			creds = this.api?.getCursorCreds?.() ?? null;
-		} catch {
-			creds = null;
-		}
+	private finish(
+		raw: Record<string, string>,
+		token: string,
+		requestId: string,
+		source: { creds?: unknown; backendUrl?: string | null; privacyMode: boolean }
+	): CursorRequestCredentials {
+		const headers: Record<string, string> = {};
+		for (const [key, value] of Object.entries(raw)) headers[key.toLowerCase()] = value;
+		headers.authorization = `Bearer ${token}`;
+		headers['x-request-id'] ??= requestId;
+		headers['x-cursor-streaming'] = 'true';
 
-		const backendUrl = safeOrigin(readString(creds, 'backendUrl'), DEFAULT_BACKEND_URL);
+		return { headers, ...this.urls(source) };
+	}
+
+	private urls(source: { creds?: unknown; backendUrl?: string | null; privacyMode: boolean }): {
+		backendUrl: string;
+		agentUrl: string;
+	} {
+		const creds = source.creds ?? null;
+		const backendUrl = safeOrigin(source.backendUrl ?? readString(creds, 'backendUrl'), DEFAULT_BACKEND_URL);
 		const record = typeof creds === 'object' && creds !== null ? (creds as Record<string, unknown>) : {};
-		const privacy = this.privacyModeOn();
 		const privacyUrl = readString(record.agentBackendUrlPrivacy, 'default');
 		const nonPrivacyUrl = readString(record.agentBackendUrlNonPrivacy, 'default');
-		const agentRaw = privacy ? (privacyUrl ?? nonPrivacyUrl) : nonPrivacyUrl;
+		const agentRaw = source.privacyMode ? (privacyUrl ?? nonPrivacyUrl) : nonPrivacyUrl;
 
 		return { backendUrl, agentUrl: safeOrigin(agentRaw, DEFAULT_AGENT_URL) };
-	}
-
-	private privacyModeOn(): boolean {
-		try {
-			return this.api?.getPrivacyMode?.() === true;
-		} catch {
-			return false;
-		}
 	}
 }
