@@ -8,6 +8,7 @@
 		"check-tunnels": "sh check-tunnels/run.sh",
 		"reset-sqlite-binary": "sh reset-sqlite-binary/run.sh",
 		"update-node-version": "sh update-node-version/run.sh",
+		"validate-cursor": "tsx validate-cursor/main.ts",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix"
 	},
