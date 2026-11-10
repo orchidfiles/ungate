@@ -21,9 +21,12 @@ const importSchema = z.object({
 		.optional()
 });
 
-/** Ungate model id for an imported Cursor model, e.g. `cursor-grok-4.7-low-fast`. */
+/**
+ * Ungate model id for an imported Cursor model, e.g. `ungate-grok-4.7-low-fast`. Not `cursor-*`:
+ * Cursor rejects those as its own built-in slugs ("does not support custom API keys").
+ */
 export function cursorMappingId(upstreamModel: string): string {
-	return `cursor-${upstreamModel.replace(/[^\w.-]+/g, '-').toLowerCase()}`;
+	return `ungate-${upstreamModel.replace(/[^\w.-]+/g, '-').toLowerCase()}`;
 }
 
 /**
