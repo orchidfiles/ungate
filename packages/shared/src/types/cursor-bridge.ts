@@ -8,6 +8,15 @@
 /** Tag on every bridge message so it can share the Node IPC channel with anything else. */
 export const CURSOR_BRIDGE_CHANNEL = 'ungate.cursor-bridge';
 
+/**
+ * Socket file, under `~/.ungate`, where an API that no extension spawned (e.g. a systemd service)
+ * serves the bridge. The leader window connects to it when it adopts that API. Same messages as
+ * the IPC channel, one JSON document per line.
+ */
+export function cursorBridgeSocketName(port: number): string {
+	return `cursor-bridge-${port}.sock`;
+}
+
 /** Upper bound for one serialized invoke request (chat history incl. inline images). */
 export const CURSOR_BRIDGE_MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 
