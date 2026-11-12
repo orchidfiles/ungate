@@ -8,6 +8,9 @@ const BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 import { getConfig } from './config';
 import { getDb } from './database/index';
 import { Settings } from './database/settings';
+import { directLocalOnly } from './plugins/local-or-api-key';
+import { bridgeTransport } from './proxy/cursor-bridge-client';
+import { cursorBridgeSocketPath, SocketBridgeTransport } from './proxy/cursor-bridge-transport';
 import analyticsPlugin from './routes/analytics';
 import anthropicPlugin from './routes/anthropic';
 import authPlugin from './routes/auth';
@@ -59,6 +62,14 @@ export async function startServer(): Promise<void> {
 
 	globalThis.console.log(`[startup] listen ${config.port}...`);
 	await app.listen({ port: config.port, host: '0.0.0.0' });
+
+	// After the port is ours, so a second run that fails on the port never replaces a live socket.
+	// The leader window retries the socket on every runtime sync.
+	if (bridgeTransport instanceof SocketBridgeTransport) {
+		const socketPath = cursorBridgeSocketPath(config.port);
+		await bridgeTransport.listen(socketPath);
+		globalThis.console.log(`[startup] cursor bridge socket ${socketPath}`);
+	}
 
 	// Always print port to stdout — extension parses this to detect the running port.
 	// Uses globalThis.console to bypass quiet mode.
