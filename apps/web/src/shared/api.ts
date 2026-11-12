@@ -271,6 +271,11 @@ export class Api {
 		return this.get('/auth/openai/status');
 	}
 
+	/** Legacy status: reflects the provider's active account only. */
+	static authGeminiStatus(): Promise<{ authenticated: boolean; email?: string }> {
+		return this.get('/auth/gemini/status');
+	}
+
 	static cursorStatus(): Promise<CursorSessionStatus> {
 		return this.get('/auth/cursor/status');
 	}

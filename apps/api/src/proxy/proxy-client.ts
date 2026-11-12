@@ -1,8 +1,10 @@
 import { detectProviderByModel } from '@ungate/shared';
 
 import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
+import { ModelMappings } from '../database/model-mappings';
 
 import { proxyRequest as proxyAnthropicRequest } from './anthropic-client';
+import { GeminiClient } from './gemini-client';
 import { proxyMiniMaxRequest } from './minimax-client';
 import { OpenAiClient } from './openai-client';
 
@@ -12,10 +14,10 @@ import type { OpenAIChatRequest } from '../types/openai';
 import type { ProxyResult, RequestContext } from '../types/proxy';
 
 function detectProvider(model: string): AIProviderName {
-	// Cursor is reachable only through explicit mappings, never by model-name detection.
+	// Cursor and Gemini are reachable only through explicit mappings, never by model-name detection.
 	const detected = detectProviderByModel(model);
 
-	return detected === 'cursor' ? 'claude' : detected;
+	return detected === 'cursor' || detected === 'gemini' ? 'claude' : detected;
 }
 
 export async function proxyRequest(
@@ -40,6 +42,24 @@ export async function proxyOpenAIRequest(
 
 	if (resolved === 'minimax') {
 		return proxyMiniMaxRequest(openaiBody);
+	}
+
+	if (resolved === 'gemini') {
+		// Gemini needs its mapping row (upstream model + reasoning tier); never fall through to Claude.
+		const mapping = ModelMappings.resolveForChatCompletion(openaiBody.model);
+		if (mapping?.provider !== 'gemini') {
+			return {
+				response: new Response(
+					JSON.stringify({
+						error: { message: `No Gemini model mapping for "${openaiBody.model}"`, type: 'invalid_request_error' }
+					}),
+					{ status: 400, headers: { 'Content-Type': 'application/json' } }
+				),
+				context: { model: openaiBody.model, source: 'error', startTime: Date.now(), reverseToolMapping: {} }
+			};
+		}
+
+		return GeminiClient.proxy(openaiBody, mapping, signal);
 	}
 
 	// Claude: convert OpenAI → Anthropic → proxy

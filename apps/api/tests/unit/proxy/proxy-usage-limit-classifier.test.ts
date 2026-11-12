@@ -156,6 +156,61 @@ describe('UsageLimitClassifier — Anthropic Claude Code OAuth', () => {
 	});
 });
 
+/** google.rpc status shapes from gemini-cli `utils/googleQuotaErrors.ts`. */
+const googleError = (code: number, details: Record<string, unknown>[], message = 'Resource exhausted') => ({
+	error: { code, status: code === 403 ? 'PERMISSION_DENIED' : 'RESOURCE_EXHAUSTED', message, details }
+});
+const errorInfo = (reason: string) => ({
+	'@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+	reason,
+	domain: 'cloudcode-pa.googleapis.com'
+});
+const retryInfo = (retryDelay: string) => ({ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay });
+
+describe('UsageLimitClassifier — Gemini Code Assist', () => {
+	const classify = (status: number, body?: unknown, headers: Record<string, string> = {}) =>
+		UsageLimitClassifier.classify('gemini', input(status, headers, body), NOW);
+
+	it('rotates on QUOTA_EXHAUSTED with the reset from RetryInfo', () => {
+		expect(classify(429, googleError(429, [errorInfo('QUOTA_EXHAUSTED'), retryInfo('3600s')]))).toEqual({
+			kind: 'usage_limit',
+			resetAt: NOW + 3_600_000,
+			estimated: false,
+			reason: 'gemini_quota_exhausted'
+		});
+	});
+
+	it('rotates on a daily QuotaFailure violation and on a long RATE_LIMIT_EXCEEDED delay', () => {
+		const daily = { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'RequestsPerDayPerUser' }] };
+		expect(classify(429, googleError(429, [daily])).kind).toBe('usage_limit');
+		expect(classify(429, googleError(429, [errorInfo('RATE_LIMIT_EXCEEDED'), retryInfo('900s')])).kind).toBe('usage_limit');
+		expect(classify(429, googleError(429, [errorInfo('RATE_LIMIT_EXCEEDED')])).kind).toBe('usage_limit');
+	});
+
+	it('treats short throttling and Google capacity limits as non-rotating', () => {
+		expect(classify(429, googleError(429, [errorInfo('RATE_LIMIT_EXCEEDED'), retryInfo('10s')])).kind).toBe('other');
+		expect(classify(429, googleError(429, [errorInfo('MODEL_CAPACITY_EXHAUSTED')])).kind).toBe('other');
+	});
+
+	it('rotates on 403 SUBSCRIPTION_REQUIRED only', () => {
+		expect(classify(403, googleError(403, [errorInfo('SUBSCRIPTION_REQUIRED')]))).toMatchObject({
+			kind: 'usage_limit',
+			reason: 'gemini_subscription_required'
+		});
+		expect(classify(403, googleError(403, [errorInfo('ACCESS_DENIED')])).kind).toBe('other');
+		expect(classify(500, googleError(500, [errorInfo('QUOTA_EXHAUSTED')])).kind).toBe('other');
+	});
+
+	it('reads the SSE array form and classifies in-stream RESOURCE_EXHAUSTED errors', () => {
+		expect(classify(429, [googleError(429, [errorInfo('QUOTA_EXHAUSTED')])]).kind).toBe('usage_limit');
+		const streamError = googleError(429, [errorInfo('QUOTA_EXHAUSTED')]).error;
+		expect(UsageLimitClassifier.classifyStreamError('gemini', new Headers(), streamError, NOW).kind).toBe('usage_limit');
+		expect(
+			UsageLimitClassifier.classifyStreamError('gemini', new Headers(), { code: 500, status: 'INTERNAL', message: 'x' }, NOW).kind
+		).toBe('other');
+	});
+});
+
 describe('parseRetryAfter', () => {
 	it('parses delta seconds, ms and HTTP dates', () => {
 		expect(parseRetryAfter(new Headers({ 'retry-after': '3' }), NOW)).toBe(NOW + 3000);

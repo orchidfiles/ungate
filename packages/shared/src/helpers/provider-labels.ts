@@ -4,7 +4,8 @@ export const PROVIDER_LABELS: Record<ModelMappingProvider, string> = {
 	claude: 'Claude',
 	openai: 'OpenAI',
 	minimax: 'MiniMax',
-	cursor: 'Cursor'
+	cursor: 'Cursor',
+	gemini: 'Gemini'
 };
 
 export function getProviderLabel(provider: ModelMappingProvider): string {

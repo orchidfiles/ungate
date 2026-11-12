@@ -27,6 +27,10 @@ export function detectProviderBySource(source: RequestSource): ModelMappingProvi
 		return 'cursor';
 	}
 
+	if (source === 'gemini') {
+		return 'gemini';
+	}
+
 	if (source === 'claude') {
 		return 'claude';
 	}

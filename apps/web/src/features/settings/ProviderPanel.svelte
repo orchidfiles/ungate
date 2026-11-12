@@ -6,6 +6,7 @@ import IconX from 'virtual:icons/lucide/x';
 import ChatGPTAuthSection from '../auth/ChatGPTAuthSection.svelte';
 import ClaudeAuthSection from '../auth/ClaudeAuthSection.svelte';
 import CursorAuthSection from '../auth/CursorAuthSection.svelte';
+import GeminiAuthSection from '../auth/GeminiAuthSection.svelte';
 import MiniMaxAuthSection from '../auth/MiniMaxAuthSection.svelte';
 
 import ClaudeCliVersionSection from './ClaudeCliVersionSection.svelte';
@@ -14,7 +15,7 @@ import { getSettingsUiStore, ProviderAuthState } from './settings-ui-store.svelt
 import type { ModelMappingProvider } from '@ungate/shared/frontend';
 
 const uiStore = getSettingsUiStore();
-const providerTabs: ModelMappingProvider[] = ['claude', 'minimax', 'openai', 'cursor'];
+const providerTabs: ModelMappingProvider[] = ['claude', 'minimax', 'openai', 'cursor', 'gemini'];
 
 const authStatusTitle: Record<ProviderAuthState, string> = {
 	[ProviderAuthState.Authorized]: 'Authorized',
@@ -73,6 +74,8 @@ function handleAuthStatusChange(): void {
 		<ChatGPTAuthSection />
 	{:else if uiStore.selectedProvider === 'cursor'}
 		<CursorAuthSection onAuthStatusChange={handleAuthStatusChange} />
+	{:else if uiStore.selectedProvider === 'gemini'}
+		<GeminiAuthSection />
 	{:else}
 		<MiniMaxAuthSection onAuthStatusChange={handleAuthStatusChange} />
 	{/if}

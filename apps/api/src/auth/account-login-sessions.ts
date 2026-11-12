@@ -13,7 +13,11 @@ export interface LoginSessionRecord {
 }
 
 /** Claude's manual CODE#STATE copy needs more time than OpenAI's automatic callback (10 min listener). */
-const SESSION_TTL_MS: Record<SubscriptionProvider, number> = { claude: 15 * 60_000, openai: 10 * 60_000 };
+const SESSION_TTL_MS: Record<SubscriptionProvider, number> = {
+	claude: 15 * 60_000,
+	openai: 10 * 60_000,
+	gemini: 10 * 60_000
+};
 
 export class AccountNotFoundError extends Error {}
 

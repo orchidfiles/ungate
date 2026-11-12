@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { logger } from 'src/utils/logger';
 
 import { AccountNotFoundError, LoginConflictError } from '../auth/account-login-sessions';
+import { GeminiOAuthNotConfiguredError } from '../auth/gemini/gemini-oauth-client';
+import { GeminiOAuthService } from '../auth/gemini/gemini-oauth-service';
+import { GeminiOAuthUtils } from '../auth/gemini/gemini-oauth-utils';
 import { OAuth } from '../auth/oauth';
 import { OpenAIOAuthService } from '../auth/openai/openai-oauth-service';
 import { OpenAIOAuthUtils } from '../auth/openai/openai-oauth-utils';
@@ -41,7 +44,7 @@ function fail(
 	return reply.code(status).send(body);
 }
 
-const services = { claude: OAuth, openai: OpenAIOAuthService } as const;
+const services = { claude: OAuth, openai: OpenAIOAuthService, gemini: GeminiOAuthService } as const;
 
 async function startLogin(provider: SubscriptionProvider, input: unknown, reply: FastifyReply) {
 	const parsed = startSchema.safeParse(input ?? {});
@@ -52,6 +55,7 @@ async function startLogin(provider: SubscriptionProvider, input: unknown, reply:
 		return reply.send(result);
 	} catch (error) {
 		if (error instanceof AccountNotFoundError) return fail(reply, 404, 'account_not_found', 'Account not found');
+		if (error instanceof GeminiOAuthNotConfiguredError) return fail(reply, 503, 'login_not_configured', error.message);
 		if (error instanceof LoginConflictError) {
 			return fail(reply, 409, 'login_pending', 'Another login is already pending; cancel it first', {
 				pendingSessionId: error.pendingSessionId || undefined
@@ -64,7 +68,7 @@ async function startLogin(provider: SubscriptionProvider, input: unknown, reply:
 }
 
 const plugin: FastifyPluginCallback = (app) => {
-	for (const provider of ['claude', 'openai'] as const) {
+	for (const provider of ['claude', 'openai', 'gemini'] as const) {
 		const service = services[provider];
 		const base = `/auth/${provider}`;
 
@@ -232,6 +236,30 @@ const plugin: FastifyPluginCallback = (app) => {
 
 	app.post('/auth/openai/logout', (_request, reply) => {
 		OpenAIOAuthService.logout();
+
+		return reply.send({ ok: true });
+	});
+
+	// Normal Gemini logins finish on the loopback listener; this completes a callback forwarded to the API.
+	app.get('/auth/gemini/callback', async (request, reply) => {
+		const { code, state: sessionId } = request.query as { code?: string; state?: string };
+		if (!code || !sessionId) {
+			return reply
+				.type('text/html')
+				.send('<html><body><h1>Missing code or session</h1><p>Please close this window and try again.</p></body></html>');
+		}
+		const result = await GeminiOAuthService.completeLogin(code, sessionId);
+		if (result.ok) return reply.redirect(GeminiOAuthUtils.successRedirect());
+
+		return reply.code(400).type('text/html').send(GeminiOAuthUtils.callbackPage(false, result.error));
+	});
+
+	app.get('/auth/gemini/status', (_request, reply) => {
+		return reply.send(GeminiOAuthService.getAuthStatus());
+	});
+
+	app.post('/auth/gemini/logout', (_request, reply) => {
+		GeminiOAuthService.logout();
 
 		return reply.send({ ok: true });
 	});

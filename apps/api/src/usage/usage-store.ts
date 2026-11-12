@@ -31,6 +31,8 @@ export class AccountUsageStore {
 
 	/** Records rate-limit headers from a proxied response; ignored when the response carries none. */
 	static recordHeaders(provider: SubscriptionProvider, accountId: string, headers: Headers, now = Date.now()): void {
+		// Code Assist reports quota only through `retrieveUserQuota`, never on responses.
+		if (provider === 'gemini') return;
 		const windows = provider === 'claude' ? parseClaudeUsageHeaders(headers) : parseCodexUsageHeaders(headers, now);
 		if (!windows.length) return;
 		const existing = this.entries.get(accountId);

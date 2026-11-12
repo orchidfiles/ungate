@@ -5,6 +5,8 @@ const knownLimitReasons: Record<string, string> = {
 	anthropic_usage_limit: 'Claude usage limit reached',
 	codex_usage_limit_reached: 'ChatGPT usage limit reached',
 	codex_rate_limit_window_exhausted: 'ChatGPT rate-limit window used up',
+	gemini_quota_exhausted: 'Gemini quota used up',
+	gemini_subscription_required: 'Gemini model not included in this account',
 	usage_limit: 'Usage limit reached'
 };
 

@@ -14,6 +14,8 @@ import type { UsageWindow } from '@ungate/shared';
  *   reset_at | reset_after_seconds }`.
  * - ChatGPT response headers: `x-codex-{primary,secondary}-used-percent`, `-window-minutes`,
  *   `-reset-at` (unix seconds) or `-reset-after-seconds`.
+ * - Gemini `POST v1internal:retrieveUserQuota`: per-model `{ remainingFraction, resetTime }` buckets.
+ *   Code Assist responses carry no rate-limit headers.
  */
 
 const MINUTES_PER_DAY = 24 * 60;
@@ -203,6 +205,42 @@ export function parseCodexUsageHeaders(headers: Headers, now = Date.now()): Usag
 /** Plan type reported on Codex responses (`x-codex-plan-type`), when present. */
 export function parseCodexPlanHeader(headers: Headers): string | null {
 	return header(headers, 'x-codex-plan-type') ?? null;
+}
+
+/**
+ * Gemini Code Assist `POST v1internal:retrieveUserQuota` body (what gemini-cli's `/stats` shows):
+ * `{ buckets: [{ modelId, tokenType, remainingFraction: 0–1, remainingAmount, resetTime: ISO }] }`.
+ * One window per bucket, id = model id (suffixed with the token type when a model has several);
+ * used percent is `1 - remainingFraction`. Buckets without a fraction are skipped.
+ */
+export function parseGeminiQuotaBuckets(body: unknown): UsageWindow[] {
+	const buckets = record(body)?.buckets;
+	if (!Array.isArray(buckets)) return [];
+	const parsed = buckets
+		.map(record)
+		.filter((bucket): bucket is Record<string, unknown> => !!bucket)
+		.flatMap((bucket) => {
+			const remaining = finiteNumber(bucket.remainingFraction);
+			const modelId = typeof bucket.modelId === 'string' && bucket.modelId.trim() ? bucket.modelId.trim() : undefined;
+			if (remaining === undefined || !modelId) return [];
+			const tokenType = typeof bucket.tokenType === 'string' && bucket.tokenType.trim() ? bucket.tokenType.trim() : undefined;
+
+			return [{ modelId, tokenType, remaining, resetsAt: parseResetTimestamp(bucket.resetTime) ?? null }];
+		});
+	const perModel = new Map<string, number>();
+	for (const bucket of parsed) perModel.set(bucket.modelId, (perModel.get(bucket.modelId) ?? 0) + 1);
+
+	return parsed.map((bucket) => {
+		const split = (perModel.get(bucket.modelId) ?? 0) > 1 && bucket.tokenType;
+
+		return {
+			id: split ? `${bucket.modelId}_${bucket.tokenType!.toLowerCase()}` : bucket.modelId,
+			label: split ? `${bucket.modelId} (${titleCase(bucket.tokenType!.toLowerCase())})` : bucket.modelId,
+			usedPercent: Math.round(clampPercent((1 - bucket.remaining) * 100)),
+			resetsAt: bucket.resetsAt,
+			windowMinutes: null
+		};
+	});
 }
 
 /**

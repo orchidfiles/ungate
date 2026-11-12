@@ -16,8 +16,9 @@ export interface UpgradeCheckInput {
 
 /**
  * Tier ranks. ChatGPT: free < go < plus < pro < team/business < enterprise/edu.
- * Claude: free < pro < max (5x) < max 20x < team < enterprise. Both scales share one table because
- * plan strings never overlap between providers (Claude tiers are `claude_`-prefixed).
+ * Claude: free < pro < max (5x) < max 20x < team < enterprise. Gemini: free < legacy < standard.
+ * All scales share one table because plan strings never overlap between providers (Claude tiers
+ * are `claude_`-prefixed, Gemini tiers `-tier`-suffixed).
  */
 const PLAN_RANKS: Record<string, number> = {
 	free: 0,
@@ -34,7 +35,11 @@ const PLAN_RANKS: Record<string, number> = {
 	claude_max_5x: 2,
 	claude_max_20x: 3,
 	claude_team: 4,
-	claude_enterprise: 5
+	claude_enterprise: 5,
+	// Gemini Code Assist tier ids (`loadCodeAssist` `currentTier.id`).
+	'free-tier': 0,
+	'legacy-tier': 1,
+	'standard-tier': 2
 };
 
 export function planRank(plan: string | null): number | null {
@@ -50,7 +55,8 @@ export function isUsageLimitCooldown(reason: string | null): boolean {
 	return (
 		reason.startsWith('anthropic_usage_limit') ||
 		reason === 'codex_usage_limit_reached' ||
-		reason === 'codex_rate_limit_window_exhausted'
+		reason === 'codex_rate_limit_window_exhausted' ||
+		reason === 'gemini_quota_exhausted'
 	);
 }
 

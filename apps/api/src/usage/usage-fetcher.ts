@@ -1,5 +1,6 @@
 import { logger } from 'src/utils/logger';
 
+import { GeminiOAuthService } from '../auth/gemini/gemini-oauth-service';
 import { OAuth } from '../auth/oauth';
 import { OpenAIOAuthService } from '../auth/openai/openai-oauth-service';
 import { config } from '../config';
@@ -7,7 +8,13 @@ import { OAuthAccounts, type OAuthAccountRow } from '../database/oauth-accounts'
 import { RequestBuilder } from '../proxy/request-builder';
 
 import { shouldLiftCooldown } from './upgrade-detector';
-import { parseClaudeProfilePlan, parseClaudeUsageBody, parseCodexUsageBody, type UsageEndpointResult } from './usage-parsers';
+import {
+	parseClaudeProfilePlan,
+	parseClaudeUsageBody,
+	parseCodexUsageBody,
+	parseGeminiQuotaBuckets,
+	type UsageEndpointResult
+} from './usage-parsers';
 import { AccountUsageStore } from './usage-store';
 
 import type { SubscriptionProvider, UsageWindow } from '@ungate/shared';
@@ -19,7 +26,7 @@ const USAGE_FETCH_TIMEOUT_MS = 10_000;
 interface Token {
 	accessToken: string;
 	credentialVersion?: number;
-	/** ChatGPT workspace id (`chatgpt-account-id`). */
+	/** ChatGPT workspace id (`chatgpt-account-id`), or the Gemini Code Assist project id. */
 	workspaceId?: string | null;
 }
 
@@ -135,7 +142,10 @@ export class UsageFetcher {
 
 			return creds?.localAccountId === accountId ? creds : null;
 		}
-		const creds = await OpenAIOAuthService.getValidToken(accountId);
+		const creds =
+			provider === 'gemini'
+				? await GeminiOAuthService.getValidToken(accountId)
+				: await OpenAIOAuthService.getValidToken(accountId);
 
 		return creds?.localAccountId === accountId && creds.accountId ? { ...creds, workspaceId: creds.accountId } : null;
 	}
@@ -146,12 +156,46 @@ export class UsageFetcher {
 		credentialVersion: number | undefined
 	): Promise<Token | null> {
 		if (provider === 'claude') return OAuth.refreshAccountToken(accountId, credentialVersion);
-		const creds = await OpenAIOAuthService.refreshAccountToken(accountId, credentialVersion);
+		const creds =
+			provider === 'gemini'
+				? await GeminiOAuthService.refreshAccountToken(accountId, credentialVersion)
+				: await OpenAIOAuthService.refreshAccountToken(accountId, credentialVersion);
 
 		return creds?.accountId ? { ...creds, workspaceId: creds.accountId } : null;
 	}
 
+	/** Code Assist quota buckets for the account's managed project (`workspaceId`). */
+	private static async geminiRequest(token: Token): Promise<FetchResult> {
+		let response: Response;
+		try {
+			response = await fetch(`${config.gemini.codeAssistUrl}:retrieveUserQuota`, {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					Authorization: `Bearer ${token.accessToken}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ project: token.workspaceId }),
+				signal: AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS)
+			});
+		} catch (error) {
+			const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+			throw new UsageFetchError(timedOut ? 'Usage request timed out' : 'Usage request failed');
+		}
+		if (!response.ok) {
+			await response.body?.cancel().catch(() => undefined);
+
+			return { ok: false, status: response.status, error: `Usage request failed (HTTP ${response.status})` };
+		}
+		const body: unknown = await response.json().catch(() => undefined);
+		if (body === undefined) return { ok: false, status: response.status, error: 'Usage response was not JSON' };
+
+		// The tier comes from `loadCodeAssist` at login; quota buckets do not report it.
+		return { ok: true, windows: parseGeminiQuotaBuckets(body), planType: null, cleared: [] };
+	}
+
 	private static async request(provider: SubscriptionProvider, token: Token): Promise<FetchResult> {
+		if (provider === 'gemini') return this.geminiRequest(token);
 		const headers: Record<string, string> =
 			provider === 'claude'
 				? {

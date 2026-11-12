@@ -47,6 +47,17 @@ describe('CompletionModelRouting', () => {
 		expect(CompletionModelRouting.isOpenAiMapped(mapping({ provider: 'claude', upstreamModel: 'c' }))).toBe(false);
 	});
 
+	it('narrows gemini mapping with isGeminiMapped and never infers it from the model name', () => {
+		const gemini = mapping({ id: 'ungate-gemini-4-carbon-medium', provider: 'gemini', upstreamModel: 'gemini-4-carbon' });
+
+		expect(CompletionModelRouting.isGeminiMapped(gemini)).toBe(true);
+		expect(CompletionModelRouting.isGeminiMapped(null)).toBe(false);
+		expect(CompletionModelRouting.isGeminiMapped(mapping({ provider: 'openai', upstreamModel: 'gemini-4-carbon' }))).toBe(false);
+		expect(CompletionModelRouting.isOpenAiMapped(gemini)).toBe(false);
+		expect(CompletionModelRouting.isCursorMapped(gemini)).toBe(false);
+		expect(CompletionModelRouting.shouldRouteMiniMax(gemini, 'ungate-gemini-4-carbon-medium')).toBe(false);
+	});
+
 	it('builds openai upstream body with optional reasoning effort and service tier', () => {
 		const body = { model: 'alias', messages: [], stream: false } as const;
 		const openai = mapping({

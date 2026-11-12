@@ -1,4 +1,4 @@
-export type SubscriptionProvider = 'claude' | 'openai';
+export type SubscriptionProvider = 'claude' | 'openai' | 'gemini';
 export type AccountAvailability = 'available' | 'cooling_down' | 'needs_login';
 
 /** Safe for dashboards: never includes OAuth tokens. Times are Unix milliseconds. */
@@ -22,7 +22,7 @@ export interface SubscriptionAccount {
 
 /** One subscription rate-limit window (e.g. Claude's 5-hour window, ChatGPT's weekly window). */
 export interface UsageWindow {
-	/** '5h' | '7d' | '7d_opus' | '7d_sonnet' | … for Claude; 'primary' | 'secondary' for ChatGPT. */
+	/** '5h' | '7d' | '7d_opus' | '7d_sonnet' | … for Claude; 'primary' | 'secondary' for ChatGPT; the Code Assist model id for Gemini. */
 	id: string;
 	/** Human-readable name, e.g. "5-hour", "Weekly", "Weekly (Opus)". */
 	label: string;
@@ -107,7 +107,8 @@ export type AccountErrorCode =
 	| 'account_unavailable'
 	| 'revision_conflict'
 	| 'login_pending'
-	| 'login_start_failed';
+	| 'login_start_failed'
+	| 'login_not_configured';
 /** Error body of every account/session endpoint. `pendingSessionId` accompanies `login_pending` (409). */
 export interface AccountErrorResponse {
 	error: string;

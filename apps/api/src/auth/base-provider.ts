@@ -1,4 +1,4 @@
-export type AIProviderName = 'claude' | 'minimax' | 'openai';
+export type AIProviderName = 'claude' | 'minimax' | 'openai' | 'gemini';
 
 export interface OAuthCredentials {
 	localAccountId?: string;
