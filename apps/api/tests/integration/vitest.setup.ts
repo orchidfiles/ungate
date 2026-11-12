@@ -17,6 +17,8 @@ export function resetIntegrationDatabase(): void {
 		sqlite.exec('DELETE FROM oauth_policies;');
 		sqlite.exec('DELETE FROM model_mappings;');
 		sqlite.exec('DELETE FROM app_settings;');
+		// The `cursor` settings client is seeded by migration and stays; minted clients do not.
+		sqlite.exec("DELETE FROM client_keys WHERE kind <> 'settings';");
 		sqlite.exec("DELETE FROM sqlite_sequence WHERE name = 'requests';");
 		sqlite.exec('PRAGMA foreign_keys = ON;');
 		sqlite.exec('COMMIT');

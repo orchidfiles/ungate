@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { isReasoningBudgetTier, type CursorModelInfo } from '@ungate/shared';
 
 import { DuplicateModelIdError, ModelMappings } from '../database/model-mappings';
-import { localOrApiKey } from '../plugins/local-or-api-key';
 import { cursorBridgeClient } from '../proxy/cursor-bridge-client';
 
 import type { FastifyPluginCallback } from 'fastify';
@@ -34,8 +33,6 @@ export function cursorMappingId(upstreamModel: string): string {
  * credentials never leave the extension host, so nothing here is credential-bearing.
  */
 const plugin: FastifyPluginCallback = (app) => {
-	const guard = { onRequest: localOrApiKey(app.config) };
-
 	const statusHandler = async () => cursorBridgeClient.status();
 	const modelsHandler = async () => {
 		const { models, error } = await cursorBridgeClient.listModels();
@@ -52,10 +49,10 @@ const plugin: FastifyPluginCallback = (app) => {
 	};
 
 	for (const prefix of ['', '/v1']) {
-		app.get(`${prefix}/auth/cursor/status`, guard, statusHandler);
-		app.get(`${prefix}/auth/cursor/models`, guard, modelsHandler);
+		app.get(`${prefix}/auth/cursor/status`, statusHandler);
+		app.get(`${prefix}/auth/cursor/models`, modelsHandler);
 
-		app.post(`${prefix}/auth/cursor/models/import`, guard, async (request, reply) => {
+		app.post(`${prefix}/auth/cursor/models/import`, async (request, reply) => {
 			const parsed = importSchema.safeParse(request.body ?? {});
 			if (!parsed.success) {
 				return reply

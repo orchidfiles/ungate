@@ -53,7 +53,8 @@ export class Requests {
 				turnIndex: record.turnIndex ?? null,
 				messageCount: record.messageCount ?? null,
 				continuation: record.continuation ?? null,
-				firstTokenMs: record.firstTokenMs ?? null
+				firstTokenMs: record.firstTokenMs ?? null,
+				clientId: record.clientId ?? null
 			})
 			.run();
 
