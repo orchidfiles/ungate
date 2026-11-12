@@ -2,6 +2,7 @@ import { AnthropicToOpenai } from 'src/adapter/anthropic-to-openai';
 import { HeadersExtractor } from 'src/handlers/headers-extractor';
 import { CompletionRequestTelemetry } from 'src/metrics';
 import { CompletionErrorMapper, CompletionModelRouting, CompletionStreamingGateway } from 'src/orchestration/openai';
+import { TRANSLATED_CALLER } from 'src/proxy/anthropic-caller';
 import { proxyRequest } from 'src/proxy/anthropic-client';
 import { logger } from 'src/utils/logger';
 import { clientAbortSignal } from 'src/utils/request-abort';
@@ -21,8 +22,7 @@ export class ClaudeChatHandler {
 		HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'OpenAI /v1/chat/completions');
 
 		const anthropicBody = CompletionModelRouting.toAnthropicRequest(openaiBody, resolvedModel);
-		const headers = HeadersExtractor.extractAnthropicHeaders(request.headers);
-		const { response, context } = await proxyRequest('/v1/messages', anthropicBody, headers, clientAbortSignal(reply));
+		const { response, context } = await proxyRequest('/v1/messages', anthropicBody, TRANSLATED_CALLER, clientAbortSignal(reply));
 		context.telemetry = { ...requestTelemetry, ...context.telemetry };
 
 		if (!response.ok) {

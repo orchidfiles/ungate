@@ -128,7 +128,7 @@ describe('Claude SSE pre-commit gate', () => {
 			})
 		);
 
-		const result = await proxyRequest('/v1/messages', claudeStreamBody, {});
+		const result = await proxyRequest('/v1/messages', claudeStreamBody);
 		const body = await readAll(result.response.body);
 
 		expect(seen).toEqual(['Bearer token-a', 'Bearer token-b']);
@@ -151,7 +151,7 @@ describe('Claude SSE pre-commit gate', () => {
 			vi.fn(() => Promise.resolve(sseResponse(chunks).response))
 		);
 
-		const result = await proxyRequest('/v1/messages', claudeStreamBody, {});
+		const result = await proxyRequest('/v1/messages', claudeStreamBody);
 
 		expect(result.response.status).toBe(200);
 		expect(result.response.headers.get('content-type')).toContain('text/event-stream');
@@ -166,7 +166,7 @@ describe('Claude SSE pre-commit gate', () => {
 		const fetchMock = vi.fn(() => Promise.resolve(sseResponse([overloaded]).response));
 		vi.stubGlobal('fetch', fetchMock);
 
-		const result = await proxyRequest('/v1/messages', claudeStreamBody, {});
+		const result = await proxyRequest('/v1/messages', claudeStreamBody);
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		const body = await readAll(result.response.body);
@@ -181,7 +181,7 @@ describe('Claude SSE pre-commit gate', () => {
 		const fetchMock = vi.fn(() => Promise.resolve(sseResponse([claudeLimitEvent]).response));
 		vi.stubGlobal('fetch', fetchMock);
 
-		const result = await proxyRequest('/v1/messages', claudeStreamBody, {});
+		const result = await proxyRequest('/v1/messages', claudeStreamBody);
 		await readAll(result.response.body);
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -197,7 +197,7 @@ describe('Claude SSE pre-commit gate', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 
-		const { response, context } = await proxyRequest('/v1/messages', claudeStreamBody, {});
+		const { response, context } = await proxyRequest('/v1/messages', claudeStreamBody);
 		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'mid', 'claude-sonnet', context);
 		const output = await readAll(stream);
 
@@ -261,7 +261,7 @@ describe('Claude SSE pre-commit gate', () => {
 		});
 		vi.stubGlobal('fetch', fetchMock);
 
-		const result = await proxyRequest('/v1/messages', claudeStreamBody, {}, controller.signal);
+		const result = await proxyRequest('/v1/messages', claudeStreamBody, undefined, controller.signal);
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(result.response.status).toBe(499);
@@ -277,7 +277,7 @@ describe('Claude SSE pre-commit gate', () => {
 		const controller = new AbortController();
 		controller.abort();
 
-		const result = await proxyRequest('/v1/messages', claudeStreamBody, {}, controller.signal);
+		const result = await proxyRequest('/v1/messages', claudeStreamBody, undefined, controller.signal);
 
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(result.response.status).toBe(499);

@@ -5,6 +5,7 @@ import { config } from '../config';
 import { RequestHeuristics } from '../metrics/request-heuristics';
 
 import { AccountFallback } from './account-fallback';
+import { type AnthropicCaller, TRANSLATED_CALLER } from './anthropic-caller';
 import { RequestBuilder } from './request-builder';
 import { SsePrecommitGate } from './sse-precommit-gate';
 import { ToolMapper } from './tool-mapper';
@@ -95,12 +96,13 @@ async function sendPinned(
 	url: string,
 	payload: string,
 	token: AccountTokenInfo,
+	headersFor: (accessToken: string) => Record<string, string>,
 	signal?: AbortSignal
 ): Promise<{ response: Response; credentials: AccountTokenInfo }> {
 	const response = await fetch(url, {
 		signal,
 		method: 'POST',
-		headers: RequestBuilder.getClaudeOAuthHeaders(token.accessToken),
+		headers: headersFor(token.accessToken),
 		body: payload
 	});
 
@@ -122,7 +124,7 @@ async function sendPinned(
 	const retryResponse = await fetch(url, {
 		signal,
 		method: 'POST',
-		headers: RequestBuilder.getClaudeOAuthHeaders(refreshed.accessToken),
+		headers: headersFor(refreshed.accessToken),
 		body: payload
 	});
 	logger.log(`Retry after refresh: ${retryResponse.status}`);
@@ -130,21 +132,41 @@ async function sendPinned(
 	return { response: retryResponse, credentials: refreshed };
 }
 
+interface PreparedRequest {
+	body: AnthropicRequest;
+	reverseToolMapping: Record<string, string>;
+	headersFor: (accessToken: string) => Record<string, string>;
+}
+
+/**
+ * Translated callers get the Claude Code packet built for them. Claude Code callers already send
+ * it, so body and headers go upstream unchanged with the pool's credential in place of theirs.
+ */
+function prepare(body: AnthropicRequest, caller: AnthropicCaller): PreparedRequest {
+	if (caller.kind === 'claude-code') {
+		return { body, reverseToolMapping: {}, headersFor: (token) => RequestBuilder.claudeCodeCallerHeaders(caller.headers, token) };
+	}
+
+	const preparedBody = RequestBuilder.prepareClaudeCodeBody(body);
+
+	let reverseToolMapping: Record<string, string> = {};
+	if (preparedBody.tools && preparedBody.tools.length > 0) {
+		const mapped = ToolMapper.map(preparedBody.tools);
+		preparedBody.tools = mapped.tools;
+		reverseToolMapping = mapped.reverseMapping;
+	}
+
+	return { body: preparedBody, reverseToolMapping, headersFor: (token) => RequestBuilder.getClaudeOAuthHeaders(token) };
+}
+
 async function makeClaudeCodeRequest(
 	endpoint: string,
 	body: AnthropicRequest,
-	_headers: Record<string, string>,
+	caller: AnthropicCaller,
 	signal?: AbortSignal
 ): Promise<RequestResult> {
 	try {
-		const preparedBody = RequestBuilder.prepareClaudeCodeBody(body);
-
-		let reverseToolMapping: Record<string, string> = {};
-		if (preparedBody.tools && preparedBody.tools.length > 0) {
-			const mapped = ToolMapper.map(preparedBody.tools);
-			preparedBody.tools = mapped.tools;
-			reverseToolMapping = mapped.reverseMapping;
-		}
+		const { body: preparedBody, reverseToolMapping, headersFor } = prepare(body, caller);
 
 		const url = `${config.anthropic.apiUrl}${endpoint}?beta=true`;
 		const payload = JSON.stringify(preparedBody);
@@ -152,7 +174,7 @@ async function makeClaudeCodeRequest(
 		const outcome = await AccountFallback.run<AccountTokenInfo>({
 			provider: 'claude',
 			getCredentials: (accountId) => OAuth.getValidToken(accountId),
-			send: (token) => sendPinned(url, payload, token, signal),
+			send: (token) => sendPinned(url, payload, token, headersFor, signal),
 			// Streams: explicit early SSE usage-limit errors rotate before anything is committed.
 			inspect: SsePrecommitGate.inspector('claude', { signal }),
 			signal
@@ -326,14 +348,14 @@ async function extractUsage(
 export async function proxyRequest(
 	endpoint: string,
 	body: AnthropicRequest,
-	headers: Record<string, string>,
+	caller: AnthropicCaller = TRANSLATED_CALLER,
 	signal?: AbortSignal
 ): Promise<ProxyResult> {
 	const startTime = Date.now();
 	const model = body.model;
 	const stream = body.stream ?? false;
 
-	const claudeResult = await makeClaudeCodeRequest(endpoint, body, headers, signal);
+	const claudeResult = await makeClaudeCodeRequest(endpoint, body, caller, signal);
 
 	if (claudeResult.success) {
 		logger.log('✓ Request served via Claude Code');
