@@ -201,7 +201,8 @@ describe('routes-openai', () => {
 				service_tier: 'priority'
 			}),
 			'openai',
-			expect.any(AbortSignal)
+			expect.any(AbortSignal),
+			expect.objectContaining({ clientId: 'cursor' })
 		);
 		await app.close();
 	});

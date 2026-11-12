@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Requests } from 'src/database/requests';
 import anthropicPlugin from 'src/routes/anthropic';
+
 import { withPlugin } from '../test-harness';
 
 import type { RequestContext } from 'src/types/proxy';
@@ -13,7 +14,13 @@ vi.mock('src/proxy/anthropic-client', () => ({
 }));
 
 function context(): RequestContext {
-	return { model: 'claude-x', source: 'claude', startTime: Date.now(), reverseToolMapping: {}, telemetry: { accountId: 'acct-a' } };
+	return {
+		model: 'claude-x',
+		source: 'claude',
+		startTime: Date.now(),
+		reverseToolMapping: {},
+		telemetry: { accountId: 'acct-a' }
+	};
 }
 
 function sse(events: unknown[]): string {
@@ -36,7 +43,10 @@ describe('routes-anthropic', () => {
 	it('passes a streamed body through unchanged and records its usage once', async () => {
 		const record = vi.spyOn(Requests, 'record').mockReturnValue(1);
 		const text = sse([
-			{ type: 'message_start', message: { usage: { input_tokens: 10, cache_read_input_tokens: 100, cache_creation_input_tokens: 5, output_tokens: 1 } } },
+			{
+				type: 'message_start',
+				message: { usage: { input_tokens: 10, cache_read_input_tokens: 100, cache_creation_input_tokens: 5, output_tokens: 1 } }
+			},
 			{ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 't', name: 'Bash', input: {} } },
 			{ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 42 } },
 			{ type: 'message_stop' }
@@ -107,7 +117,10 @@ describe('routes-anthropic', () => {
 	it('counts tokens on the pool without recording usage', async () => {
 		const record = vi.spyOn(Requests, 'record').mockReturnValue(1);
 		proxyRequestMock.mockResolvedValueOnce({
-			response: new Response(JSON.stringify({ input_tokens: 7 }), { status: 200, headers: { 'content-type': 'application/json' } }),
+			response: new Response(JSON.stringify({ input_tokens: 7 }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			}),
 			context: context()
 		});
 
@@ -128,7 +141,11 @@ describe('routes-anthropic', () => {
 
 	it('refuses a request without a key', async () => {
 		const app = await withPlugin(anthropicPlugin, { apiKey: 'secret' });
-		const response = await app.inject({ method: 'POST', url: '/v1/messages', payload: { model: 'm', max_tokens: 1, messages: [] } });
+		const response = await app.inject({
+			method: 'POST',
+			url: '/v1/messages',
+			payload: { model: 'm', max_tokens: 1, messages: [] }
+		});
 
 		expect(response.statusCode).toBe(403);
 		expect(proxyRequestMock).not.toHaveBeenCalled();

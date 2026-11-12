@@ -29,13 +29,88 @@ interface ProxyOpenAiResult {
 	context: RequestContext;
 }
 
+export interface ProxyResponsesResult extends ProxyOpenAiResult {
+	/** Post-commit hook for an upstream error inside the forwarded stream (cools the account down). */
+	onStreamError: (error: Record<string, unknown> | undefined) => void;
+}
+
+type PoolOutcome =
+	| {
+			kind: 'served';
+			response: Response;
+			telemetry: RequestTelemetry;
+			onStreamError: (error: Record<string, unknown> | undefined) => void;
+	  }
+	| { kind: 'answered'; result: ProxyOpenAiResult };
+
 export class OpenAiClient {
-	static async proxy(body: OpenAIChatRequest, signal?: AbortSignal): Promise<ProxyOpenAiResult> {
+	/**
+	 * `requestTelemetry` (the caller's client and request shape) goes on the context before a
+	 * stream starts reading, since a short stream can finish and record its row at once.
+	 */
+	static async proxy(
+		body: OpenAIChatRequest,
+		signal?: AbortSignal,
+		requestTelemetry: RequestTelemetry = {}
+	): Promise<ProxyOpenAiResult> {
 		const startTime = Date.now();
 		const model = body.model;
-		const resolvedModel = ResponsesModelResolver.resolveModel(model);
-		const normalizedModel = resolvedModel.model;
+		const normalizedModel = ResponsesModelResolver.resolveModel(model).model;
 		const requestBody = JSON.stringify(this.buildCodexBody(body, model, normalizedModel));
+
+		const served = await this.runPool(requestBody, {}, model, startTime, signal);
+		if (served.kind === 'answered') {
+			served.result.context.telemetry = { ...requestTelemetry, ...served.result.context.telemetry };
+
+			return served.result;
+		}
+
+		return this.successResult(
+			body,
+			served.response,
+			model,
+			normalizedModel,
+			startTime,
+			{ ...requestTelemetry, ...served.telemetry },
+			served.onStreamError
+		);
+	}
+
+	/**
+	 * A Responses request from a Codex client, sent to the ChatGPT pool as it came. The body is
+	 * already what the Codex backend takes; `callerHeaders` carry the client's session headers. The
+	 * committed stream is returned untouched for the route to forward and record.
+	 */
+	static async proxyResponses(
+		body: { model?: unknown },
+		callerHeaders: Record<string, string>,
+		signal?: AbortSignal
+	): Promise<ProxyResponsesResult> {
+		const startTime = Date.now();
+		const model = typeof body.model === 'string' ? body.model : 'unknown';
+		logger.log(`OpenAI Codex responses pass-through: ${model}`);
+
+		const served = await this.runPool(JSON.stringify(body), callerHeaders, model, startTime, signal);
+		if (served.kind === 'answered') return { ...served.result, onStreamError: () => undefined };
+
+		return {
+			response: served.response,
+			context: { ...this.openAiContext(model, startTime), telemetryDeferred: true, telemetry: served.telemetry },
+			onStreamError: served.onStreamError
+		};
+	}
+
+	/**
+	 * Sends one Codex request through the ChatGPT pool, rotating accounts on usage limits. Returns
+	 * the committed upstream response, or the answer to give when no account served it.
+	 */
+	private static async runPool(
+		requestBody: string,
+		callerHeaders: Record<string, string>,
+		model: string,
+		startTime: number,
+		signal?: AbortSignal
+	): Promise<PoolOutcome> {
 		let missingWorkspace = false;
 		let outcome: Awaited<ReturnType<typeof AccountFallback.run<OAuthCredentials>>>;
 
@@ -50,7 +125,7 @@ export class OpenAiClient {
 
 					return creds?.accessToken && creds.accountId ? creds : null;
 				},
-				send: (creds) => this.sendPinned(requestBody, creds, signal),
+				send: (creds) => this.sendPinned(requestBody, creds, callerHeaders, signal),
 				// Codex always streams SSE: explicit early usage-limit events rotate before commit.
 				inspect: SsePrecommitGate.inspector('openai', { signal }),
 				signal
@@ -59,18 +134,26 @@ export class OpenAiClient {
 			if (signal?.aborted) {
 				logger.log('ChatGPT Codex request aborted by client; fallback stopped');
 
-				return this.errorResult(model, startTime, 499, { message: 'Client closed request', type: 'client_closed_request' });
+				return this.answered(
+					this.errorResult(model, startTime, 499, { message: 'Client closed request', type: 'client_closed_request' })
+				);
 			}
 			logger.error(`ChatGPT Codex request failed: ${String(error)}`);
 
-			return this.errorResult(model, startTime, 502, { message: `ChatGPT request failed: ${String(error)}`, type: 'api_error' });
+			return this.answered(
+				this.errorResult(model, startTime, 502, { message: `ChatGPT request failed: ${String(error)}`, type: 'api_error' })
+			);
 		}
 
 		if (outcome.kind === 'no_credentials') {
-			return this.authErrorResult(
-				model,
-				startTime,
-				missingWorkspace ? 'ChatGPT account id missing. Re-login to refresh your ChatGPT token.' : 'Not authenticated with OpenAI'
+			return this.answered(
+				this.authErrorResult(
+					model,
+					startTime,
+					missingWorkspace
+						? 'ChatGPT account id missing. Re-login to refresh your ChatGPT token.'
+						: 'Not authenticated with OpenAI'
+				)
 			);
 		}
 
@@ -91,7 +174,7 @@ export class OpenAiClient {
 				stopReason: 'error'
 			};
 
-			return limited;
+			return this.answered(limited);
 		}
 
 		const telemetry: RequestTelemetry = {
@@ -104,29 +187,34 @@ export class OpenAiClient {
 			const failed = await this.upstreamErrorResult(outcome.response, model, startTime);
 			failed.context.telemetry = { ...telemetry, stopReason: 'error' };
 
-			return failed;
+			return this.answered(failed);
 		}
 
-		const onStreamError = SsePrecommitGate.cooldownOnStreamLimit(
-			'openai',
-			outcome.accountId,
-			outcome.credentials.credentialVersion,
-			outcome.response.headers
-		);
+		return {
+			kind: 'served',
+			response: outcome.response,
+			telemetry,
+			onStreamError: SsePrecommitGate.cooldownOnStreamLimit(
+				'openai',
+				outcome.accountId,
+				outcome.credentials.credentialVersion,
+				outcome.response.headers
+			)
+		};
+	}
 
-		const result = await this.successResult(body, outcome.response, model, normalizedModel, startTime, onStreamError);
-		result.context.telemetry = { ...telemetry, ...result.context.telemetry };
-
-		return result;
+	private static answered(result: ProxyOpenAiResult): PoolOutcome {
+		return { kind: 'answered', result };
 	}
 
 	/** One Codex attempt pinned to `creds`' account, with one same-account refresh retry on 401. */
 	private static async sendPinned(
 		requestBody: string,
 		creds: OAuthCredentials,
+		callerHeaders: Record<string, string>,
 		signal?: AbortSignal
 	): Promise<{ response: Response; credentials: OAuthCredentials }> {
-		const response = await this.fetchCodexResponses(requestBody, creds.accessToken, creds.accountId!, signal);
+		const response = await this.fetchCodexResponses(requestBody, creds.accessToken, creds.accountId!, callerHeaders, signal);
 
 		if (response.status !== 401 || !creds.localAccountId) return { response, credentials: creds };
 
@@ -148,7 +236,7 @@ export class OpenAiClient {
 		}
 
 		return {
-			response: await this.fetchCodexResponses(requestBody, refreshed.accessToken, refreshed.accountId, signal),
+			response: await this.fetchCodexResponses(requestBody, refreshed.accessToken, refreshed.accountId, callerHeaders, signal),
 			credentials: refreshed
 		};
 	}
@@ -181,16 +269,18 @@ export class OpenAiClient {
 		requestBody: string,
 		accessToken: string,
 		accountId: string,
+		callerHeaders: Record<string, string>,
 		signal?: AbortSignal
 	): Promise<Response> {
 		return fetch(`${config.openai.codexUrl}/responses`, {
 			signal,
 			method: 'POST',
 			headers: {
+				originator: 'codex_cli_rs',
+				...callerHeaders,
 				'content-type': 'application/json',
 				authorization: `Bearer ${accessToken}`,
 				'chatgpt-account-id': accountId,
-				originator: 'codex_cli_rs',
 				accept: 'text/event-stream'
 			},
 			body: requestBody
@@ -255,6 +345,7 @@ export class OpenAiClient {
 		model: string,
 		normalizedModel: string,
 		startTime: number,
+		telemetry: RequestTelemetry,
 		onStreamError: (error: Record<string, unknown> | undefined) => void
 	): Promise<ProxyOpenAiResult> {
 		const stream = body.stream ?? false;
@@ -262,7 +353,7 @@ export class OpenAiClient {
 		const state = StreamStateFactory.create(normalizedModel);
 
 		if (stream) {
-			const context: RequestContext = { ...this.openAiContext(model, startTime), telemetryDeferred: true };
+			const context: RequestContext = { ...this.openAiContext(model, startTime), telemetryDeferred: true, telemetry };
 
 			return { response: this.streamResponse(response, state, context, onStreamError), context };
 		}
@@ -271,7 +362,7 @@ export class OpenAiClient {
 		const context = buffered.failed ? this.errorContext(model, startTime) : this.openAiContext(model, startTime);
 		context.inputTokens = state.usage?.prompt_tokens ?? 0;
 		context.outputTokens = state.usage?.completion_tokens ?? 0;
-		context.telemetry = StreamDiagnostics.telemetry(state, buffered.failed ? 'failed' : undefined);
+		context.telemetry = { ...telemetry, ...StreamDiagnostics.telemetry(state, buffered.failed ? 'failed' : undefined) };
 
 		return { response: buffered.response, context };
 	}

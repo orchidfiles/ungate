@@ -15,8 +15,7 @@ export class OpenAiMappedChatHandler {
 		requestTelemetry: RequestTelemetry = {}
 	): Promise<FastifyReply> {
 		const upstreamBody = CompletionModelRouting.buildOpenAiUpstreamBody(openaiBody, resolvedModel);
-		const { response, context } = await proxyOpenAIRequest(upstreamBody, 'openai', clientAbortSignal(reply));
-		context.telemetry = { ...requestTelemetry, ...context.telemetry };
+		const { response, context } = await proxyOpenAIRequest(upstreamBody, 'openai', clientAbortSignal(reply), requestTelemetry);
 
 		if (!response.ok) {
 			const error = await CompletionErrorMapper.openAiUpstreamErrorPayload(response);
