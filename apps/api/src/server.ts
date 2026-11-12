@@ -1,5 +1,7 @@
+import { createServer, type Server } from 'node:http';
+
 import cors from '@fastify/cors';
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 
 import { logger, setQuietMode } from 'src/utils/logger';
 
@@ -52,10 +54,36 @@ export async function startServer(): Promise<void> {
 	await app.register(analyticsPlugin);
 	await app.register(settingsPlugin);
 
-	globalThis.console.log(`[startup] listen ${config.port}...`);
-	await app.listen({ port: config.port, host: '0.0.0.0' });
+	globalThis.console.log(`[startup] listen ${config.hosts.join(',')}:${config.port}...`);
+	await listenOnAll(app, config.hosts, config.port);
 
 	// Always print port to stdout — extension parses this to detect the running port.
 	// Uses globalThis.console to bypass quiet mode.
 	globalThis.console.log(`[ungate] listening on localhost:${config.port}`);
+}
+
+/**
+ * Listens on each address in `hosts`. The first is Fastify's own server; each further address gets
+ * a plain listener that hands requests to it, so routes see the real peer of every socket.
+ */
+export async function listenOnAll(app: FastifyInstance, hosts: string[], port: number): Promise<void> {
+	const [first, ...rest] = hosts;
+	const extra: Server[] = [];
+	app.addHook('onClose', async () => {
+		await Promise.all(extra.map((server) => new Promise((resolve) => server.close(resolve))));
+	});
+
+	await app.listen({ port, host: first });
+
+	for (const host of rest) {
+		const server = createServer((request, response) => app.server.emit('request', request, response));
+		await new Promise<void>((resolve, reject) => {
+			server.once('error', reject);
+			server.listen(port, host, () => {
+				server.off('error', reject);
+				resolve();
+			});
+		});
+		extra.push(server);
+	}
 }

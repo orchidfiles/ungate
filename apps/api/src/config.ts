@@ -54,8 +54,14 @@ export function getConfig(settings: AppSettings): ProxyConfig {
 		}
 	}
 
+	const hosts = (process.env.HOST ?? '')
+		.split(',')
+		.map((host) => host.trim())
+		.filter((host) => host !== '');
+
 	return {
 		port: envPort ?? settings.port,
+		hosts: hosts.length > 0 ? hosts : ['0.0.0.0'],
 		apiKey: settings.apiKey ?? undefined,
 		quietMode: settings.quiet
 	};
