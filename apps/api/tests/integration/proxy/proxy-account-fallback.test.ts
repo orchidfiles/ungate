@@ -101,7 +101,7 @@ describe('Claude account fallback (proxyRequest)', () => {
 			})
 		);
 
-		const result = await proxyRequest('/v1/messages', claudeBody, {});
+		const result = await proxyRequest('/v1/messages', claudeBody);
 
 		expect(result.response.status).toBe(200);
 		expect(seen).toEqual(['Bearer token-a', 'Bearer token-b']);
@@ -131,7 +131,7 @@ describe('Claude account fallback (proxyRequest)', () => {
 			})
 		);
 
-		const result = await proxyRequest('/v1/messages', claudeBody, {});
+		const result = await proxyRequest('/v1/messages', claudeBody);
 
 		expect(calls).toBe(2);
 		expect(result.response.status).toBe(429);
@@ -162,7 +162,7 @@ describe('Claude account fallback (proxyRequest)', () => {
 		});
 		vi.stubGlobal('fetch', fetchMock);
 
-		const result = await proxyRequest('/v1/messages', claudeBody, {});
+		const result = await proxyRequest('/v1/messages', claudeBody);
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(result.response.status).toBe(429);
@@ -191,16 +191,16 @@ describe('Claude account fallback (proxyRequest)', () => {
 			.mockResolvedValueOnce(new Response('upstream down', { status: 503 }));
 		vi.stubGlobal('fetch', fetchMock);
 
-		const throttled = await proxyRequest('/v1/messages', claudeBody, {});
+		const throttled = await proxyRequest('/v1/messages', claudeBody);
 		expect(throttled.response.status).toBe(429);
 		expect(throttled.response.headers.get('retry-after')).toBe('7');
 		expect(throttled.response.headers.get('x-should-retry')).toBe('true');
 		const throttledJson: { error: { message: string } } = await throttled.response.json();
 		expect(throttledJson.error.message).toBe('Slow down');
 
-		const overloaded = await proxyRequest('/v1/messages', claudeBody, {});
+		const overloaded = await proxyRequest('/v1/messages', claudeBody);
 		expect(overloaded.response.status).toBe(529);
-		const unavailable = await proxyRequest('/v1/messages', claudeBody, {});
+		const unavailable = await proxyRequest('/v1/messages', claudeBody);
 		expect(unavailable.response.status).toBe(503);
 
 		expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -229,7 +229,7 @@ describe('Claude account fallback (proxyRequest)', () => {
 			})
 		);
 
-		const result = await proxyRequest('/v1/messages', claudeBody, {});
+		const result = await proxyRequest('/v1/messages', claudeBody);
 
 		expect(result.response.status).toBe(200);
 		// The request follows the user's newer selection (C), never CAS-switching to B.
@@ -261,7 +261,7 @@ describe('Claude account fallback (proxyRequest)', () => {
 			})
 		);
 
-		const result = await proxyRequest('/v1/messages', claudeBody, {});
+		const result = await proxyRequest('/v1/messages', claudeBody);
 
 		expect(result.response.status).toBe(200);
 		expect(seen).toEqual(['Bearer token-a', 'Bearer token-c']);
@@ -273,7 +273,7 @@ describe('Claude account fallback (proxyRequest)', () => {
 		const fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);
 
-		const result = await proxyRequest('/v1/messages', claudeBody, {});
+		const result = await proxyRequest('/v1/messages', claudeBody);
 
 		expect(result.response.status).toBe(401);
 		expect(fetchMock).not.toHaveBeenCalled();
