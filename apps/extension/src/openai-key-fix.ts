@@ -66,6 +66,7 @@ export class OpenAiKeyFix {
 	};
 
 	private lastUnavailableReason: string | null = null;
+	private lastCheckError: string | null = null;
 
 	constructor(
 		context: vscode.ExtensionContext,
@@ -146,14 +147,6 @@ export class OpenAiKeyFix {
 	public stop(): void {
 		this.state.activated = false;
 		this.stopMonitoring();
-	}
-
-	private getUnavailableReason(): string | null {
-		if (!fs.existsSync(this.stateDbPath)) {
-			return `${config.files.stateDb} not found`;
-		}
-
-		return this.readerUnavailableReason;
 	}
 
 	private async refreshReaderAvailability(): Promise<string | null> {
@@ -253,24 +246,30 @@ export class OpenAiKeyFix {
 			return;
 		}
 
-		const unavailableReason = this.getUnavailableReason();
-
-		if (unavailableReason) {
-			if (this.lastUnavailableReason !== unavailableReason) {
-				this.lastUnavailableReason = unavailableReason;
-				this.log(`${config.logPrefix} monitoring unavailable: ${unavailableReason}`);
-			}
-
-			return;
-		}
-
-		this.lastUnavailableReason = null;
 		this.state.running = true;
 
 		try {
+			const unavailableReason = await this.refreshReaderAvailability();
+
+			if (unavailableReason) {
+				if (this.lastUnavailableReason !== unavailableReason) {
+					this.lastUnavailableReason = unavailableReason;
+					this.log(`${config.logPrefix} monitoring unavailable: ${unavailableReason}`);
+				}
+
+				return;
+			}
+
+			this.lastUnavailableReason = null;
 			await this.enableOpenAiKeyIfNeeded(true);
+			this.lastCheckError = null;
 		} catch (error) {
-			this.log(`${config.logPrefix} check failed: ${String(error)}`);
+			// The poll runs every few seconds; repeat failures with the same cause are logged once.
+			const message = String(error);
+			if (this.lastCheckError !== message) {
+				this.lastCheckError = message;
+				this.log(`${config.logPrefix} check failed: ${message}`);
+			}
 		} finally {
 			this.state.running = false;
 		}

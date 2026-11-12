@@ -4,11 +4,19 @@ import { CursorRequestError, openaiToCursor } from 'src/adapter/openai-to-cursor
 import { CompletionRequestTelemetry } from 'src/metrics';
 import { CompletionErrorMapper } from 'src/orchestration/openai/error-mapper';
 import { cursorBridgeClient, type CursorBridgeClient } from 'src/proxy/cursor-bridge-client';
-import { CursorStreamHandler } from 'src/streaming/cursor-stream-handler';
+import { CursorStreamHandler, type CursorStreamOptions, type RepairRound } from 'src/streaming/cursor-stream-handler';
 import { logger } from 'src/utils/logger';
 import { clientAbortSignal } from 'src/utils/request-abort';
 
-import type { CursorBridgeError, CursorBridgeEventBody, ModelMappingConfig, RequestTelemetry } from '@ungate/shared';
+import type {
+	CursorBridgeError,
+	CursorBridgeEventBody,
+	CursorInferenceMessage,
+	CursorInferenceRequest,
+	CursorInferenceToolResultPart,
+	ModelMappingConfig,
+	RequestTelemetry
+} from '@ungate/shared';
 import type { FastifyReply } from 'fastify';
 import type { OpenAIChatRequest } from 'src/types/openai';
 
@@ -27,6 +35,47 @@ async function* prepend(
 	} finally {
 		await rest.return?.(undefined);
 	}
+}
+
+function parseArgs(raw: string): Record<string, unknown> {
+	try {
+		const parsed: unknown = raw.trim() ? JSON.parse(raw) : {};
+
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * The original request plus the model's invalid tool-call turn, answered with one error result
+ * per call, so the model re-issues the whole batch with complete arguments.
+ */
+export function buildRepairRequest(request: CursorInferenceRequest, round: RepairRound): CursorInferenceRequest {
+	const invalidById = new Map(round.invalid.map((call) => [call.id, call]));
+	const assistant: CursorInferenceMessage = {
+		role: 'INFERENCE_MESSAGE_ROLE_ASSISTANT',
+		toolCalls: round.calls.map((call) => ({ toolCallId: call.id, toolName: call.name, args: parseArgs(call.args) }))
+	};
+	if (round.text) assistant.text = round.text;
+
+	const parts: CursorInferenceToolResultPart[] = round.calls.map((call) => {
+		const invalid = invalidById.get(call.id);
+
+		return {
+			toolCallId: call.id,
+			toolName: call.name,
+			isError: true,
+			result: invalid
+				? `Invalid arguments: ${invalid.problems.slice(0, 5).join('; ')}. The call was not executed. Re-issue this call with a complete JSON arguments object that satisfies the tool's schema.`
+				: 'Not executed because other calls in this batch had invalid arguments. Re-issue it together with the corrected calls.'
+		};
+	});
+
+	return {
+		...request,
+		messages: [...request.messages, assistant, { role: 'INFERENCE_MESSAGE_ROLE_TOOL', toolContent: { parts } }]
+	};
 }
 
 export class CursorChatHandler {
@@ -108,7 +157,8 @@ export class CursorChatHandler {
 			return fail(mapped.status, mapped.body, startError.message, aborted);
 		}
 
-		const options = {
+		const embedded = built.capability === 'embedded' && built.request.tools.length > 0;
+		const options: CursorStreamOptions = {
 			events: prepend(head, iterator),
 			streamId: randomUUID().replace(/-/g, '').slice(0, 24),
 			modelName,
@@ -116,7 +166,9 @@ export class CursorChatHandler {
 			tools: openaiBody.tools,
 			startTime,
 			telemetry: requestTelemetry,
-			signal
+			signal,
+			holdToolCalls: embedded,
+			repair: embedded ? (round) => client.invoke(buildRepairRequest(built.request, round), signal) : undefined
 		};
 
 		if (stream) {
