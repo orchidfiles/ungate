@@ -36,10 +36,67 @@ export function buildCursorTools(tools: OpenAITool[] | undefined, capability: Cu
 				return { name: tool.function.name, description, parameters: schema };
 			}
 
-			const embedded = `${EMBEDDED_SCHEMA_PREFIX}\n${JSON.stringify(schema)}`;
+			const embedded = `${EMBEDDED_SCHEMA_PREFIX}\n${JSON.stringify(schema)}${requiredArgumentsLine(schema)}`;
 
 			return { name: tool.function.name, description: description ? `${description}\n\n${embedded}` : embedded };
 		});
+}
+
+function requiredKeys(schema: Record<string, unknown> | undefined): string[] {
+	const required = schema?.required;
+
+	return Array.isArray(required) ? required.filter((key): key is string => typeof key === 'string') : [];
+}
+
+/** Embedded schemas are only prose to Grok, so the required keys are spelled out. */
+function requiredArgumentsLine(schema: Record<string, unknown>): string {
+	const keys = requiredKeys(schema);
+	if (keys.length === 0) return '';
+
+	return `\nRequired arguments: ${keys.join(', ')}. Never call this tool with an empty object.`;
+}
+
+/**
+ * System instruction for `embedded` tool mode: without structured `parameters`, Grok
+ * occasionally emits whole batches of parallel calls with `{}` arguments.
+ */
+export const EMBEDDED_TOOL_ARGUMENTS_INSTRUCTION =
+	"Tool calls: every tool call must include a complete JSON arguments object that satisfies the JSON Schema in that tool's description, with all required arguments filled in. This applies to each call when you make several calls in parallel. Never send an empty arguments object to a tool that has required arguments.";
+
+export interface ToolCallCheckInput {
+	id: string;
+	name: string;
+	args: string;
+}
+
+export interface InvalidToolCall extends ToolCallCheckInput {
+	problems: string[];
+}
+
+/**
+ * Tool calls whose arguments cannot work: unparseable JSON, missing required keys or wrong
+ * types. Unknown tools are left alone (the client reports them itself).
+ */
+export function findInvalidToolCalls(tools: OpenAITool[] | undefined, calls: ToolCallCheckInput[]): InvalidToolCall[] {
+	const invalid: InvalidToolCall[] = [];
+
+	for (const call of calls) {
+		const tool = tools?.find((entry) => entry.function?.name === call.name);
+		if (!tool) continue;
+
+		let parsed: unknown;
+		try {
+			parsed = call.args.trim() ? JSON.parse(call.args) : {};
+		} catch {
+			invalid.push({ ...call, problems: ['arguments are not valid JSON'] });
+			continue;
+		}
+
+		const problems = validateToolArguments(tool.function.parameters, parsed);
+		if (problems.length > 0) invalid.push({ ...call, problems });
+	}
+
+	return invalid;
 }
 
 type JsonSchema = Record<string, unknown>;

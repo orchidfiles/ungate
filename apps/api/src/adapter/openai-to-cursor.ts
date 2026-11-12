@@ -1,4 +1,4 @@
-import { buildCursorTools, resolveCursorToolCapability } from './cursor-tool-capability';
+import { buildCursorTools, EMBEDDED_TOOL_ARGUMENTS_INSTRUCTION, resolveCursorToolCapability } from './cursor-tool-capability';
 
 import type {
 	CursorInferenceContentPart,
@@ -168,11 +168,15 @@ export function openaiToCursor(body: OpenAIChatRequest, options: OpenAiToCursorO
 		}
 	}
 
-	const request: CursorInferenceRequest = {
-		modelId: options.upstreamModel,
-		messages,
-		tools: body.tool_choice === 'none' ? [] : buildCursorTools(body.tools, capability)
-	};
+	const tools = body.tool_choice === 'none' ? [] : buildCursorTools(body.tools, capability);
+
+	if (capability === 'embedded' && tools.length > 0) {
+		const firstNonSystem = messages.findIndex((message) => message.role !== 'INFERENCE_MESSAGE_ROLE_SYSTEM');
+		const at = firstNonSystem === -1 ? messages.length : firstNonSystem;
+		messages.splice(at, 0, { role: 'INFERENCE_MESSAGE_ROLE_SYSTEM', text: EMBEDDED_TOOL_ARGUMENTS_INSTRUCTION });
+	}
+
+	const request: CursorInferenceRequest = { modelId: options.upstreamModel, messages, tools };
 
 	const maxTokens = body.max_completion_tokens ?? body.max_tokens;
 	if (typeof maxTokens === 'number' && maxTokens > 0) request.modelConfig = { maxTokens };
