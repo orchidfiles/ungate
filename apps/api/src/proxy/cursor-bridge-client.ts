@@ -11,12 +11,7 @@ import {
 	type CursorSessionStatus
 } from '@ungate/shared';
 
-/** The parts of `process` the client uses; injectable for tests. */
-export interface BridgeTransport {
-	send?: (message: unknown) => boolean;
-	on(event: 'message', listener: (message: unknown) => void): unknown;
-	off(event: 'message', listener: (message: unknown) => void): unknown;
-}
+import { ProcessBridgeTransport, SocketBridgeTransport, type BridgeTransport } from './cursor-bridge-transport';
 
 const STATUS_TIMEOUT_MS = 3_000;
 const MODELS_TIMEOUT_MS = 20_000;
@@ -24,21 +19,36 @@ const MODELS_TIMEOUT_MS = 20_000;
 const IDLE_TIMEOUT_MS = 120_000;
 
 const UNAVAILABLE_STATUS: CursorSessionStatus = { available: false, connected: false, reason: 'no_bridge', membershipType: null };
+const NOT_ATTACHED: CursorBridgeError = {
+	kind: 'unavailable',
+	message: 'Cursor provider needs an open Cursor window running the Ungate extension'
+};
+const DISCONNECTED: CursorBridgeError = { kind: 'unavailable', message: 'Cursor bridge is disconnected' };
 
 type Listener = (event: CursorBridgeEvent) => void;
 
 /**
- * API-side end of the private IPC bridge to the extension host. Only exists when the API was
- * spawned by an Ungate window with an `ipc` stdio slot; a standalone API reports unavailable.
+ * API-side end of the bridge to the extension host that owns the Cursor session. The extension is
+ * on the other end of `transport` only while a Cursor window serves it; without one every call
+ * reports unavailable.
  */
 export class CursorBridgeClient {
 	private readonly listeners = new Map<string, Listener>();
-	private attached = false;
 
-	constructor(private readonly transport: BridgeTransport = process as unknown as BridgeTransport) {}
+	constructor(private readonly transport: BridgeTransport) {
+		transport.on('message', (message) => {
+			if (!isCursorBridgeMessage(message)) return;
+			this.listeners.get(message.id)?.(message as CursorBridgeEvent);
+		});
+		transport.on('disconnect', () => {
+			for (const [id, listener] of [...this.listeners]) {
+				listener({ channel: CURSOR_BRIDGE_CHANNEL, id, kind: 'end', error: DISCONNECTED });
+			}
+		});
+	}
 
 	isAvailable(): boolean {
-		return typeof this.transport.send === 'function';
+		return this.transport.isConnected();
 	}
 
 	async status(): Promise<CursorSessionStatus> {
@@ -49,11 +59,12 @@ export class CursorBridgeClient {
 	}
 
 	async listModels(): Promise<{ models: CursorModelInfo[]; error: CursorBridgeError | null }> {
-		if (!this.isAvailable()) return { models: [], error: { kind: 'unavailable', message: 'Cursor bridge is not attached' } };
+		if (!this.isAvailable()) return { models: [], error: NOT_ATTACHED };
 
 		try {
 			const event = await this.single('listModels', MODELS_TIMEOUT_MS);
 			if (event.kind === 'models') return { models: event.models, error: event.error };
+			if (event.kind === 'end' && event.error) return { models: [], error: event.error };
 		} catch {
 			return { models: [], error: { kind: 'timeout', message: 'Timed out listing Cursor models' } };
 		}
@@ -67,13 +78,7 @@ export class CursorBridgeClient {
 	 */
 	async *invoke(request: CursorInferenceRequest, signal?: AbortSignal): AsyncGenerator<CursorBridgeEventBody> {
 		if (!this.isAvailable()) {
-			yield {
-				kind: 'end',
-				error: {
-					kind: 'unavailable',
-					message: 'Cursor provider is only available when the API is started by the Ungate extension'
-				}
-			};
+			yield { kind: 'end', error: NOT_ATTACHED };
 
 			return;
 		}
@@ -88,7 +93,7 @@ export class CursorBridgeClient {
 			wake?.();
 		};
 
-		this.subscribe(id, (event) => {
+		this.listeners.set(id, (event) => {
 			const body: Record<string, unknown> = { ...event };
 			delete body.channel;
 			delete body.id;
@@ -106,7 +111,7 @@ export class CursorBridgeClient {
 			}
 
 			if (!this.post({ channel: CURSOR_BRIDGE_CHANNEL, kind: 'invoke', id, request })) {
-				yield { kind: 'end', error: { kind: 'unavailable', message: 'Cursor bridge is disconnected' } };
+				yield { kind: 'end', error: DISCONNECTED };
 
 				return;
 			}
@@ -149,7 +154,7 @@ export class CursorBridgeClient {
 				reject(new Error('timeout'));
 			}, timeoutMs);
 
-			this.subscribe(id, (event) => {
+			this.listeners.set(id, (event) => {
 				clearTimeout(timer);
 				this.listeners.delete(id);
 				resolve(event);
@@ -163,23 +168,10 @@ export class CursorBridgeClient {
 		});
 	}
 
-	private subscribe(id: string, listener: Listener): void {
-		this.ensureAttached();
-		this.listeners.set(id, listener);
-	}
-
-	private ensureAttached(): void {
-		if (this.attached) return;
-		this.attached = true;
-		this.transport.on('message', (message) => {
-			if (!isCursorBridgeMessage(message)) return;
-			this.listeners.get(message.id)?.(message as CursorBridgeEvent);
-		});
-	}
-
 	private post(message: unknown): boolean {
+		if (!this.transport.isConnected()) return false;
 		try {
-			this.transport.send?.(message);
+			this.transport.send(message);
 
 			return true;
 		} catch {
@@ -188,4 +180,11 @@ export class CursorBridgeClient {
 	}
 }
 
-export const cursorBridgeClient = new CursorBridgeClient();
+/**
+ * An API the extension spawned talks over its IPC channel; any other run (a systemd service, a
+ * terminal) serves a socket the leader window connects to when it adopts the API.
+ */
+export const bridgeTransport: BridgeTransport =
+	typeof process.send === 'function' ? new ProcessBridgeTransport() : new SocketBridgeTransport();
+
+export const cursorBridgeClient = new CursorBridgeClient(bridgeTransport);
