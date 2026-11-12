@@ -69,7 +69,8 @@ export class Analytics {
 				estimatedCost: unknownCost ? null : row.estimatedCost,
 				stream: row.stream,
 				latencyMs: row.latencyMs,
-				error: row.error
+				error: row.error,
+				clientId: row.clientId
 			}));
 	}
 

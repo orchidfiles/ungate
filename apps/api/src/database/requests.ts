@@ -54,7 +54,8 @@ export class Requests {
 				messageCount: record.messageCount ?? null,
 				continuation: record.continuation ?? null,
 				firstTokenMs: record.firstTokenMs ?? null,
-				cacheReported: record.cacheReadTokens != null
+				cacheReported: record.cacheReadTokens != null,
+				clientId: record.clientId ?? null
 			})
 			.run();
 

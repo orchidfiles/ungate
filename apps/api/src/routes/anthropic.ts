@@ -1,7 +1,7 @@
 import { logger } from 'src/utils/logger';
 
 import { HeadersExtractor } from '../handlers/headers-extractor';
-import { apiKeyAuth } from '../plugins/auth';
+import { clientKeyAuth } from '../plugins/auth';
 import { proxyRequest } from '../proxy/anthropic-client';
 import { SseErrorObserver } from '../streaming/sse-error-observer';
 import { clientAbortSignal } from '../utils/request-abort';
@@ -12,7 +12,7 @@ import type { FastifyPluginCallback } from 'fastify';
 const plugin: FastifyPluginCallback = (app) => {
 	const { config } = app;
 
-	app.post('/v1/messages', { onRequest: apiKeyAuth(config) }, async (request, reply) => {
+	app.post('/v1/messages', { onRequest: clientKeyAuth(config) }, async (request, reply) => {
 		try {
 			HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'Anthropic /v1/messages');
 
