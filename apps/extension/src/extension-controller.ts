@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+	cursorBridgeSocketName,
 	DEFAULT_AUTO_TUNNEL_ENABLED,
 	DEFAULT_KEY_FIX_ENABLED,
 	type ApiStatus as ApiLifecycleStatus,
@@ -14,6 +15,7 @@ import * as vscode from 'vscode';
 
 import { ApiServer } from './api-server';
 import { AutoTunnel } from './auto-tunnel';
+import { BridgeSocket } from './cursor/bridge-socket';
 import { CursorBridge } from './cursor/cursor-bridge';
 import { CursorDiskSession } from './cursor/cursor-disk-session';
 import { CursorSession } from './cursor/cursor-session';
@@ -35,6 +37,10 @@ export class ExtensionController {
 	private keyFix!: OpenAiKeyFix;
 	private autoTunnel!: AutoTunnel;
 	private cursorBridge!: CursorBridge;
+	/** The bridge socket of an API this window adopted; null while it serves a spawned child or nothing. */
+	private adoptedBridge: { port: number; socket: BridgeSocket } | null = null;
+	private adoptingBridge = false;
+	private lastBridgeSocketError: string | null = null;
 	private currentPort: number | null = null;
 	private lastApiStatus: ApiLifecycleStatus | null = null;
 	private currentTunnelState: TunnelState = { status: 'stopped', url: null, error: null };
@@ -212,6 +218,8 @@ export class ExtensionController {
 
 		this.keyFix?.stop();
 		this.cursorBridge?.detach();
+		this.adoptedBridge?.socket.close();
+		this.adoptedBridge = null;
 		const stateAfterStop = RuntimeStateStore.read();
 		const hasLiveClients = RuntimeStateStore.hasLiveClients(stateAfterStop);
 
@@ -557,8 +565,42 @@ export class ExtensionController {
 		await this.keyFix.applySharedState(runtimeState.keyFix.enabled);
 		this.applyRuntimeState(runtimeState);
 		this.apiServer.syncLeaderHealthMonitor(this.isLeaderWindow(runtimeState));
+		await this.syncAdoptedBridge(runtimeState);
 		this.tryHandleCommand(runtimeState);
 		await this.reconcileAutoTunnel(runtimeState);
+	}
+
+	/**
+	 * Serves the Cursor bridge to a running API this window did not spawn, such as the systemd
+	 * service, over the socket it serves. Only the leader serves it; a window that stops leading
+	 * lets go so the next leader can connect.
+	 */
+	private async syncAdoptedBridge(runtimeState: RuntimeState): Promise<void> {
+		const port = runtimeState.api.status === 'running' ? runtimeState.api.port : null;
+		const wanted = port !== null && this.isLeaderWindow(runtimeState) && !this.apiServer.spawnedApi() ? port : null;
+
+		if (this.adoptedBridge && (this.adoptedBridge.port !== wanted || !this.adoptedBridge.socket.connected)) {
+			this.adoptedBridge.socket.close();
+			this.adoptedBridge = null;
+		}
+		if (wanted === null || this.adoptedBridge || this.adoptingBridge) return;
+
+		const socketPath = path.join(config.baseDir, cursorBridgeSocketName(wanted));
+		this.adoptingBridge = true;
+		try {
+			const socket = await BridgeSocket.connect(socketPath);
+			this.adoptedBridge = { port: wanted, socket };
+			this.cursorBridge.attach(socket);
+			this.log(`[cursor] serving the bridge to the API on port ${wanted} over ${socketPath}`);
+		} catch (error) {
+			// An API another window spawned keeps its bridge on that window's IPC channel and has no socket.
+			if (this.lastBridgeSocketError !== socketPath) {
+				this.lastBridgeSocketError = socketPath;
+				this.log(`[cursor] no bridge socket for the API on port ${wanted}: ${this.formatError(error)}`);
+			}
+		} finally {
+			this.adoptingBridge = false;
+		}
 	}
 
 	private applyRuntimeState(runtimeState: RuntimeState): void {
