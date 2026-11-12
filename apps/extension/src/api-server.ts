@@ -19,7 +19,7 @@ interface ApiServerCallbacks {
 	isLeaderWindow(): boolean;
 	isExtensionHostActive(): boolean;
 	getWindowId(): string;
-	/** Called with the API child this window spawned (IPC channel attached). Adopted APIs never get one. */
+	/** Called with the API child this window spawned (IPC channel attached). An adopted API serves a socket instead. */
 	onChildSpawned?(child: cp.ChildProcess): void;
 }
 
@@ -111,6 +111,11 @@ export class ApiServer {
 
 	getPort(): number | null {
 		return this.port;
+	}
+
+	/** This window spawned the running API, so its IPC channel carries the Cursor bridge. */
+	spawnedApi(): boolean {
+		return this.process !== null;
 	}
 
 	syncLeaderHealthMonitor(isLeader: boolean): void {

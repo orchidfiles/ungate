@@ -11,6 +11,7 @@ interface MockApiServer {
 	restart: ReturnType<typeof vi.fn>;
 	getPort: ReturnType<typeof vi.fn>;
 	isStartupInProgress: ReturnType<typeof vi.fn>;
+	spawnedApi: ReturnType<typeof vi.fn>;
 	syncLeaderHealthMonitor: ReturnType<typeof vi.fn>;
 }
 
@@ -192,6 +193,14 @@ vi.mock('../../src/tunnel-manager', () => {
 	};
 });
 
+const bridgeSocketConnectMock = vi.fn<(path: string) => Promise<unknown>>(() => Promise.reject(new Error('ENOENT')));
+
+vi.mock('../../src/cursor/bridge-socket', () => {
+	return {
+		BridgeSocket: { connect: (path: string) => bridgeSocketConnectMock(path) }
+	};
+});
+
 vi.mock('../../src/api-server', () => {
 	return {
 		ApiServer: class {
@@ -200,6 +209,7 @@ vi.mock('../../src/api-server', () => {
 			restart = apiServerRestartMock;
 			getPort = apiServerGetPortMock;
 			isStartupInProgress = apiServerIsStartupInProgressMock;
+			spawnedApi = vi.fn().mockReturnValue(false);
 			syncLeaderHealthMonitor = apiServerSyncLeaderHealthMonitorMock;
 		}
 	};
@@ -243,6 +253,7 @@ function createController(windowId: string): {
 		restart: vi.fn().mockResolvedValue(undefined),
 		getPort: vi.fn().mockReturnValue(null),
 		isStartupInProgress,
+		spawnedApi: vi.fn().mockReturnValue(false),
 		syncLeaderHealthMonitor: vi.fn()
 	};
 	const tunnelManager: MockTunnelManager = {
@@ -278,6 +289,7 @@ function createController(windowId: string): {
 
 	Object.assign(controller as object, {
 		windowId,
+		outputChannel: { appendLine: vi.fn() },
 		apiServer,
 		tunnelManager,
 		dashboard,
@@ -319,6 +331,8 @@ describe('ExtensionController', () => {
 	});
 
 	beforeEach(() => {
+		bridgeSocketConnectMock.mockReset();
+		bridgeSocketConnectMock.mockRejectedValue(new Error('ENOENT'));
 		createOutputChannelMock.mockClear();
 		createStatusBarItemMock.mockClear();
 		registerCommandMock.mockClear();
@@ -402,6 +416,45 @@ describe('ExtensionController', () => {
 
 		expect(resetApiForRestartMock).not.toHaveBeenCalled();
 		expect(apiServer.start).not.toHaveBeenCalled();
+	});
+
+	it('serves the cursor bridge over the socket of an api it adopted', async () => {
+		const { controller, apiServer } = createController('window-a');
+		const runtimeState = createRuntimeState(['window-a'], 47821);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a']);
+		runtimeTouchClientMock.mockResolvedValue(runtimeState);
+		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
+		const socket = { connected: true, close: vi.fn() };
+		bridgeSocketConnectMock.mockResolvedValueOnce(socket);
+		const attach = vi.fn();
+		Object.assign(controller as object, { cursorBridge: { attach, cancelAll: vi.fn() } });
+
+		await getInternals(controller).syncFromRuntimeState();
+		await getInternals(controller).syncFromRuntimeState();
+
+		expect(bridgeSocketConnectMock).toHaveBeenCalledTimes(1);
+		expect(bridgeSocketConnectMock.mock.calls[0][0]).toMatch(/\.ungate\/cursor-bridge-47821\.sock$/);
+		expect(attach).toHaveBeenCalledWith(socket);
+
+		runtimeGetLeaderWindowIdMock.mockReturnValue('window-b');
+		await getInternals(controller).syncFromRuntimeState();
+		expect(socket.close).toHaveBeenCalledTimes(1);
+		expect(apiServer.start).not.toHaveBeenCalled();
+	});
+
+	it('keeps the ipc bridge of an api it spawned', async () => {
+		const { controller, apiServer } = createController('window-a');
+		const runtimeState = createRuntimeState(['window-a'], 47821);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a']);
+		runtimeTouchClientMock.mockResolvedValue(runtimeState);
+		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
+		apiServer.spawnedApi.mockReturnValue(true);
+
+		await getInternals(controller).syncFromRuntimeState();
+
+		expect(bridgeSocketConnectMock).not.toHaveBeenCalled();
 	});
 
 	it('starts the api on activate bootstrap when leader has no port', async () => {

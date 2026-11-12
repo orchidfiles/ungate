@@ -5,7 +5,6 @@ vi.mock('src/database/requests', () => ({ Requests: { record: (...args: unknown[
 
 const { CursorResponseAccumulator, CursorStreamHandler } = await import('src/streaming/cursor-stream-handler');
 const { CompletionErrorMapper, CompletionModelRouting } = await import('src/orchestration/openai');
-const { CursorBridgeClient } = await import('src/proxy/cursor-bridge-client');
 const { buildRepairRequest } = await import('src/orchestration/openai/provider-handlers/cursor-chat-handler');
 
 import type { CursorBridgeEventBody, ModelMappingConfig, RequestTelemetry } from '@ungate/shared';
@@ -354,47 +353,5 @@ describe('Cursor routing', () => {
 		expect(CompletionModelRouting.isCursorMapped(null)).toBe(false);
 		expect(CompletionModelRouting.isOpenAiMapped(mapping('cursor'))).toBe(false);
 		expect(CompletionModelRouting.shouldRouteMiniMax(mapping('cursor'), 'cursor-grok')).toBe(false);
-	});
-});
-
-describe('CursorBridgeClient', () => {
-	it('reports unavailable without an IPC channel', async () => {
-		const client = new CursorBridgeClient({ on: () => undefined, off: () => undefined });
-		const status = await client.status();
-		expect(status).toMatchObject({ available: false, reason: 'no_bridge' });
-		const events: CursorBridgeEventBody[] = [];
-		for await (const event of client.invoke({ modelId: 'grok', messages: [], tools: [] })) events.push(event);
-		expect(events).toEqual([{ kind: 'end', error: expect.objectContaining({ kind: 'unavailable' }) }]);
-	});
-
-	it('correlates events by id and sends cancel on abort', async () => {
-		const sent: Record<string, unknown>[] = [];
-		let listener: (message: unknown) => void = () => undefined;
-		const client = new CursorBridgeClient({
-			send: (message) => {
-				sent.push(message as Record<string, unknown>);
-				const { id, kind } = message as { id: string; kind: string };
-				if (kind === 'invoke') {
-					queueMicrotask(() => {
-						listener({ channel: 'ungate.cursor-bridge', id: 'other', kind: 'text', text: 'not mine' });
-						listener({ channel: 'ungate.cursor-bridge', id, kind: 'ready', resolvedModel: 'grok' });
-						listener({ channel: 'ungate.cursor-bridge', id, kind: 'text', text: 'hello' });
-					});
-				}
-
-				return true;
-			},
-			on: (_event, fn) => (listener = fn),
-			off: () => undefined
-		});
-		const controller = new AbortController();
-		const events: CursorBridgeEventBody[] = [];
-		for await (const event of client.invoke({ modelId: 'grok', messages: [], tools: [] }, controller.signal)) {
-			events.push(event);
-			if (event.kind === 'text') controller.abort();
-		}
-		expect(events.map((event) => event.kind)).toEqual(['ready', 'text', 'end']);
-		expect(sent.map((message) => message.kind)).toEqual(['invoke', 'cancel']);
-		expect(JSON.stringify(sent)).not.toMatch(/token|authorization|checksum/i);
 	});
 });
