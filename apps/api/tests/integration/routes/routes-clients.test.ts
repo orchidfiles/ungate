@@ -87,7 +87,10 @@ describe('routes-clients', () => {
 
 	it('lets a minted key reach model routes from the container', async () => {
 		const { key } = ClientKeys.create('coda-agent');
-		proxyRequestMock.mockResolvedValueOnce({ response: new Response('{}', { status: 200 }), context: {} });
+		proxyRequestMock.mockResolvedValueOnce({
+			response: new Response('{}', { status: 200 }),
+			context: { model: 'm', source: 'claude', startTime: Date.now(), reverseToolMapping: {} }
+		});
 		const app = await server();
 
 		const refused = await app.inject({ method: 'POST', url: '/v1/messages', payload: { model: 'm', max_tokens: 1, messages: [] }, ...REMOTE });

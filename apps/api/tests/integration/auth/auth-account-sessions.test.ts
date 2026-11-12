@@ -143,7 +143,7 @@ describe('account-scoped tokens', () => {
 				);
 			})
 		);
-		const result = await proxyRequest('/v1/messages', { model: 'm', messages: [], max_tokens: 1 } as never, {});
+		const result = await proxyRequest('/v1/messages', { model: 'm', messages: [], max_tokens: 1 } as never);
 		expect(result.response.status).toBe(200);
 		expect(seen).toEqual(['Bearer live-a', 'Bearer refreshed-a']);
 		expect(OAuthAccounts.get(b.id)?.accessToken).toBe('old-b');

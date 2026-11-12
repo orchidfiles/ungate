@@ -2,6 +2,7 @@ import { detectProviderByModel } from '@ungate/shared';
 
 import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
 
+import { type AnthropicCaller, TRANSLATED_CALLER } from './anthropic-caller';
 import { proxyRequest as proxyAnthropicRequest } from './anthropic-client';
 import { proxyMiniMaxRequest } from './minimax-client';
 import { OpenAiClient } from './openai-client';
@@ -21,10 +22,10 @@ function detectProvider(model: string): AIProviderName {
 export async function proxyRequest(
 	endpoint: string,
 	body: AnthropicRequest,
-	headers: Record<string, string>,
+	caller: AnthropicCaller = TRANSLATED_CALLER,
 	signal?: AbortSignal
 ): Promise<ProxyResult> {
-	return proxyAnthropicRequest(endpoint, body, headers, signal);
+	return proxyAnthropicRequest(endpoint, body, caller, signal);
 }
 
 export async function proxyOpenAIRequest(
@@ -44,8 +45,7 @@ export async function proxyOpenAIRequest(
 
 	// Claude: convert OpenAI → Anthropic → proxy
 	const anthropicBody = openaiToAnthropic(openaiBody);
-	const anthropicHeaders: Record<string, string> = {};
-	const result = await proxyAnthropicRequest('/v1/messages', anthropicBody, anthropicHeaders, signal);
+	const result = await proxyAnthropicRequest('/v1/messages', anthropicBody, TRANSLATED_CALLER, signal);
 
 	return result;
 }
