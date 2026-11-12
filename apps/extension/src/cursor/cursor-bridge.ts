@@ -10,6 +10,7 @@ import {
 } from '@ungate/shared';
 
 import { CursorModelsError, fetchUsableModels } from './models';
+import { PacerTimeoutError, RequestPacer } from './request-pacer';
 import { redactMessage, runInference } from './run-inference';
 
 import type { Http2Connect } from './connect-transport';
@@ -31,9 +32,30 @@ export interface CursorBridgeOptions {
 	isEnabled: () => boolean;
 	onLog?: (level: 'info' | 'warn' | 'error', message: string) => void;
 	connect?: Http2Connect;
+	pacer?: RequestPacer;
+	/** Overrides `CURSOR_PACING.retryDelaysMs` (tests). */
+	retryDelaysMs?: readonly number[];
 }
 
 const MAX_ACTIVE_REQUESTS = 32;
+
+/**
+ * Cursor (and xAI behind it for Grok) rejects bursts per model with `resource_exhausted`.
+ * Cursor's agent fires tool-loop steps back to back, so starts are paced per model.
+ */
+export const CURSOR_PACING = {
+	maxConcurrentPerModel: 2,
+	minIntervalMs: 1_000,
+	/** Below the API's 120 s idle timeout so a queued request still fails cleanly. */
+	maxWaitMs: 90_000,
+	/** Backoff before retry n (1-based) of a run rate-limited before any output. */
+	retryDelaysMs: [2_000, 6_000] as readonly number[],
+	/** Lane cooldown after a rate limit that cannot be retried (output already sent). */
+	cooldownMs: 5_000
+};
+
+const RETRYABLE_BEFORE_OUTPUT = new Set(['rate_limit', 'overloaded']);
+const OUTPUT_KINDS = new Set(['text', 'thinking', 'toolCall']);
 
 /**
  * Serves Cursor inference to the API child this window spawned, over the child's private IPC
@@ -45,8 +67,17 @@ export class CursorBridge {
 	private readonly active = new Map<string, AbortController>();
 	private readonly onMessage = (message: unknown) => this.handle(message);
 	private readonly onChildGone = () => this.detach();
+	private readonly pacer: RequestPacer;
 
-	constructor(private readonly options: CursorBridgeOptions) {}
+	constructor(private readonly options: CursorBridgeOptions) {
+		this.pacer =
+			options.pacer ??
+			new RequestPacer({
+				maxConcurrent: CURSOR_PACING.maxConcurrentPerModel,
+				minIntervalMs: CURSOR_PACING.minIntervalMs,
+				maxWaitMs: CURSOR_PACING.maxWaitMs
+			});
+	}
 
 	attach(child: BridgeChild): void {
 		this.detach();
@@ -179,28 +210,93 @@ export class CursorBridge {
 
 		const controller = new AbortController();
 		this.active.set(id, controller);
-		const { session } = this.options;
 
 		try {
-			for await (const event of runInference({
-				request,
-				credentials: () => session.credentials(),
-				refresh: () => session.refresh(),
-				signal: controller.signal,
-				connect: this.options.connect
-			})) {
-				if (!this.emit(id, event)) {
-					controller.abort();
-				}
-				if (event.kind === 'end' && event.error && event.error.kind !== 'cancelled') {
-					this.options.onLog?.('warn', `[cursor] inference failed (${event.error.kind}): ${event.error.message}`);
-				}
-			}
+			await this.invokePaced(id, request, controller.signal);
 		} catch (error) {
 			const message = redactMessage(error instanceof Error ? error.message : 'Cursor inference failed');
 			this.emit(id, { kind: 'end', error: { kind: 'upstream', message } });
 		} finally {
 			this.active.delete(id);
+		}
+	}
+
+	/**
+	 * Runs one invocation inside the model's pacing lane. A rate limit or overload that arrives
+	 * before any output is retried after a backoff (the API is still waiting for its first
+	 * event, so nothing is duplicated); after output it only cools the lane down.
+	 */
+	private async invokePaced(id: string, request: CursorInferenceRequest, signal: AbortSignal): Promise<void> {
+		const { session } = this.options;
+		const lane = request.modelId;
+		const retries = this.options.retryDelaysMs ?? CURSOR_PACING.retryDelaysMs;
+
+		let readySent = false;
+
+		for (let attempt = 0; ; attempt++) {
+			let release;
+			try {
+				release = await this.pacer.acquire(lane, signal);
+			} catch (error) {
+				const timedOut = error instanceof PacerTimeoutError;
+				this.emit(id, {
+					kind: 'end',
+					error: timedOut
+						? { kind: 'rate_limit', message: 'Too many queued Cursor requests for this model; try again shortly' }
+						: { kind: 'cancelled', message: 'Request cancelled' }
+				});
+
+				return;
+			}
+
+			let outputStarted = false;
+			let retryAfter: number | null = null;
+
+			try {
+				for await (const event of runInference({
+					request,
+					credentials: () => session.credentials(),
+					refresh: () => session.refresh(),
+					signal,
+					connect: this.options.connect,
+					onLog: this.options.onLog
+				})) {
+					if (event.kind === 'end' && event.error && !outputStarted && !signal.aborted) {
+						if (RETRYABLE_BEFORE_OUTPUT.has(event.error.kind) && attempt < retries.length) {
+							retryAfter = retries[attempt];
+							this.pacer.penalize(lane, retryAfter);
+							this.options.onLog?.(
+								'info',
+								`[cursor] ${lane} ${event.error.kind} before output, retrying in ${retryAfter} ms (${attempt + 1}/${retries.length})`
+							);
+							break;
+						}
+					}
+
+					if (event.kind === 'end' && event.error?.kind === 'rate_limit') {
+						this.pacer.penalize(lane, CURSOR_PACING.cooldownMs);
+					}
+
+					// A retried run produces a second `ready`; the API only expects one.
+					if (event.kind === 'ready') {
+						if (readySent) continue;
+						readySent = true;
+					}
+					if (OUTPUT_KINDS.has(event.kind)) outputStarted = true;
+
+					if (!this.emit(id, event)) {
+						this.active.get(id)?.abort();
+					}
+					if (event.kind === 'end' && event.error && event.error.kind !== 'cancelled') {
+						this.options.onLog?.('warn', `[cursor] inference failed (${event.error.kind}): ${event.error.message}`);
+					}
+				}
+			} finally {
+				release();
+			}
+
+			// The penalty above holds the lane, so the next `acquire` waits out the backoff.
+			if (retryAfter === null) return;
 		}
 	}
 

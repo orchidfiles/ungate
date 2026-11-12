@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCursorTools, resolveCursorToolCapability, validateToolArguments } from 'src/adapter/cursor-tool-capability';
+import {
+	buildCursorTools,
+	EMBEDDED_TOOL_ARGUMENTS_INSTRUCTION,
+	findInvalidToolCalls,
+	resolveCursorToolCapability,
+	validateToolArguments
+} from 'src/adapter/cursor-tool-capability';
 import { CursorRequestError, openaiToCursor } from 'src/adapter/openai-to-cursor';
 
 import type { OpenAIChatRequest, OpenAITool } from 'src/types/openai';
@@ -75,7 +81,10 @@ describe('openaiToCursor', () => {
 			}),
 			{ upstreamModel: 'composer-2.5' }
 		);
-		expect(request.messages[0].parts?.parts).toEqual([{ text: { text: 'look' } }, { image: { data: 'AAAA', mimeType: 'image/png' } }]);
+		expect(request.messages[0].parts?.parts).toEqual([
+			{ text: { text: 'look' } },
+			{ image: { data: 'AAAA', mimeType: 'image/png' } }
+		]);
 
 		expect(() =>
 			openaiToCursor(
@@ -97,13 +106,9 @@ describe('openaiToCursor', () => {
 			{ messages: [{ role: 'user', content: [{ type: 'input_audio' }] }] } as never
 		];
 		for (const extra of cases) {
-			try {
-				openaiToCursor(body(extra), { upstreamModel: 'composer-2.5' });
-				expect.unreachable();
-			} catch (error) {
-				expect(error).toBeInstanceOf(CursorRequestError);
-				expect((error as CursorRequestError).status).toBe(400);
-			}
+			expect(() => openaiToCursor(body(extra), { upstreamModel: 'composer-2.5' })).toThrow(
+				expect.objectContaining({ name: 'CursorRequestError', status: 400 })
+			);
 		}
 	});
 
@@ -126,17 +131,61 @@ describe('Cursor tool capability', () => {
 		const [tool] = buildCursorTools([readTool], 'embedded');
 		expect(tool.parameters).toBeUndefined();
 		expect(tool.description).toBe(
-			`Read a file\n\nArguments must be a JSON object matching this JSON Schema:\n${JSON.stringify(readTool.function.parameters)}`
+			`Read a file\n\nArguments must be a JSON object matching this JSON Schema:\n${JSON.stringify(readTool.function.parameters)}\nRequired arguments: path. Never call this tool with an empty object.`
 		);
 		const [structured] = buildCursorTools([readTool], 'structured');
 		expect(structured).toEqual({ name: 'Read', description: 'Read a file', parameters: readTool.function.parameters });
 	});
 
 	it('validates required fields and types', () => {
-		const schema = readTool.function.parameters as Record<string, unknown>;
+		const schema = readTool.function.parameters!;
 		expect(validateToolArguments(schema, { path: 'a' })).toEqual([]);
 		expect(validateToolArguments(schema, {})).toEqual(['$.path is required']);
 		expect(validateToolArguments(schema, { path: 3 })).toEqual(['$.path should be string']);
 		expect(validateToolArguments(schema, [])).toEqual(['$ should be object']);
+	});
+
+	it('omits the required line for tools without required arguments', () => {
+		const [tool] = buildCursorTools(
+			[{ type: 'function', function: { name: 'List', parameters: { type: 'object', properties: {} } } }],
+			'embedded'
+		);
+		expect(tool.description).not.toContain('Required arguments');
+	});
+
+	it('finds empty, unparseable and mistyped tool calls', () => {
+		const invalid = findInvalidToolCalls(
+			[readTool],
+			[
+				{ id: 'a', name: 'Read', args: '{"path":"x"}' },
+				{ id: 'b', name: 'Read', args: '{}' },
+				{ id: 'c', name: 'Read', args: '' },
+				{ id: 'd', name: 'Read', args: '{"path":' },
+				{ id: 'e', name: 'Unknown', args: '{}' }
+			]
+		);
+		expect(invalid.map((call) => [call.id, call.problems])).toEqual([
+			['b', ['$.path is required']],
+			['c', ['$.path is required']],
+			['d', ['arguments are not valid JSON']]
+		]);
+	});
+
+	it('adds the tool-argument instruction for embedded mode only', () => {
+		const withSystem = body({
+			tools: [readTool],
+			messages: [
+				{ role: 'system', content: 'be brief' },
+				{ role: 'user', content: 'hi' }
+			] as OpenAIChatRequest['messages']
+		});
+		const embedded = openaiToCursor(withSystem, { upstreamModel: 'grok-4.7-high' }).request;
+		expect(embedded.messages.map((message) => message.text)).toEqual(['be brief', EMBEDDED_TOOL_ARGUMENTS_INSTRUCTION, 'hi']);
+
+		const structured = openaiToCursor(withSystem, { upstreamModel: 'composer-2.5' }).request;
+		expect(structured.messages.map((message) => message.text)).toEqual(['be brief', 'hi']);
+
+		const noTools = openaiToCursor(body(), { upstreamModel: 'grok-4.7-high' }).request;
+		expect(noTools.messages).toHaveLength(1);
 	});
 });

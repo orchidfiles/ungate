@@ -18,6 +18,18 @@ export class CursorOriginError extends Error {
 	}
 }
 
+const TRANSIENT_DNS_CODES = new Set(['EAI_AGAIN', 'ENOTFOUND']);
+
+/** A DNS lookup that may succeed on a second try (resolver hiccup, network switch). */
+export function isTransientDnsError(error: unknown): boolean {
+	if (!error || typeof error !== 'object') return false;
+	const code = (error as { code?: unknown }).code;
+	if (typeof code === 'string' && TRANSIENT_DNS_CODES.has(code)) return true;
+	const message = (error as { message?: unknown }).message;
+
+	return typeof message === 'string' && /getaddrinfo (EAI_AGAIN|ENOTFOUND)/i.test(message);
+}
+
 export class ConnectProtocolError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -149,15 +161,25 @@ export interface BidiStream {
 	items(): AsyncIterable<BidiStreamItem>;
 }
 
-/** Opens a bidirectional Connect-JSON stream over HTTP/2 to an allowlisted Cursor origin. */
+/**
+ * Opens a bidirectional Connect-JSON stream over HTTP/2 to an allowlisted Cursor origin.
+ * Writes are kept until the first response arrives so that a transient DNS failure on the
+ * session (`EAI_AGAIN` / `ENOTFOUND`, before Cursor saw anything) can be retried once on a
+ * fresh session by replaying them. Once a response starts, errors go to the consumer as-is.
+ */
 export function openBidiStream(options: BidiStreamOptions): BidiStream {
 	const origin = assertCursorOrigin(options.url);
 	const connect = options.connect ?? ((authority: string) => http2.connect(authority));
-	const session = connect(origin);
 	const queue: BidiStreamItem[] = [];
 	let notify: (() => void) | null = null;
 	let finished = false;
+	let responded = false;
+	let dnsRetried = false;
+	let ended = false;
+	const pending: Buffer[] = [];
 	const decoder = new ConnectFrameDecoder();
+	let session!: http2.ClientHttp2Session;
+	let stream!: http2.ClientHttp2Stream;
 
 	const push = (item: BidiStreamItem) => {
 		if (finished) return;
@@ -166,20 +188,6 @@ export function openBidiStream(options: BidiStreamOptions): BidiStream {
 		notify?.();
 		notify = null;
 	};
-
-	session.on('error', (error: Error) => push({ type: 'error', error }));
-
-	const stream = session.request(
-		{
-			...sanitizeRequestHeaders(options.headers),
-			':method': 'POST',
-			':path': options.path,
-			'content-type': 'application/connect+json',
-			'connect-protocol-version': '1',
-			'connect-timeout-ms': String(options.deadlineMs)
-		},
-		{ endStream: false }
-	);
 
 	const deadline = setTimeout(() => {
 		push({ type: 'error', error: new ConnectProtocolError('deadline_exceeded') });
@@ -193,64 +201,115 @@ export function openBidiStream(options: BidiStreamOptions): BidiStream {
 
 	options.signal?.addEventListener('abort', onAbort, { once: true });
 
-	function close(): void {
-		clearTimeout(deadline);
-		options.signal?.removeEventListener('abort', onAbort);
-
+	function closeTransport(current: http2.ClientHttp2Session, currentStream: http2.ClientHttp2Stream): void {
 		try {
-			stream.close(http2.constants.NGHTTP2_CANCEL);
+			currentStream.close(http2.constants.NGHTTP2_CANCEL);
 		} catch {
 			// already closed
 		}
 
-		session.close();
+		current.close();
 	}
 
-	stream.on('response', (headers) => {
-		const status = Number(headers[':status'] ?? 0);
-		push({ type: 'status', status });
-	});
+	function close(): void {
+		clearTimeout(deadline);
+		options.signal?.removeEventListener('abort', onAbort);
+		closeTransport(session, stream);
+	}
 
-	stream.on('data', (chunk: Buffer) => {
-		try {
-			for (const frame of decoder.push(chunk)) {
-				push({ type: 'frame', frame });
+	/** True when the failure was handled by reconnecting. */
+	function retryOnDns(error: unknown): boolean {
+		if (responded || dnsRetried || finished || !isTransientDnsError(error)) return false;
+		dnsRetried = true;
+		closeTransport(session, stream);
+		open();
+
+		return true;
+	}
+
+	function open(): void {
+		const current = connect(origin);
+		session = current;
+		current.on('error', (error: Error) => {
+			if (current !== session) return;
+			if (retryOnDns(error)) return;
+			push({ type: 'error', error });
+		});
+
+		const currentStream = current.request(
+			{
+				...sanitizeRequestHeaders(options.headers),
+				':method': 'POST',
+				':path': options.path,
+				'content-type': 'application/connect+json',
+				'connect-protocol-version': '1',
+				'connect-timeout-ms': String(options.deadlineMs)
+			},
+			{ endStream: false }
+		);
+		stream = currentStream;
+
+		currentStream.on('response', (headers) => {
+			if (currentStream !== stream) return;
+			responded = true;
+			pending.length = 0;
+			push({ type: 'status', status: Number(headers[':status'] ?? 0) });
+		});
+
+		currentStream.on('data', (chunk: Buffer) => {
+			if (currentStream !== stream) return;
+			responded = true;
+
+			try {
+				for (const frame of decoder.push(chunk)) {
+					push({ type: 'frame', frame });
+				}
+			} catch (error) {
+				push({ type: 'error', error: error instanceof Error ? error : new ConnectProtocolError(String(error)) });
+				close();
 			}
-		} catch (error) {
-			push({ type: 'error', error: error instanceof Error ? error : new ConnectProtocolError(String(error)) });
+		});
+
+		currentStream.on('end', () => {
+			if (currentStream !== stream) return;
+
+			if (decoder.pendingBytes() > 0) {
+				push({ type: 'error', error: new ConnectProtocolError('stream ended mid-frame') });
+			} else {
+				push({ type: 'closed' });
+			}
+
 			close();
-		}
-	});
+		});
 
-	stream.on('end', () => {
-		if (decoder.pendingBytes() > 0) {
-			push({ type: 'error', error: new ConnectProtocolError('stream ended mid-frame') });
-		} else {
-			push({ type: 'closed' });
-		}
+		currentStream.on('error', (error: Error) => {
+			if (currentStream !== stream) return;
+			if (retryOnDns(error)) return;
+			push({ type: 'error', error });
+			close();
+		});
 
-		close();
-	});
+		for (const chunk of pending) currentStream.write(chunk);
+		if (ended) currentStream.end();
+	}
 
-	stream.on('error', (error: Error) => {
-		push({ type: 'error', error });
-		close();
-	});
+	open();
 
 	if (options.signal?.aborted) {
 		onAbort();
 	}
 
+	const writable = () => !stream.closed && !stream.destroyed && stream.writable;
+
 	return {
 		write(message: unknown) {
-			if (!stream.closed && !stream.destroyed && stream.writable) {
-				stream.write(encodeEnvelope(message));
-			}
+			const chunk = encodeEnvelope(message);
+			if (!responded && !dnsRetried) pending.push(chunk);
+			if (writable()) stream.write(chunk);
 		},
 		end() {
-			if (!stream.closed && !stream.destroyed && stream.writable) {
-				stream.end();
-			}
+			ended = true;
+			if (writable()) stream.end();
 		},
 		close,
 		items(): AsyncIterable<BidiStreamItem> {
@@ -292,8 +351,21 @@ export interface UnaryResult {
 	body: unknown;
 }
 
-/** Connect unary call with a JSON body over HTTP/2 to an allowlisted Cursor origin. */
+/**
+ * Connect unary call with a JSON body over HTTP/2 to an allowlisted Cursor origin.
+ * A transient DNS failure is retried once on a fresh session: it happens before any byte is sent.
+ */
 export async function connectUnary(options: UnaryOptions): Promise<UnaryResult> {
+	try {
+		return await connectUnaryOnce(options);
+	} catch (error) {
+		if (!isTransientDnsError(error)) throw error;
+
+		return await connectUnaryOnce(options);
+	}
+}
+
+async function connectUnaryOnce(options: UnaryOptions): Promise<UnaryResult> {
 	const origin = assertCursorOrigin(options.url);
 	const connect = options.connect ?? ((authority: string) => http2.connect(authority));
 	const maxBytes = options.maxResponseBytes ?? 4 * 1024 * 1024;
