@@ -1,5 +1,8 @@
+import { desc } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { getDb, schema } from 'src/database';
+import { ClientKeys } from 'src/database/client-keys';
 import { OAuthAccounts, type OAuthAccountRow } from 'src/database/oauth-accounts';
 import { proxyRequest } from 'src/proxy/anthropic-client';
 import { OpenAiClient } from 'src/proxy/openai-client';
@@ -421,6 +424,23 @@ describe('Codex SSE gate and failure surfacing', () => {
 		expect(OAuthAccounts.get(a.id)?.cooldownUntil).toBe(reset * 1000);
 		expect(OAuthAccounts.get(a.id)?.cooldownReason).toBe('codex_usage_limit_reached');
 		expect(OAuthAccounts.policy('openai').activeAccountId).toBe(a.id);
+	});
+
+	it('streaming: a stream complete in its first chunk records the caller and account', async () => {
+		const a = add('openai', 'a');
+		const client = ClientKeys.create('coda-agent').client;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => Promise.resolve(sseResponse([codexText('one chunk').join('')]).response))
+		);
+
+		const result = await OpenAiClient.proxy(codexBody(true), undefined, { clientId: client.id });
+		await readAll(result.response.body);
+
+		const row = getDb().select().from(schema.requests).orderBy(desc(schema.requests.id)).get();
+		expect(row?.clientId).toBe(client.id);
+		expect(row?.accountId).toBe(a.id);
+		expect(row?.inputTokens).toBe(3);
 	});
 
 	it('streaming: downstream cancel cancels the upstream reader', async () => {

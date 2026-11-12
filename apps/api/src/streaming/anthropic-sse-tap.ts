@@ -1,5 +1,7 @@
 import { RequestHeuristics } from '../metrics/request-heuristics';
 
+import { tapSse, type SseTapEnd, type SseTapReader } from './sse-tap';
+
 import type { AnthropicStreamEvent } from '../types/anthropic-stream';
 import type { StopReason } from '@ungate/shared';
 
@@ -27,143 +29,121 @@ export interface AnthropicSseTapHooks {
 
 const MAX_CARRY = 256 * 1024;
 
+/** Reads Anthropic stream events into an `AnthropicStreamSummary`. */
+class AnthropicStreamReader implements SseTapReader<AnthropicStreamSummary> {
+	private buffer = '';
+	private sawMessageStop = false;
+	private rawStopReason: string | null = null;
+	private streamError: string | null = null;
+	private errorReported = false;
+	private readonly summary: AnthropicStreamSummary = {
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: null,
+		cacheCreationTokens: null,
+		reasoningChars: null,
+		toolNames: [],
+		firstTokenAt: null,
+		stopReason: 'unknown',
+		error: null
+	};
+
+	constructor(private readonly onError?: AnthropicSseTapHooks['onError']) {}
+
+	read(text: string): void {
+		this.buffer += text;
+		const lines = this.buffer.split('\n');
+		this.buffer = lines.pop() ?? '';
+		for (const line of lines) {
+			if (!line.startsWith('data:')) continue;
+			try {
+				this.handle(JSON.parse(line.slice(5).trim()) as AnthropicStreamEvent);
+			} catch {
+				// Not JSON: the bytes are still forwarded; only the summary skips it.
+			}
+		}
+		if (this.buffer.length > MAX_CARRY) this.buffer = '';
+	}
+
+	finish(end: SseTapEnd): AnthropicStreamSummary {
+		const summary = this.summary;
+		if (this.streamError !== null) {
+			summary.stopReason = 'error';
+			summary.error = this.streamError;
+		} else if (end.kind === 'aborted') {
+			summary.stopReason = 'aborted';
+			summary.error = 'Client cancelled stream';
+		} else if (end.kind === 'failed') {
+			summary.stopReason = 'error';
+			summary.error = `Upstream stream failed: ${String(end.error)}`;
+		} else if (!this.sawMessageStop) {
+			summary.stopReason = 'error';
+			summary.error = 'Upstream stream ended before message_stop';
+		} else {
+			summary.stopReason = RequestHeuristics.normalizeStopReason(this.rawStopReason);
+		}
+
+		return summary;
+	}
+
+	private handle(event: AnthropicStreamEvent): void {
+		const summary = this.summary;
+		switch (event.type) {
+			case 'message_start': {
+				const usage = event.message?.usage;
+				if (!usage) return;
+				const cacheRead = usage.cache_read_input_tokens ?? 0;
+				const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+				summary.inputTokens = (usage.input_tokens ?? 0) + cacheRead + cacheCreation;
+				summary.outputTokens = usage.output_tokens ?? 0;
+				summary.cacheReadTokens = cacheRead;
+				summary.cacheCreationTokens = cacheCreation;
+
+				return;
+			}
+			case 'content_block_start':
+				if (event.content_block?.type === 'tool_use') {
+					summary.toolNames.push(event.content_block.name);
+					summary.firstTokenAt ??= Date.now();
+				}
+
+				return;
+			case 'content_block_delta':
+				if (event.delta?.type === 'text_delta') summary.firstTokenAt ??= Date.now();
+				if (event.delta?.type === 'thinking_delta') {
+					summary.firstTokenAt ??= Date.now();
+					summary.reasoningChars = (summary.reasoningChars ?? 0) + (event.delta.thinking?.length ?? 0);
+				}
+
+				return;
+			case 'message_delta':
+				if (event.delta?.stop_reason) this.rawStopReason = event.delta.stop_reason;
+				if (event.usage) summary.outputTokens = event.usage.output_tokens ?? summary.outputTokens;
+
+				return;
+			case 'message_stop':
+				this.sawMessageStop = true;
+
+				return;
+			case 'error':
+				this.streamError = event.error?.message ?? event.error?.type ?? 'Upstream stream error';
+				if (!this.errorReported) {
+					this.errorReported = true;
+					this.onError?.(event.error as Record<string, unknown> | undefined);
+				}
+
+				return;
+			default:
+		}
+	}
+}
+
 /**
  * Byte-for-byte passthrough of an Anthropic SSE body that reads usage, stop reason, tool names and
  * `error` events as they pass. Downstream cancellation cancels the upstream body.
  */
 export class AnthropicSseTap {
 	static observe(body: ReadableStream<Uint8Array>, hooks: AnthropicSseTapHooks): ReadableStream<Uint8Array> {
-		const decoder = new TextDecoder();
-		const reader = body.getReader();
-		let buffer = '';
-		let ended = false;
-		let errorReported = false;
-		let sawMessageStop = false;
-		let rawStopReason: string | null = null;
-		let streamError: string | null = null;
-		const summary: AnthropicStreamSummary = {
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheReadTokens: null,
-			cacheCreationTokens: null,
-			reasoningChars: null,
-			toolNames: [],
-			firstTokenAt: null,
-			stopReason: 'unknown',
-			error: null
-		};
-
-		const handle = (event: AnthropicStreamEvent) => {
-			switch (event.type) {
-				case 'message_start': {
-					const usage = event.message?.usage;
-					if (!usage) return;
-					const cacheRead = usage.cache_read_input_tokens ?? 0;
-					const cacheCreation = usage.cache_creation_input_tokens ?? 0;
-					summary.inputTokens = (usage.input_tokens ?? 0) + cacheRead + cacheCreation;
-					summary.outputTokens = usage.output_tokens ?? 0;
-					summary.cacheReadTokens = cacheRead;
-					summary.cacheCreationTokens = cacheCreation;
-
-					return;
-				}
-				case 'content_block_start':
-					if (event.content_block?.type === 'tool_use') {
-						summary.toolNames.push(event.content_block.name);
-						summary.firstTokenAt ??= Date.now();
-					}
-
-					return;
-				case 'content_block_delta':
-					if (event.delta?.type === 'text_delta') summary.firstTokenAt ??= Date.now();
-					if (event.delta?.type === 'thinking_delta') {
-						summary.firstTokenAt ??= Date.now();
-						summary.reasoningChars = (summary.reasoningChars ?? 0) + (event.delta.thinking?.length ?? 0);
-					}
-
-					return;
-				case 'message_delta':
-					if (event.delta?.stop_reason) rawStopReason = event.delta.stop_reason;
-					if (event.usage) summary.outputTokens = event.usage.output_tokens ?? summary.outputTokens;
-
-					return;
-				case 'message_stop':
-					sawMessageStop = true;
-
-					return;
-				case 'error':
-					streamError = event.error?.message ?? event.error?.type ?? 'Upstream stream error';
-					if (!errorReported) {
-						errorReported = true;
-						hooks.onError?.(event.error as Record<string, unknown> | undefined);
-					}
-
-					return;
-				default:
-			}
-		};
-
-		const scan = (text: string) => {
-			buffer += text;
-			const lines = buffer.split('\n');
-			buffer = lines.pop() ?? '';
-			for (const line of lines) {
-				if (!line.startsWith('data:')) continue;
-				try {
-					handle(JSON.parse(line.slice(5).trim()) as AnthropicStreamEvent);
-				} catch {
-					// Not JSON: the bytes are still forwarded; only the summary skips it.
-				}
-			}
-			if (buffer.length > MAX_CARRY) buffer = '';
-		};
-
-		const end = (cause: 'complete' | 'aborted' | 'failed', failure?: unknown) => {
-			if (ended) return;
-			ended = true;
-
-			if (streamError !== null) {
-				summary.stopReason = 'error';
-				summary.error = streamError;
-			} else if (cause === 'aborted') {
-				summary.stopReason = 'aborted';
-				summary.error = 'Client cancelled stream';
-			} else if (cause === 'failed') {
-				summary.stopReason = 'error';
-				summary.error = `Upstream stream failed: ${String(failure)}`;
-			} else if (!sawMessageStop) {
-				summary.stopReason = 'error';
-				summary.error = 'Upstream stream ended before message_stop';
-			} else {
-				summary.stopReason = RequestHeuristics.normalizeStopReason(rawStopReason);
-			}
-
-			hooks.onEnd(summary);
-		};
-
-		return new ReadableStream<Uint8Array>({
-			async pull(controller) {
-				try {
-					const { done, value } = await reader.read();
-					if (done) {
-						scan(decoder.decode());
-						end('complete');
-						controller.close();
-
-						return;
-					}
-					controller.enqueue(value);
-					scan(decoder.decode(value, { stream: true }));
-				} catch (error) {
-					end('failed', error);
-					controller.error(error);
-				}
-			},
-			cancel(reason) {
-				end('aborted');
-
-				return reader.cancel(reason).catch(() => undefined);
-			}
-		});
+		return tapSse(body, new AnthropicStreamReader(hooks.onError), hooks.onEnd);
 	}
 }

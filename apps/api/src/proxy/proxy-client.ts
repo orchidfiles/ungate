@@ -1,4 +1,4 @@
-import { detectProviderByModel } from '@ungate/shared';
+import { detectProviderByModel, type RequestTelemetry } from '@ungate/shared';
 
 import { openaiToAnthropic } from '../adapter/openai-to-anthropic';
 
@@ -31,12 +31,13 @@ export async function proxyRequest(
 export async function proxyOpenAIRequest(
 	openaiBody: OpenAIChatRequest,
 	provider?: AIProviderName,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	requestTelemetry: RequestTelemetry = {}
 ): Promise<{ response: Response; context: RequestContext }> {
 	const resolved = provider ?? detectProvider(openaiBody.model);
 
 	if (resolved === 'openai') {
-		return OpenAiClient.proxy(openaiBody, signal);
+		return OpenAiClient.proxy(openaiBody, signal, requestTelemetry);
 	}
 
 	if (resolved === 'minimax') {

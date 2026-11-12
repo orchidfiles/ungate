@@ -20,6 +20,7 @@ import cursorPlugin from './routes/cursor';
 import healthPlugin from './routes/health';
 import modelsPlugin from './routes/models';
 import openaiPlugin from './routes/openai';
+import responsesPlugin from './routes/responses';
 import settingsPlugin from './routes/settings';
 
 /** Dashboard webviews call account routes cross-origin; PATCH/DELETE must pass the preflight. */
@@ -50,6 +51,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 	await app.register(healthPlugin);
 	await app.register(anthropicPlugin);
 	await app.register(openaiPlugin);
+	await app.register(responsesPlugin);
 	await app.register(clientPlugin);
 	await app.register(modelsPlugin);
 
