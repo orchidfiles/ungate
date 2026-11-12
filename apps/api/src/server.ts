@@ -14,6 +14,7 @@ import { cursorBridgeSocketPath, SocketBridgeTransport } from './proxy/cursor-br
 import analyticsPlugin from './routes/analytics';
 import anthropicPlugin from './routes/anthropic';
 import authPlugin from './routes/auth';
+import clientPlugin from './routes/client';
 import clientsPlugin from './routes/clients';
 import cursorPlugin from './routes/cursor';
 import healthPlugin from './routes/health';
@@ -38,8 +39,9 @@ function removeSocketOnShutdown(transport: SocketBridgeTransport): void {
 }
 
 /**
- * Model routes (`/v1/messages`, `/v1/chat/completions`) take a client key and record the client;
- * `/health` and the `/v1/models` list stay open. Everything else reads or changes state and
+ * Model routes (`/v1/messages`, `/v1/chat/completions`, `/v1/responses`) take a client key and
+ * record the client, and `/v1/client` names the key's client; `/health` and the `/v1/models` list
+ * stay open. Everything else reads or changes state and
  * answers only direct loopback requests, whatever key is sent; see `directLocalOnly`.
  */
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
@@ -48,6 +50,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 	await app.register(healthPlugin);
 	await app.register(anthropicPlugin);
 	await app.register(openaiPlugin);
+	await app.register(clientPlugin);
 	await app.register(modelsPlugin);
 
 	await app.register(async (admin) => {
