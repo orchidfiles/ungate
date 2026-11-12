@@ -8,7 +8,7 @@ import {
 	MiniMaxChatHandler,
 	OpenAiMappedChatHandler
 } from 'src/orchestration/openai/provider-handlers';
-import { apiKeyAuth } from 'src/plugins/auth';
+import { clientKeyAuth } from 'src/plugins/auth';
 import { logger } from 'src/utils/logger';
 
 import type { RequestTelemetry } from '@ungate/shared';
@@ -33,14 +33,14 @@ function requestTelemetry(body: OpenAIChatRequest, reasoningTier: string | null 
 const plugin: FastifyPluginCallback = (app) => {
 	const { config } = app;
 
-	app.post('/v1/chat/completions', { onRequest: apiKeyAuth(config) }, async (request, reply) => {
+	app.post('/v1/chat/completions', { onRequest: clientKeyAuth(config) }, async (request, reply) => {
 		try {
 			const openaiBody = request.body as OpenAIChatRequest;
 			const resolvedModel = ModelMappings.resolveForChatCompletion(
 				openaiBody.model,
 				openaiBody.reasoning_effort ?? openaiBody.reasoning?.effort ?? null
 			);
-			const telemetry = requestTelemetry(openaiBody, resolvedModel?.reasoningBudget);
+			const telemetry = { ...requestTelemetry(openaiBody, resolvedModel?.reasoningBudget), clientId: request.clientId };
 
 			// Branch order matters: MiniMax (mapping or name prefix) -> DB-mapped OpenAI -> DB-mapped Cursor -> default Claude.
 			// A Cursor mapping never falls through to Claude.

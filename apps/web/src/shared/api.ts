@@ -14,6 +14,9 @@ import {
 	type AccountUsageRefreshRequest,
 	type AnalyticsSummary,
 	type AppSettings,
+	type ClientKeyCreateResponse,
+	type ClientKeyListResponse,
+	type ClientUsage,
 	type CursorBridgeError,
 	type CursorModelInfo,
 	type CursorSessionStatus,
@@ -181,6 +184,26 @@ export class Api {
 
 	static resetAnalytics(): Promise<{ success: boolean; deletedCount: number }> {
 		return this.post('/analytics/reset');
+	}
+
+	static fetchClientUsage(period: Period): Promise<{ period: Period; clients: ClientUsage[] }> {
+		return this.get(`/analytics/clients?period=${period}`);
+	}
+
+	static clientList(): Promise<ClientKeyListResponse> {
+		return this.get('/clients');
+	}
+
+	static clientCreate(label: string): Promise<ClientKeyCreateResponse> {
+		return this.post('/clients', { label });
+	}
+
+	static clientRename(id: string, label: string): Promise<ClientKeyListResponse> {
+		return this.patch(`/clients/${encodeURIComponent(id)}`, { label });
+	}
+
+	static clientRevoke(id: string): Promise<ClientKeyListResponse> {
+		return this.post(`/clients/${encodeURIComponent(id)}/revoke`);
 	}
 
 	static fetchSettings(): Promise<AppSettings> {

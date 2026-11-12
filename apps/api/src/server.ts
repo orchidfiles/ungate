@@ -1,5 +1,5 @@
 import cors, { type FastifyCorsOptions } from '@fastify/cors';
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 
 import { logger, setQuietMode } from 'src/utils/logger';
 
@@ -8,11 +8,13 @@ const BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 import { getConfig } from './config';
 import { getDb } from './database/index';
 import { Settings } from './database/settings';
+import { directLocalOnly } from './plugins/local-or-api-key';
 import { bridgeTransport } from './proxy/cursor-bridge-client';
 import { cursorBridgeSocketPath, SocketBridgeTransport } from './proxy/cursor-bridge-transport';
 import analyticsPlugin from './routes/analytics';
 import anthropicPlugin from './routes/anthropic';
 import authPlugin from './routes/auth';
+import clientsPlugin from './routes/clients';
 import cursorPlugin from './routes/cursor';
 import healthPlugin from './routes/health';
 import modelsPlugin from './routes/models';
@@ -33,6 +35,29 @@ function removeSocketOnShutdown(transport: SocketBridgeTransport): void {
 			void transport.close().finally(() => process.kill(process.pid, signal));
 		});
 	}
+}
+
+/**
+ * Model routes (`/v1/messages`, `/v1/chat/completions`) take a client key and record the client;
+ * `/health` and the `/v1/models` list stay open. Everything else reads or changes state and
+ * answers only direct loopback requests, whatever key is sent; see `directLocalOnly`.
+ */
+export async function registerRoutes(app: FastifyInstance): Promise<void> {
+	app.decorateRequest('clientId', null);
+
+	await app.register(healthPlugin);
+	await app.register(anthropicPlugin);
+	await app.register(openaiPlugin);
+	await app.register(modelsPlugin);
+
+	await app.register(async (admin) => {
+		admin.addHook('onRequest', directLocalOnly);
+		await admin.register(authPlugin);
+		await admin.register(cursorPlugin);
+		await admin.register(analyticsPlugin);
+		await admin.register(settingsPlugin);
+		await admin.register(clientsPlugin);
+	});
 }
 
 export async function startServer(): Promise<void> {
@@ -63,14 +88,7 @@ export async function startServer(): Promise<void> {
 	await app.register(cors, CORS_OPTIONS);
 
 	globalThis.console.log('[startup] register plugins...');
-	await app.register(healthPlugin);
-	await app.register(authPlugin);
-	await app.register(cursorPlugin);
-	await app.register(anthropicPlugin);
-	await app.register(openaiPlugin);
-	await app.register(modelsPlugin);
-	await app.register(analyticsPlugin);
-	await app.register(settingsPlugin);
+	await registerRoutes(app);
 
 	globalThis.console.log(`[startup] listen ${config.port}...`);
 	await app.listen({ port: config.port, host: '0.0.0.0' });

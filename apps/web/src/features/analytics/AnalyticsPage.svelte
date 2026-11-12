@@ -8,6 +8,7 @@ import { Formatter } from '$shared/formatter';
 
 import InsightsSection from './insights/InsightsSection.svelte';
 import { getAnalyticsStore } from './analytics-store.svelte';
+import ClientUsageTable from './ClientUsageTable.svelte';
 import RequestList from './RequestList.svelte';
 import StatCard from './StatCard.svelte';
 import TokenChart from './TokenChart.svelte';
@@ -105,6 +106,8 @@ function handleConfirmReset() {
 		<TokenChart
 			series={store.tokenSeries}
 			period={store.period} />
+
+		<ClientUsageTable clients={store.clientUsage} />
 
 		<InsightsSection />
 	{/if}

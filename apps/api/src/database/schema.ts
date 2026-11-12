@@ -92,13 +92,34 @@ export const requests = sqliteTable(
 		turnIndex: integer(),
 		messageCount: integer(),
 		continuation: integer({ mode: 'boolean' }),
-		firstTokenMs: integer()
+		firstTokenMs: integer(),
+		/** `client_keys.id` of the caller; null for rows recorded before clients existed or with auth off. */
+		clientId: text()
 	},
 	(table) => [
 		index('requests_timestamp_idx').on(table.timestamp),
 		index('requests_session_key_idx').on(table.sessionKey, table.timestamp),
-		index('requests_account_timestamp_idx').on(table.accountId, table.timestamp)
+		index('requests_account_timestamp_idx').on(table.accountId, table.timestamp),
+		index('requests_client_timestamp_idx').on(table.clientId, table.timestamp)
 	]
 );
 
-export const schema = { appSettings, requests, providerSettings, modelMappings, oauthAccounts, oauthPolicies };
+/**
+ * Callers of the model routes. `kind = 'settings'` is the one row whose key is `app_settings.api_key`
+ * (the key pasted into Cursor); it has no hash here. `kind = 'minted'` rows hold only the SHA-256 of
+ * a key shown once at creation.
+ */
+export const clientKeys = sqliteTable(
+	'client_keys',
+	{
+		id: text().primaryKey(),
+		kind: text().notNull(),
+		label: text().notNull(),
+		keyHash: text(),
+		createdAt: integer().notNull(),
+		revokedAt: integer()
+	},
+	(table) => [index('client_keys_key_hash_idx').on(table.keyHash)]
+);
+
+export const schema = { appSettings, requests, providerSettings, modelMappings, oauthAccounts, oauthPolicies, clientKeys };
