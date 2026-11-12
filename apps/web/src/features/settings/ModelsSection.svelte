@@ -58,7 +58,8 @@ const upstreamPlaceholders: Record<ModelMappingProvider, string> = {
 	claude: 'claude-sonnet-4-6',
 	openai: 'gpt-5.6',
 	minimax: 'MiniMax-M2.7',
-	cursor: 'grok-4.7-low-fast'
+	cursor: 'grok-4.7-low-fast',
+	gemini: 'gemini-4-carbon'
 };
 
 function commit(nextModels: ModelMappingConfig[]) {

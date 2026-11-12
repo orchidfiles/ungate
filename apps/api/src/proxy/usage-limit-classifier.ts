@@ -183,12 +183,93 @@ function classifyAnthropic(input: UpstreamErrorInput, now: number): UsageLimitCl
 	);
 }
 
+/** Longest `RetryInfo.retryDelay` still treated as request throttling (gemini-cli's `MAX_RETRYABLE_DELAY_SECONDS`). */
+const GEMINI_MAX_THROTTLE_MS = 5 * 60_000;
+
+/** `"34.07s"` / `"900ms"` (google.rpc.RetryInfo duration) → ms. */
+function parseGoogleDuration(value: unknown): number | undefined {
+	if (typeof value !== 'string') return undefined;
+	const match = /^([0-9.]+)(ms|s)$/.exec(value.trim());
+	if (!match) return undefined;
+	const amount = Number(match[1]);
+	if (!Number.isFinite(amount)) return undefined;
+
+	return match[2] === 'ms' ? amount : amount * 1000;
+}
+
+/** Google API errors arrive as `{ error }` or, on the SSE endpoint, as `[{ error }]`. */
+function googleError(body: unknown): Record<string, unknown> | undefined {
+	const root = Array.isArray(body) ? body[0] : body;
+
+	return record(record(root)?.error) ?? record(root);
+}
+
+function googleDetail(details: unknown, type: string): Record<string, unknown> | undefined {
+	if (!Array.isArray(details)) return undefined;
+
+	return details.map(record).find((detail) => typeof detail?.['@type'] === 'string' && detail['@type'].endsWith(type));
+}
+
+/**
+ * Gemini Code Assist (`cloudcode-pa.googleapis.com/v1internal`).
+ *
+ * Source: gemini-cli `packages/core/src/utils/googleQuotaErrors.ts`. Errors are google.rpc statuses
+ * `{ error: { code, message, status, details: [ErrorInfo, RetryInfo, QuotaFailure] } }`:
+ * - 429 `ErrorInfo.reason == QUOTA_EXHAUSTED`, a `PerDay`/`Daily` `QuotaFailure` violation, a
+ *   `limit: 0` message, or `RATE_LIMIT_EXCEEDED` with no / a > 5 min `RetryInfo.retryDelay` → the
+ *   account's quota is spent (gemini-cli's `TerminalQuotaError`); reset from `retryDelay`.
+ * - 403 `ErrorInfo.reason == SUBSCRIPTION_REQUIRED` → this account cannot serve the model: rotate.
+ * - Short `RATE_LIMIT_EXCEEDED` / per-minute limits are throttling, and `MODEL_CAPACITY_EXHAUSTED`
+ *   is Google-side capacity (another account would hit the same wall): neither rotates.
+ */
+function classifyGemini(input: UpstreamErrorInput, now: number): UsageLimitClassification {
+	const error = googleError(input.body);
+	const info = googleDetail(error?.details, 'google.rpc.ErrorInfo');
+	const reason = typeof info?.reason === 'string' ? info.reason : undefined;
+	const message = typeof error?.message === 'string' ? error.message : '';
+
+	if (input.status === 403) {
+		return reason === 'SUBSCRIPTION_REQUIRED' ? limited('gemini_subscription_required', now) : other('gemini_forbidden');
+	}
+	if (input.status !== 429) return other('gemini_not_429');
+	if (reason === 'MODEL_CAPACITY_EXHAUSTED' || reason === 'MODEL_CAPACITY_EXCEEDED') return other('gemini_model_capacity');
+
+	const delay = parseGoogleDuration(googleDetail(error?.details, 'google.rpc.RetryInfo')?.retryDelay);
+	const retryAfter = parseRetryAfter(input.headers, now);
+	const resets = [
+		delay !== undefined ? { at: now + delay, source: 'retry-delay' } : undefined,
+		retryAfter !== undefined ? { at: retryAfter, source: 'retry-after' } : undefined
+	];
+	const violations = googleDetail(error?.details, 'google.rpc.QuotaFailure')?.violations;
+	const daily =
+		Array.isArray(violations) &&
+		violations.some((violation) => {
+			const quotaId = record(violation)?.quotaId;
+
+			return typeof quotaId === 'string' && /PerDay|Daily/.test(quotaId);
+		});
+
+	if (reason === 'QUOTA_EXHAUSTED' || daily || /limit:\s*0(?!\d|\.\d)/i.test(message)) {
+		return limited('gemini_quota_exhausted', now, ...resets);
+	}
+	if (reason === 'RATE_LIMIT_EXCEEDED' && (delay === undefined || delay > GEMINI_MAX_THROTTLE_MS)) {
+		return limited('gemini_quota_exhausted', now, ...resets);
+	}
+
+	return other('gemini_rate_limited');
+}
+
 /** Codex in-stream error codes that may describe an exhausted plan window (anything else never rotates). */
 const CODEX_STREAM_LIMIT_CODES = new Set(['usage_limit_reached', 'rate_limit_exceeded']);
 
+const STREAM_ERROR_PREFIX: Record<SubscriptionProvider, string> = { claude: 'anthropic', openai: 'codex', gemini: 'gemini' };
+
 export class UsageLimitClassifier {
 	static classify(provider: SubscriptionProvider, input: UpstreamErrorInput, now = Date.now()): UsageLimitClassification {
-		return provider === 'openai' ? classifyCodex(input, now) : classifyAnthropic(input, now);
+		if (provider === 'openai') return classifyCodex(input, now);
+		if (provider === 'gemini') return classifyGemini(input, now);
+
+		return classifyAnthropic(input, now);
 	}
 
 	/**
@@ -206,7 +287,13 @@ export class UsageLimitClassifier {
 		error: Record<string, unknown> | undefined,
 		now = Date.now()
 	): UsageLimitClassification {
-		if (!error) return other(`${provider === 'openai' ? 'codex' : 'anthropic'}_stream_error`);
+		if (!error) return other(`${STREAM_ERROR_PREFIX[provider]}_stream_error`);
+		if (provider === 'gemini') {
+			// A Code Assist stream error is a google.rpc status; only RESOURCE_EXHAUSTED can be a quota.
+			if (error.code !== 429 && error.status !== 'RESOURCE_EXHAUSTED') return other('gemini_stream_error');
+
+			return classifyGemini({ status: 429, headers, body: { error } }, now);
+		}
 		if (provider === 'openai') {
 			if (![error.type, error.code].some((value) => typeof value === 'string' && CODEX_STREAM_LIMIT_CODES.has(value))) {
 				return other('codex_stream_error');

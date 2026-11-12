@@ -1,11 +1,11 @@
 export type ReasoningBudgetTier = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-export type ModelMappingProvider = 'claude' | 'minimax' | 'openai' | 'cursor';
+export type ModelMappingProvider = 'claude' | 'minimax' | 'openai' | 'cursor' | 'gemini';
 export type ModelServiceTier = 'default' | 'priority';
 /** How tool schemas are sent to Cursor-hosted models; `auto` picks per model. */
 export type CursorToolMode = 'auto' | 'structured' | 'embedded';
 
-export const MODEL_MAPPING_PROVIDERS = ['claude', 'minimax', 'openai', 'cursor'] as const;
+export const MODEL_MAPPING_PROVIDERS = ['claude', 'minimax', 'openai', 'cursor', 'gemini'] as const;
 export const CURSOR_TOOL_MODES = ['auto', 'structured', 'embedded'] as const;
 export const MODEL_SERVICE_TIERS = ['default', 'priority'] as const;
 export const REASONING_BUDGET_TIERS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;

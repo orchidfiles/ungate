@@ -81,6 +81,28 @@ function decideCodex(event: Record<string, unknown>): Decision {
 	return { kind: 'commit', why: type };
 }
 
+/**
+ * Code Assist `streamGenerateContent?alt=sse`: each event is `{ response: { candidates, usageMetadata } }`;
+ * an in-stream failure is a google.rpc status `{ error: { code, status, details } }`.
+ */
+function decideGemini(event: Record<string, unknown>): Decision {
+	if (record(event.error)) return { kind: 'error', error: record(event.error) };
+	const candidate = (record(event.response)?.candidates as unknown[] | undefined)?.map(record)[0];
+	if (!candidate) return CONTINUE;
+	if (typeof candidate.finishReason === 'string') return { kind: 'commit', why: `finish:${candidate.finishReason}` };
+	const parts = record(candidate.content)?.parts;
+	if (!Array.isArray(parts)) return CONTINUE;
+	const output = parts.map(record).some((part) => (typeof part?.text === 'string' && part.text !== '') || !!part?.functionCall);
+
+	return output ? { kind: 'commit', why: 'parts' } : CONTINUE;
+}
+
+const DECIDERS: Record<SubscriptionProvider, (event: Record<string, unknown>) => Decision> = {
+	claude: decideAnthropic,
+	openai: decideCodex,
+	gemini: decideGemini
+};
+
 /** Incremental SSE event splitter: yields the parsed JSON `data:` payload of each complete event. */
 class SseEventParser {
 	private buffer = '';
@@ -137,7 +159,7 @@ export class SsePrecommitGate {
 		const maxBytes = options.maxBytes ?? SSE_GATE_MAX_BYTES;
 		const maxMs = options.maxMs ?? SSE_GATE_MAX_MS;
 		const now = options.now ?? Date.now;
-		const decide = provider === 'openai' ? decideCodex : decideAnthropic;
+		const decide = DECIDERS[provider];
 		const reader = response.body.getReader();
 		const parser = new SseEventParser();
 		const buffered: Uint8Array[] = [];

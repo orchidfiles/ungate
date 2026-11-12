@@ -23,6 +23,8 @@ export interface AccountIdentity {
 }
 export type LoginAccountSnapshot = OAuthAccountRow[];
 
+const ACCOUNT_LABEL: Record<SubscriptionProvider, string> = { claude: 'Claude', openai: 'ChatGPT', gemini: 'Gemini' };
+
 /** Atomic read of the provider policy plus its active account, captured once per incoming request. */
 export interface AccountSelection {
 	policy: AccountPolicy;
@@ -360,7 +362,7 @@ export class OAuthAccounts {
 				.values({
 					id,
 					provider,
-					label: metadata.email ?? `${provider === 'claude' ? 'Claude' : 'ChatGPT'} account ${current.length + 1}`,
+					label: metadata.email ?? `${ACCOUNT_LABEL[provider]} account ${current.length + 1}`,
 					email: metadata.email ?? null,
 					providerAccountId: metadata.providerAccountId ?? null,
 					accessToken: credentials.accessToken,
@@ -446,7 +448,7 @@ export class OAuthAccounts {
 				.values({
 					id,
 					provider,
-					label: identity.email ?? `${provider === 'claude' ? 'Claude' : 'ChatGPT'} account ${current.length + 1}`,
+					label: identity.email ?? `${ACCOUNT_LABEL[provider]} account ${current.length + 1}`,
 					email: identity.email ?? null,
 					providerUserId: identity.providerUserId,
 					providerAccountId: workspace,

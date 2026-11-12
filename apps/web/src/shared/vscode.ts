@@ -23,7 +23,7 @@ const vscodeApi = (
 ).acquireVsCodeApi?.();
 
 const dashboardPages: DashboardPage[] = ['analytics', 'settings', 'logs'];
-const modelMappingProviders: ModelMappingProvider[] = ['claude', 'minimax', 'openai', 'cursor'];
+const modelMappingProviders: ModelMappingProvider[] = ['claude', 'minimax', 'openai', 'cursor', 'gemini'];
 
 function readWebviewState(): WebviewState {
 	const state = vscodeApi?.getState();

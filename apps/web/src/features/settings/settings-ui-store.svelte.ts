@@ -28,7 +28,8 @@ function createAuthStates(state: ProviderAuthState): Record<ModelMappingProvider
 		claude: state,
 		openai: state,
 		minimax: state,
-		cursor: state
+		cursor: state,
+		gemini: state
 	};
 }
 
@@ -38,7 +39,8 @@ const providerLabels: Record<ModelMappingProvider, string> = {
 	claude: getProviderLabel('claude'),
 	openai: getProviderLabel('openai'),
 	minimax: getProviderLabel('minimax'),
-	cursor: getProviderLabel('cursor')
+	cursor: getProviderLabel('cursor'),
+	gemini: getProviderLabel('gemini')
 };
 
 function setSelectedProvider(provider: ModelMappingProvider): void {
@@ -61,11 +63,12 @@ async function refreshAuthStates(): Promise<void> {
 	authStates = createAuthStates(ProviderAuthState.Loading);
 
 	try {
-		const [claude, openai, minimax, cursor] = await Promise.all([
+		const [claude, openai, minimax, cursor, gemini] = await Promise.all([
 			Api.authStatus(),
 			Api.authChatGPTStatus(),
 			Api.authMinimaxStatus(),
-			Api.cursorStatus().catch(() => ({ connected: false }))
+			Api.cursorStatus().catch(() => ({ connected: false })),
+			Api.authGeminiStatus().catch(() => ({ authenticated: false }))
 		]);
 
 		if (seq !== refreshSeq) {
@@ -76,7 +79,8 @@ async function refreshAuthStates(): Promise<void> {
 			claude: toAuthState(claude.authenticated),
 			openai: toAuthState(openai.authenticated),
 			minimax: toAuthState(minimax.authenticated),
-			cursor: toAuthState(cursor.connected)
+			cursor: toAuthState(cursor.connected),
+			gemini: toAuthState(gemini.authenticated)
 		};
 	} catch {
 		if (seq === refreshSeq) {

@@ -45,10 +45,44 @@ export const config = {
 		codexUrl: 'https://chatgpt.com/backend-api/codex',
 		/** Subscription usage (what Codex `/status` shows). */
 		usageUrl: 'https://chatgpt.com/backend-api/wham/usage'
+	},
+	gemini: {
+		/** The installed-app client comes from the environment; see `geminiOAuthClient()`. */
+		oauth: {
+			authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+			tokenUrl: 'https://oauth2.googleapis.com/token',
+			userInfoUrl: 'https://www.googleapis.com/oauth2/v2/userinfo',
+			scope: [
+				'https://www.googleapis.com/auth/cloud-platform',
+				'https://www.googleapis.com/auth/userinfo.email',
+				'https://www.googleapis.com/auth/userinfo.profile'
+			].join(' '),
+			callbackPath: '/oauth2callback',
+			successUrl: 'https://developers.google.com/gemini-code-assist/auth_success_gemini',
+			failureUrl: 'https://developers.google.com/gemini-code-assist/auth_failure_gemini'
+		},
+		/** Code Assist internal API (what gemini-cli talks to), not the paid Gemini API. */
+		codeAssistUrl: 'https://cloudcode-pa.googleapis.com/v1internal'
 	}
 } as const;
 
 export type Config = ProxyConfig;
+
+export interface GeminiOAuthClientCredentials {
+	clientId: string;
+	clientSecret: string;
+}
+
+/**
+ * Google OAuth installed-app client for Gemini sign-in, from `UNGATE_GEMINI_OAUTH_CLIENT_ID` and
+ * `UNGATE_GEMINI_OAUTH_CLIENT_SECRET`. Ungate ships no client of its own; null when either is unset.
+ */
+export function geminiOAuthClient(): GeminiOAuthClientCredentials | null {
+	const clientId = process.env.UNGATE_GEMINI_OAUTH_CLIENT_ID?.trim();
+	const clientSecret = process.env.UNGATE_GEMINI_OAUTH_CLIENT_SECRET?.trim();
+
+	return clientId && clientSecret ? { clientId, clientSecret } : null;
+}
 
 export function getConfig(settings: AppSettings): ProxyConfig {
 	let envPort: number | undefined;

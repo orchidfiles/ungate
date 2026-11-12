@@ -49,6 +49,10 @@ function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 			provider = 'cursor';
 		}
 
+		if (model.provider === 'gemini') {
+			provider = 'gemini';
+		}
+
 		const toolMode =
 			provider === 'cursor' && (model.toolMode === 'structured' || model.toolMode === 'embedded') ? model.toolMode : null;
 

@@ -5,6 +5,7 @@ import { CompletionModelRouting } from 'src/orchestration/openai';
 import {
 	ClaudeChatHandler,
 	CursorChatHandler,
+	GeminiChatHandler,
 	MiniMaxChatHandler,
 	OpenAiMappedChatHandler
 } from 'src/orchestration/openai/provider-handlers';
@@ -42,8 +43,8 @@ const plugin: FastifyPluginCallback = (app) => {
 			);
 			const telemetry = requestTelemetry(openaiBody, resolvedModel?.reasoningBudget);
 
-			// Branch order matters: MiniMax (mapping or name prefix) -> DB-mapped OpenAI -> DB-mapped Cursor -> default Claude.
-			// A Cursor mapping never falls through to Claude.
+			// Branch order matters: MiniMax (mapping or name prefix) -> DB-mapped OpenAI -> DB-mapped Cursor
+			// -> DB-mapped Gemini -> default Claude. Cursor and Gemini mappings never fall through to Claude.
 			if (CompletionModelRouting.shouldRouteMiniMax(resolvedModel, openaiBody.model)) {
 				return MiniMaxChatHandler.handle(openaiBody, resolvedModel, reply, telemetry);
 			}
@@ -54,6 +55,10 @@ const plugin: FastifyPluginCallback = (app) => {
 
 			if (CompletionModelRouting.isCursorMapped(resolvedModel)) {
 				return CursorChatHandler.handle(openaiBody, resolvedModel, reply, telemetry);
+			}
+
+			if (CompletionModelRouting.isGeminiMapped(resolvedModel)) {
+				return GeminiChatHandler.handle(openaiBody, resolvedModel, reply, telemetry);
 			}
 
 			return ClaudeChatHandler.handle(request, openaiBody, resolvedModel, reply, telemetry);

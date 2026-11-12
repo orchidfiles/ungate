@@ -524,9 +524,14 @@ export class AccountStore {
 		}
 	}
 
-	/** OpenAI completes via its callback listener, and resumed sessions have no local completion path. */
+	/** Providers whose login completes through a local callback listener, not a pasted code. */
+	get callbackLogin(): boolean {
+		return this.provider !== 'claude';
+	}
+
+	/** Callback logins (ChatGPT, Gemini) complete server-side, and resumed sessions have no local completion path. */
 	private needsSessionPolling(): boolean {
-		return this.login.phase === 'awaiting' && !!this.login.sessionId && (this.provider === 'openai' || this.login.resumed);
+		return this.login.phase === 'awaiting' && !!this.login.sessionId && (this.callbackLogin || this.login.resumed);
 	}
 
 	private ensureSessionPolling(immediate = false): void {
@@ -617,7 +622,8 @@ export class AccountStore {
 
 const stores: Record<SubscriptionProvider, AccountStore> = {
 	claude: new AccountStore('claude'),
-	openai: new AccountStore('openai')
+	openai: new AccountStore('openai'),
+	gemini: new AccountStore('gemini')
 };
 
 /** Module-level store per provider so login state survives provider tab switches. */

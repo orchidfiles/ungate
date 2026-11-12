@@ -6,7 +6,8 @@ import {
 	parseClaudeUsageHeaders,
 	parseCodexPlanHeader,
 	parseCodexUsageBody,
-	parseCodexUsageHeaders
+	parseCodexUsageHeaders,
+	parseGeminiQuotaBuckets
 } from 'src/usage/usage-parsers';
 
 const NOW = 1_800_000_000_000;
@@ -123,5 +124,48 @@ describe('ChatGPT usage', () => {
 		]);
 		expect(parseCodexPlanHeader(headers)).toBe('pro');
 		expect(parseCodexUsageHeaders(new Headers(), NOW)).toEqual([]);
+	});
+});
+
+describe('Gemini quota buckets', () => {
+	it('derives used percent from remainingFraction and keeps per-model resets', () => {
+		expect(
+			parseGeminiQuotaBuckets({
+				buckets: [
+					{ modelId: 'gemini-4-carbon', tokenType: 'REQUESTS', remainingFraction: 0.25, resetTime: '2027-01-15T12:00:00Z' },
+					{ modelId: 'gemini-2.5-flash', remainingFraction: 1 },
+					{ modelId: 'gemini-2.5-pro', remainingFraction: -0.2, resetTime: 'not a date' }
+				]
+			})
+		).toEqual([
+			{
+				id: 'gemini-4-carbon',
+				label: 'gemini-4-carbon',
+				usedPercent: 75,
+				resetsAt: Date.parse('2027-01-15T12:00:00Z'),
+				windowMinutes: null
+			},
+			{ id: 'gemini-2.5-flash', label: 'gemini-2.5-flash', usedPercent: 0, resetsAt: null, windowMinutes: null },
+			{ id: 'gemini-2.5-pro', label: 'gemini-2.5-pro', usedPercent: 100, resetsAt: null, windowMinutes: null }
+		]);
+	});
+
+	it('splits a model with several token-type buckets into distinct window ids', () => {
+		const windows = parseGeminiQuotaBuckets({
+			buckets: [
+				{ modelId: 'gemini-4-carbon', tokenType: 'REQUESTS', remainingFraction: 0.5 },
+				{ modelId: 'gemini-4-carbon', tokenType: 'TOKENS', remainingFraction: 0.9 }
+			]
+		});
+		expect(windows.map((window) => [window.id, window.label, window.usedPercent])).toEqual([
+			['gemini-4-carbon_requests', 'gemini-4-carbon (Requests)', 50],
+			['gemini-4-carbon_tokens', 'gemini-4-carbon (Tokens)', 10]
+		]);
+	});
+
+	it('skips malformed buckets and bodies', () => {
+		expect(parseGeminiQuotaBuckets(null)).toEqual([]);
+		expect(parseGeminiQuotaBuckets({ buckets: 'nope' })).toEqual([]);
+		expect(parseGeminiQuotaBuckets({ buckets: [{ remainingFraction: 0.5 }, { modelId: 'x' }, null] })).toEqual([]);
 	});
 });

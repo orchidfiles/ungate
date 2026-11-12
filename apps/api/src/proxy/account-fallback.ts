@@ -8,7 +8,7 @@ import { UsageLimitClassifier, type UsageLimitClassification } from './usage-lim
 
 import type { SubscriptionProvider } from '@ungate/shared';
 
-/** Minimal shape both `OAuth.getValidToken` and `OpenAIOAuthService.getValidToken` return. */
+/** Minimal shape every subscription provider's `getValidToken` returns. */
 export interface PinnedCredentials {
 	localAccountId?: string;
 	credentialVersion?: number;
@@ -80,7 +80,7 @@ interface LimitRecord {
 	headers: Record<string, string>;
 }
 
-const PROVIDER_LABEL: Record<SubscriptionProvider, string> = { claude: 'Claude', openai: 'ChatGPT' };
+const PROVIDER_LABEL: Record<SubscriptionProvider, string> = { claude: 'Claude', openai: 'ChatGPT', gemini: 'Gemini' };
 
 /** Hop-by-hop / representation headers that are stale once a body has been read and re-wrapped. */
 const STALE_HEADERS = new Set(['content-length', 'content-encoding', 'transfer-encoding', 'connection', 'keep-alive']);
@@ -173,12 +173,14 @@ export class AccountFallback {
 	}
 
 	/**
-	 * Default HTTP-level inspection. Only 429s can be usage limits for either provider, so other
-	 * responses pass through untouched (body unread). A 429 body is read once to classify; a
-	 * non-limit 429 is rebuilt with the same status/body and stale length/encoding headers removed.
+	 * Default HTTP-level inspection. Only 429s (plus Gemini's 403 `SUBSCRIPTION_REQUIRED`) can be
+	 * usage limits, so other responses pass through untouched (body unread). A candidate body is read
+	 * once to classify; a non-limit one is rebuilt with the same status/body and stale
+	 * length/encoding headers removed.
 	 */
 	static async inspectHttp(provider: SubscriptionProvider, response: Response): Promise<InspectedAttempt> {
-		if (response.status !== 429) return { response };
+		const candidate = response.status === 429 || (provider === 'gemini' && response.status === 403);
+		if (!candidate) return { response };
 		const text = await this.readBounded(response);
 		let body: unknown;
 		try {

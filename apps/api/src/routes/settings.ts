@@ -21,7 +21,7 @@ const ModelMappingUpdateSchema = z
 		id: z.string(),
 		label: z.string(),
 		provider: z.string().refine((value) => isModelMappingProvider(value), {
-			message: 'Model provider must be claude, openai, minimax or cursor'
+			message: 'Model provider must be claude, openai, minimax, cursor or gemini'
 		}),
 		upstreamModel: z.string(),
 		sortOrder: z.number().int(),
