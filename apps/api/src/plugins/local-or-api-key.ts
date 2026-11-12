@@ -1,4 +1,3 @@
-import type { Config } from '../config';
 import type { FastifyRequest, onRequestAsyncHookHandler } from 'fastify';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -12,18 +11,12 @@ export function isDirectLocalRequest(request: FastifyRequest): boolean {
 }
 
 /**
- * Allows the local dashboard (direct loopback) without a key. Tunnelled requests must carry the
- * configured API key; with no key configured they are refused outright.
+ * Admin routes (accounts, settings, analytics, clients) answer only the local dashboard. No key
+ * opens them: model keys are handed to tools and tunnels, which must not be able to sign accounts
+ * out, read settings or mint keys.
  */
-export function localOrApiKey(config: Config): onRequestAsyncHookHandler {
-	return async (request, reply) => {
-		if (isDirectLocalRequest(request)) return;
+export const directLocalOnly: onRequestAsyncHookHandler = async (request, reply) => {
+	if (isDirectLocalRequest(request)) return;
 
-		const bearer = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : undefined;
-		const key = bearer ?? (request.headers['x-api-key'] as string | undefined);
-
-		if (!config.apiKey || key !== config.apiKey) {
-			return reply.code(403).send({ error: 'Forbidden', code: 'forbidden' });
-		}
-	};
-}
+	return reply.code(403).send({ error: 'Admin routes accept only direct local requests', code: 'forbidden' });
+};

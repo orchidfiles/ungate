@@ -129,7 +129,7 @@ describe('routes-openai', () => {
 		expect(response.headers['x-request-id']).toBeTruthy();
 		expect(response.headers['openai-processing-ms']).toBeTruthy();
 		expect(response.headers['openai-version']).toBe('2020-10-01');
-		expect(requestsRecordMock).toHaveBeenCalled();
+		expect(requestsRecordMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'cursor' }));
 		await app.close();
 	});
 

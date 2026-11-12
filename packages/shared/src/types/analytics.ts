@@ -46,6 +46,8 @@ export interface RequestRecord {
 	messageCount?: number | null;
 	continuation?: boolean | null;
 	firstTokenMs?: number | null;
+	/** Client key that made the request; null when the model routes run without a key. */
+	clientId?: string | null;
 }
 
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'error' | 'aborted' | 'unknown';

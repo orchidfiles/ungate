@@ -20,13 +20,21 @@ function toPeriod(value: string | undefined): Period {
 	return 'day';
 }
 
+/** The analytics window for a `?period=` value; unknown values mean the last day. */
+export function periodWindow(
+	value: string | undefined,
+	now: number = Date.now()
+): { period: Period; since: number; until: number } {
+	const period = toPeriod(value);
+
+	return { period, since: period === 'all' ? 0 : now - PERIOD_OFFSETS[period], until: now };
+}
+
 const plugin: FastifyPluginCallback = (app) => {
 	app.get('/analytics', async (request, reply) => {
-		const period = toPeriod((request.query as Record<string, string>).period);
-		const now = Date.now();
-		const since = period === 'all' ? 0 : now - PERIOD_OFFSETS[period];
+		const { period, since, until } = periodWindow((request.query as Record<string, string>).period);
 
-		const analytics = Analytics.getSummary(since, now);
+		const analytics = Analytics.getSummary(since, until);
 
 		return reply.send({
 			period,
@@ -44,20 +52,16 @@ const plugin: FastifyPluginCallback = (app) => {
 	});
 
 	app.get('/analytics/tokens', async (request, reply) => {
-		const period = toPeriod((request.query as Record<string, string>).period);
-		const now = Date.now();
-		const since = period === 'all' ? 0 : now - PERIOD_OFFSETS[period];
-		const series = Analytics.getTokenSeries(period, since, now);
+		const { period, since, until } = periodWindow((request.query as Record<string, string>).period);
+		const series = Analytics.getTokenSeries(period, since, until);
 
 		return reply.send({ period, series });
 	});
 
 	app.get('/analytics/insights', async (request, reply) => {
-		const period = toPeriod((request.query as Record<string, string>).period);
-		const now = Date.now();
-		const since = period === 'all' ? 0 : now - PERIOD_OFFSETS[period];
+		const { period, since, until } = periodWindow((request.query as Record<string, string>).period);
 
-		return reply.send(Analytics.getInsights(period, since, now));
+		return reply.send(Analytics.getInsights(period, since, until));
 	});
 
 	app.post('/analytics/reset', async (_request, reply) => {
