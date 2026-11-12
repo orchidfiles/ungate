@@ -39,4 +39,38 @@ describe('listenOnAll', () => {
 		await app.close();
 		await expect(get('::1', port, '/peer')).rejects.toThrow();
 	});
+
+	it('serves the other addresses while one is not on this machine, and stops retrying on close', async () => {
+		const app = Fastify({ logger: false });
+		app.decorate('config', { port: 0, hosts: [], apiKey: 'k', quietMode: true });
+		await registerRoutes(app);
+
+		const probe = Fastify();
+		await probe.listen({ port: 0, host: '127.0.0.1' });
+		const port = (probe.server.address() as AddressInfo).port;
+		await probe.close();
+
+		// TEST-NET-1: never assigned here, so listening on it fails with EADDRNOTAVAIL.
+		await listenOnAll(app, ['127.0.0.1', '192.0.2.1'], port, 10);
+		expect(await get('127.0.0.1', port, '/health')).toBe(200);
+
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		await app.close();
+		await expect(get('127.0.0.1', port, '/health')).rejects.toThrow();
+	});
+
+	it('fails when a further address is taken', async () => {
+		const app = Fastify({ logger: false });
+		app.decorate('config', { port: 0, hosts: [], apiKey: 'k', quietMode: true });
+		await registerRoutes(app);
+
+		const holder = Fastify();
+		await holder.listen({ port: 0, host: '::1' });
+		const port = (holder.server.address() as AddressInfo).port;
+
+		await expect(listenOnAll(app, ['127.0.0.1', '::1'], port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+
+		await app.close();
+		await holder.close();
+	});
 });

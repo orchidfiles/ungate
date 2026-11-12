@@ -32,8 +32,9 @@ in
         "10.233.1.1"
       ];
       description = ''
-        Addresses to listen on. Admin routes answer only direct loopback requests on any of
-        them; other addresses reach the model routes with a client key.
+        Addresses to listen on. Every address serves the same routes, and each request sees
+        its real peer. An address after the first that is not on the machine yet, such as a
+        container's veth end, is retried until it appears.
       '';
     };
 
