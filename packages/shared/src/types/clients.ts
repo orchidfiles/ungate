@@ -30,6 +30,11 @@ export interface ClientKeyCreateResponse {
 	clients: ClientKeyView[];
 }
 
+/** `GET /v1/client`: the presented key's client; `null` when the model routes are open. */
+export interface WhoAmIResponse {
+	client: { id: string; label: string } | null;
+}
+
 /** Requests and tokens per client over an analytics period. */
 export interface ClientUsage {
 	/** `null` groups requests recorded without a client (before clients existed, or with auth off). */
