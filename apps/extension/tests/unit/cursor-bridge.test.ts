@@ -10,12 +10,20 @@ import {
 	ConnectFrameDecoder,
 	ConnectProtocolError,
 	encodeEnvelope,
+	isTransientDnsError,
 	openBidiStream,
 	type Http2Connect
 } from '../../src/cursor/connect-transport';
 import { CursorBridge, type BridgeChild } from '../../src/cursor/cursor-bridge';
 import { CursorSession } from '../../src/cursor/cursor-session';
-import { classifyInvocationError, redactMessage, runInference } from '../../src/cursor/run-inference';
+import { PacerAbortError, PacerTimeoutError, RequestPacer } from '../../src/cursor/request-pacer';
+import {
+	classifyInvocationError,
+	describeToolCallShape,
+	mapStreamResponse,
+	redactMessage,
+	runInference
+} from '../../src/cursor/run-inference';
 
 import type { CursorBridgeEventBody } from '@ungate/shared';
 
@@ -128,6 +136,31 @@ async function collect(events: AsyncIterable<CursorBridgeEventBody>): Promise<Cu
 
 	return out;
 }
+
+describe('tool call argument shapes', () => {
+	const state = () => ({ sawExtendedUsage: false });
+	const toolCall = (part: Record<string, unknown>) =>
+		mapStreamResponse({ toolCallPart: { toolCallId: 'c1', toolName: 'Read', isComplete: true, ...part } }, state());
+
+	it('keeps string args', () => {
+		expect(toolCall({ args: '{"path":"a"}' })).toMatchObject({ kind: 'toolCall', args: '{"path":"a"}' });
+	});
+
+	it('serializes object args instead of dropping them', () => {
+		expect(toolCall({ args: { path: 'a' } })).toMatchObject({ kind: 'toolCall', args: '{"path":"a"}' });
+	});
+
+	it('reads alternate argument fields', () => {
+		expect(toolCall({ argsDelta: '{"path":"b"}' })).toMatchObject({ args: '{"path":"b"}' });
+		expect(toolCall({ arguments: { path: 'c' } })).toMatchObject({ args: '{"path":"c"}' });
+	});
+
+	it('describes field shapes without values', () => {
+		const shape = describeToolCallShape({ toolName: 'Read', args: 'secret', isComplete: true, extra: null });
+		expect(shape).toBe('toolName:string(4), args:string(6), isComplete:boolean, extra:null');
+		expect(shape).not.toContain('secret');
+	});
+});
 
 describe('runInference state machine', () => {
 	it('runs runRequest -> runReady -> invokeModel -> responses -> invocationEnd -> finishRun', async () => {
@@ -311,5 +344,245 @@ describe('CursorBridge', () => {
 		expect(serialized).not.toMatch(/authorization|bearer/i);
 		// The upstream request does carry them (extension host only).
 		expect(server.requestHeaders[0].authorization).toBe(`Bearer ${TOKEN}`);
+	});
+});
+
+/** First `failures` sessions fail with `error` before responding; later ones run `server`. */
+function flakyConnect(server: Http2Connect, error: () => Error, failures = 1) {
+	let calls = 0;
+	const connect: Http2Connect = (authority) => {
+		calls += 1;
+		if (calls > failures) return server(authority);
+		const session = new EventEmitter() as EventEmitter & { request: unknown; close: () => void };
+		session.close = () => undefined;
+		session.request = () => {
+			const stream = Object.assign(new EventEmitter(), {
+				closed: false,
+				destroyed: false,
+				writable: true,
+				write: () => undefined,
+				end: () => undefined,
+				close: () => undefined
+			});
+			setImmediate(() => session.emit('error', error()));
+
+			return stream;
+		};
+
+		return session as never;
+	};
+
+	return { connect, calls: () => calls };
+}
+
+const dnsError = () => Object.assign(new Error('getaddrinfo EAI_AGAIN agentn.api5.cursor.sh'), { code: 'EAI_AGAIN' });
+
+describe('transient DNS retry', () => {
+	const happy = () =>
+		fakeCursor((message, reply) => {
+			if (message.runRequest) reply(envelope({ runReady: {} }));
+			if (message.invokeModel) {
+				reply(envelope({ invocationResponse: { response: { textPart: { text: 'ok' } } } }));
+				reply(envelope({ invocationEnd: {} }));
+			}
+		});
+
+	it('replays the run on a fresh session after one EAI_AGAIN before any response', async () => {
+		const server = happy();
+		const flaky = flakyConnect(server.connect, dnsError);
+		const events = await collect(
+			runInference({ request, credentials: creds, refresh: () => Promise.resolve(), connect: flaky.connect })
+		);
+		expect(flaky.calls()).toBe(2);
+		expect(server.written[0]).toHaveProperty('runRequest');
+		expect(events.map((event) => event.kind)).toEqual(['ready', 'text', 'end']);
+		expect(events.at(-1)).toEqual({ kind: 'end', error: null });
+	});
+
+	it('retries only once', async () => {
+		const server = happy();
+		const flaky = flakyConnect(server.connect, dnsError, 2);
+		const events = await collect(
+			runInference({ request, credentials: creds, refresh: () => Promise.resolve(), connect: flaky.connect })
+		);
+		expect(flaky.calls()).toBe(2);
+		expect(events).toEqual([
+			{ kind: 'end', error: expect.objectContaining({ kind: 'upstream', message: expect.stringContaining('EAI_AGAIN') }) }
+		]);
+	});
+
+	it('does not retry non-DNS session errors', async () => {
+		const server = happy();
+		const flaky = flakyConnect(server.connect, () => Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
+		const events = await collect(
+			runInference({ request, credentials: creds, refresh: () => Promise.resolve(), connect: flaky.connect })
+		);
+		expect(flaky.calls()).toBe(1);
+		expect(events.at(-1)).toMatchObject({ kind: 'end', error: { kind: 'upstream' } });
+	});
+
+	it('recognizes DNS codes and messages', () => {
+		expect(isTransientDnsError({ code: 'ENOTFOUND' })).toBe(true);
+		expect(isTransientDnsError(new Error('getaddrinfo EAI_AGAIN host'))).toBe(true);
+		expect(isTransientDnsError({ code: 'ECONNRESET' })).toBe(false);
+		expect(isTransientDnsError(null)).toBe(false);
+	});
+});
+
+describe('RequestPacer', () => {
+	it('caps concurrency per key, spaces starts and keeps FIFO order', async () => {
+		vi.useFakeTimers();
+		try {
+			const pacer = new RequestPacer({ maxConcurrent: 1, minIntervalMs: 1_000, maxWaitMs: 60_000 });
+			const order: string[] = [];
+			const a = pacer.acquire('grok').then((release) => (order.push('a'), release));
+			const b = pacer.acquire('grok').then((release) => (order.push('b'), release));
+			const other = pacer.acquire('composer').then((release) => (order.push('other'), release));
+
+			await vi.advanceTimersByTimeAsync(0);
+			expect(order).toEqual(['a', 'other']);
+			expect(pacer.snapshot('grok')).toEqual({ active: 1, queued: 1 });
+
+			const releaseA = await a;
+			releaseA();
+			await vi.advanceTimersByTimeAsync(500);
+			expect(order).toEqual(['a', 'other']);
+			await vi.advanceTimersByTimeAsync(500);
+			expect(order).toEqual(['a', 'other', 'b']);
+			const releaseB = await b;
+			releaseB();
+			const releaseOther = await other;
+			releaseOther();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('delays starts after penalize and times out queued waiters', async () => {
+		vi.useFakeTimers();
+		try {
+			const pacer = new RequestPacer({ maxConcurrent: 1, minIntervalMs: 0, maxWaitMs: 3_000 });
+			pacer.penalize('grok', 2_000);
+			let started = false;
+			const first = pacer.acquire('grok').then((release) => ((started = true), release));
+			await vi.advanceTimersByTimeAsync(1_999);
+			expect(started).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(started).toBe(true);
+
+			const blocked = pacer.acquire('grok').catch((error: unknown) => error);
+			await vi.advanceTimersByTimeAsync(3_000);
+			const blockedError = await blocked;
+			expect(blockedError).toBeInstanceOf(PacerTimeoutError);
+			const releaseFirst = await first;
+			releaseFirst();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('rejects aborted waiters without granting them a slot', async () => {
+		const pacer = new RequestPacer({ maxConcurrent: 1, minIntervalMs: 0, maxWaitMs: 60_000 });
+		const release = await pacer.acquire('grok');
+		const controller = new AbortController();
+		const waiting = pacer.acquire('grok', controller.signal);
+		controller.abort();
+		await expect(waiting).rejects.toBeInstanceOf(PacerAbortError);
+		release();
+		expect(pacer.snapshot('grok')).toEqual({ active: 0, queued: 0 });
+	});
+});
+
+describe('CursorBridge pacing', () => {
+	const rateLimited = (failures: number) => {
+		let runs = 0;
+		const server = fakeCursor((message, reply, end) => {
+			if (message.runRequest) {
+				runs += 1;
+				if (runs <= failures) {
+					reply(envelope({ error: { code: 'resource_exhausted', message: 'rate limited' } }, CONNECT_FLAG_END_STREAM));
+					end();
+
+					return;
+				}
+				reply(envelope({ runReady: { resolvedModel: { modelId: 'grok-4.7' } } }));
+			}
+			if (message.invokeModel) {
+				reply(envelope({ invocationResponse: { response: { textPart: { text: 'hi' } } } }));
+				reply(envelope({ invocationEnd: {} }));
+			}
+		});
+
+		return { server, runs: () => runs };
+	};
+
+	const fastPacer = () => new RequestPacer({ maxConcurrent: 2, minIntervalMs: 0, maxWaitMs: 60_000 });
+
+	it('retries a run rate-limited before output and forwards a single clean stream', async () => {
+		const upstream = rateLimited(1);
+		const { child, sent } = fakeChild();
+		const bridge = new CursorBridge({
+			session: session(),
+			isEnabled: () => true,
+			connect: upstream.server.connect,
+			pacer: fastPacer(),
+			retryDelaysMs: [5, 5]
+		});
+		bridge.attach(child);
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'invoke', id: 'r1', request });
+		await tick();
+		await tick();
+
+		expect(upstream.runs()).toBe(2);
+		expect(sent.map((message) => (message as { kind: string }).kind)).toEqual(['ready', 'text', 'end']);
+		expect(sent.at(-1)).toMatchObject({ kind: 'end', error: null });
+	});
+
+	it('gives up with rate_limit after the retry budget', async () => {
+		const upstream = rateLimited(99);
+		const { child, sent } = fakeChild();
+		const bridge = new CursorBridge({
+			session: session(),
+			isEnabled: () => true,
+			connect: upstream.server.connect,
+			pacer: fastPacer(),
+			retryDelaysMs: [5, 5]
+		});
+		bridge.attach(child);
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'invoke', id: 'r1', request });
+		await tick();
+		await tick();
+
+		expect(upstream.runs()).toBe(3);
+		expect(sent).toEqual([expect.objectContaining({ kind: 'end', error: expect.objectContaining({ kind: 'rate_limit' }) })]);
+	});
+
+	it('queues concurrent invocations for one model behind the pacer', async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		const server = fakeCursor((message, reply) => {
+			if (message.runRequest) reply(envelope({ runReady: {} }));
+			if (message.invokeModel)
+				void gate.then(() => {
+					reply(envelope({ invocationResponse: { response: { textPart: { text: 'x' } } } }));
+					reply(envelope({ invocationEnd: {} }));
+				});
+		});
+		const pacer = new RequestPacer({ maxConcurrent: 1, minIntervalMs: 0, maxWaitMs: 60_000 });
+		const { child, sent } = fakeChild();
+		const bridge = new CursorBridge({ session: session(), isEnabled: () => true, connect: server.connect, pacer });
+		bridge.attach(child);
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'invoke', id: 'a', request });
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'invoke', id: 'b', request });
+		await tick();
+
+		expect(pacer.snapshot(request.modelId)).toEqual({ active: 1, queued: 1 });
+		expect(sent.every((message) => (message as { id: string }).id === 'a')).toBe(true);
+
+		release();
+		await tick();
+		await tick();
+		const ends = sent.filter((message) => (message as { kind: string }).kind === 'end');
+		expect(ends.map((message) => (message as { id: string }).id)).toEqual(['a', 'b']);
 	});
 });

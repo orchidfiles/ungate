@@ -160,6 +160,46 @@ function usageFromBasic(raw: unknown): CursorUsage {
 	};
 }
 
+const TOOL_ARGS_FIELDS = ['args', 'arguments', 'argsDelta', 'argumentsDelta', 'input'] as const;
+
+/**
+ * Tool arguments as a JSON string. Cursor sends `args` as a string, but an object (or an
+ * alternate field name) must not silently collapse to `''` and reach the client as `{}`.
+ */
+export function toolCallArgs(part: JsonRecord): string {
+	for (const field of TOOL_ARGS_FIELDS) {
+		const value = part[field];
+		if (typeof value === 'string' && value) return value;
+		if (value && typeof value === 'object') {
+			try {
+				return JSON.stringify(value);
+			} catch {
+				return '';
+			}
+		}
+	}
+
+	return '';
+}
+
+/** Field names and value types of a tool call part, never the values (they may hold user data). */
+export function describeToolCallShape(part: JsonRecord): string {
+	return Object.entries(part)
+		.map(([key, value]) => {
+			const type = Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value;
+			const size = typeof value === 'string' ? `(${value.length})` : '';
+
+			return `${key}:${type}${size}`;
+		})
+		.join(', ');
+}
+
+function isEmptyArgs(args: string): boolean {
+	const trimmed = args.trim();
+
+	return trimmed === '' || trimmed === '{}' || trimmed === 'null';
+}
+
 /** Maps one `InferenceStreamResponse` oneof to bridge events. */
 export function mapStreamResponse(
 	raw: unknown,
@@ -190,7 +230,7 @@ export function mapStreamResponse(
 			kind: 'toolCall',
 			toolCallId: str(toolCallPart.toolCallId),
 			toolName: str(toolCallPart.toolName),
-			args: str(toolCallPart.args),
+			args: toolCallArgs(toolCallPart),
 			isComplete: toolCallPart.isComplete === true,
 			toolIndex: toolIndex === undefined ? null : num(toolIndex)
 		};
@@ -234,6 +274,8 @@ export interface RunInferenceOptions {
 	signal?: AbortSignal;
 	deadlineMs?: number;
 	connect?: Http2Connect;
+	/** Diagnostics; never receives credentials or tool argument values. */
+	onLog?: (level: 'info' | 'warn' | 'error', message: string) => void;
 }
 
 const DEFAULT_DEADLINE_MS = 10 * 60 * 1000;
@@ -412,8 +454,17 @@ async function* attempt(
 			}
 
 			if (message.invocationResponse !== undefined) {
-				const mapped = mapStreamResponse(asRecord(message.invocationResponse)?.response, usageState);
+				const response = asRecord(message.invocationResponse)?.response;
+				const mapped = mapStreamResponse(response, usageState);
 				if (!mapped) continue;
+
+				if (mapped.kind === 'toolCall' && mapped.isComplete && isEmptyArgs(mapped.args)) {
+					const part = asRecord(asRecord(response)?.toolCallPart) ?? {};
+					options.onLog?.(
+						'warn',
+						`[cursor] ${options.request.modelId} sent ${mapped.toolName || 'a tool call'} with empty arguments; fields: ${describeToolCallShape(part)}`
+					);
+				}
 
 				if (mapped.kind === 'error') {
 					finish(false);
