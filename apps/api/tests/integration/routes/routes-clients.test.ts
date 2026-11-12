@@ -104,6 +104,26 @@ describe('routes-clients', () => {
 		await app.close();
 	});
 
+	it('names the client of a presented key on /v1/client, and refuses an unknown or revoked one', async () => {
+		const { client, key } = ClientKeys.create('coda-agent');
+		const app = await server();
+
+		const mine = await app.inject({ method: 'GET', url: '/v1/client', headers: { authorization: `Bearer ${key}` }, ...REMOTE });
+		expect(mine.statusCode).toBe(200);
+		expect(mine.json()).toEqual({ client: { id: client.id, label: 'coda-agent' } });
+
+		const cursor = await app.inject({ method: 'GET', url: '/v1/client', headers: { 'x-api-key': 'settings-key' } });
+		expect(cursor.json()).toEqual({ client: { id: 'cursor', label: 'cursor' } });
+
+		const unknown = await app.inject({ method: 'GET', url: '/v1/client', headers: { 'x-api-key': 'ug_nope' }, ...REMOTE });
+		expect(unknown.statusCode).toBe(403);
+
+		ClientKeys.revoke(client.id);
+		const revoked = await app.inject({ method: 'GET', url: '/v1/client', headers: { 'x-api-key': key }, ...REMOTE });
+		expect(revoked.statusCode).toBe(403);
+		await app.close();
+	});
+
 	it('reports usage per client, with unattributed rows grouped apart', async () => {
 		const { client } = ClientKeys.create('coda-agent');
 		const base = { model: 'claude-opus-4-8', source: 'claude' as const, stream: true, latencyMs: 1 };
