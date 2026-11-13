@@ -85,6 +85,18 @@ export class AnthropicToOpenai {
 		return `data: ${JSON.stringify(chunk)}\n\n`;
 	}
 
+	static reasoningChunk(id: string, model: string, reasoning: string): string {
+		const chunk: OpenAIStreamChunk = {
+			id: `chatcmpl-${id}`,
+			object: 'chat.completion.chunk',
+			created: Math.floor(Date.now() / 1000),
+			model,
+			choices: [{ index: 0, delta: { reasoning_content: reasoning }, finish_reason: null }]
+		};
+
+		return `data: ${JSON.stringify(chunk)}\n\n`;
+	}
+
 	// OpenAI streams tool calls in multiple chunks:
 	// First chunk: id, type="function", function.name, function.arguments=""
 	// Subsequent: only function.arguments with fragments

@@ -42,6 +42,7 @@ export type ThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export interface ThinkingConfig {
 	type: 'enabled' | 'adaptive' | 'disabled';
 	budget_tokens?: number;
+	display?: 'summarized' | 'omitted';
 }
 
 export interface OutputConfig {

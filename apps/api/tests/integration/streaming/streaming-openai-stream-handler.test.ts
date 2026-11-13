@@ -638,7 +638,7 @@ describe('streaming-openai-stream-handler', () => {
 
 		expect(elapsed).toBeGreaterThanOrEqual(450);
 		expect(upstreamCancelled).toBe(false);
-		expect(output).not.toContain('still working');
+		expect(output).not.toContain('"content":"still working"');
 		expect(output).toContain('"content":"finished"');
 		expect(output).toContain('"finish_reason":"stop"');
 		expect(output).not.toContain('"finish_reason":"length"');
@@ -678,6 +678,100 @@ describe('streaming-openai-stream-handler', () => {
 		expect(output).toContain('"content":"slow but alive"');
 		expect(output).toContain('"finish_reason":"stop"');
 		expect(output).not.toContain('"finish_reason":"length"');
+	});
+
+	it('forwards summarized thinking as reasoning_content, separate from the reply text', async () => {
+		const response = createResponseWithSse([
+			'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}',
+			'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Checking the retry path."}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" It never refreshes the token."}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EqQBCgIYAhIM"}}',
+			'data: {"type":"content_block_stop","index":0}',
+			'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}',
+			'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Found it."}}',
+			'data: {"type":"content_block_stop","index":1}',
+			'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}',
+			'data: {"type":"message_stop"}'
+		]);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st_thinking', 'model_thinking', {
+			model: 'model_thinking',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: {}
+		});
+
+		const output = await readStream(stream);
+		const reasoning = output
+			.split('\n')
+			.filter((line) => line.startsWith('data: {'))
+			.map((line) => JSON.parse(line.slice(6)) as { choices?: { delta?: { reasoning_content?: string } }[] })
+			.map((chunk) => chunk.choices?.[0]?.delta?.reasoning_content ?? '')
+			.join('');
+
+		expect(reasoning).toBe('Checking the retry path. It never refreshes the token.');
+		expect(output.indexOf('"reasoning_content"')).toBeLessThan(output.indexOf('"content":"Found it."'));
+		expect(output).not.toContain('"content":"Checking the retry path."');
+		expect(output).not.toContain('EqQBCgIYAhIM');
+		expect(output).toContain('"finish_reason":"stop"');
+	});
+
+	it('emits nothing for omitted thinking, which streams an empty thinking_delta', async () => {
+		const response = createResponseWithSse([
+			'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}',
+			'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EosnCkYI"}}',
+			'data: {"type":"content_block_stop","index":0}',
+			'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"done"}}',
+			'data: {"type":"message_stop"}'
+		]);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st_omitted', 'model_omitted', {
+			model: 'model_omitted',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: {}
+		});
+
+		const output = await readStream(stream);
+
+		expect(output).not.toContain('reasoning_content');
+		expect(output).not.toContain('EosnCkYI');
+		expect(output).toContain('"content":"done"');
+	});
+
+	it('keeps tool calls intact when thinking precedes them', async () => {
+		const event = (value: unknown) => `data: ${JSON.stringify(value)}`;
+		const response = createResponseWithSse([
+			event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }),
+			event({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }),
+			event({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Read the file first.' } }),
+			event({ type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig' } }),
+			event({ type: 'content_block_stop', index: 0 }),
+			event({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_think', name: 'Read' } }),
+			event({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"path":"a.ts"}' } }),
+			event({ type: 'content_block_stop', index: 1 }),
+			event({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 3 } }),
+			event({ type: 'message_stop' })
+		]);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st_think_tool', 'model_think_tool', {
+			model: 'model_think_tool',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: {}
+		});
+
+		const output = await readStream(stream);
+
+		expect(output).toContain('"reasoning_content":"Read the file first."');
+		expect(readToolCalls(output)).toEqual([
+			{ index: 0, id: 'tu_think', type: 'function', function: { name: 'Read', arguments: '' } },
+			{ index: 0, function: { arguments: '{"path":"a.ts"}' } }
+		]);
+		expect(output).toContain('"finish_reason":"tool_calls"');
 	});
 
 	it('logs downstream cancellation without flushing an open tool', async () => {

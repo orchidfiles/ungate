@@ -25,7 +25,12 @@ export interface AnthropicStreamToolUseBlock {
 	name: string;
 }
 
-export type AnthropicStreamBlock = AnthropicStreamTextBlock | AnthropicStreamToolUseBlock;
+export interface AnthropicStreamThinkingBlock {
+	type: 'thinking';
+	thinking?: string;
+}
+
+export type AnthropicStreamBlock = AnthropicStreamTextBlock | AnthropicStreamToolUseBlock | AnthropicStreamThinkingBlock;
 
 export interface AnthropicStreamTextDelta {
 	type: 'text_delta';
@@ -37,7 +42,21 @@ export interface AnthropicStreamInputJsonDelta {
 	partial_json: string;
 }
 
-export type AnthropicStreamDelta = AnthropicStreamTextDelta | AnthropicStreamInputJsonDelta;
+export interface AnthropicStreamThinkingDelta {
+	type: 'thinking_delta';
+	thinking: string;
+}
+
+export interface AnthropicStreamSignatureDelta {
+	type: 'signature_delta';
+	signature: string;
+}
+
+export type AnthropicStreamDelta =
+	| AnthropicStreamTextDelta
+	| AnthropicStreamInputJsonDelta
+	| AnthropicStreamThinkingDelta
+	| AnthropicStreamSignatureDelta;
 
 export type AnthropicStreamEvent =
 	| { type: 'message_start'; message: { usage: AnthropicUsage } }
