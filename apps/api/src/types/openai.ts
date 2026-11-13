@@ -98,6 +98,7 @@ export interface OpenAIStreamChunk {
 		delta: {
 			role?: 'assistant';
 			content?: string | null;
+			reasoning_content?: string;
 			tool_calls?: OpenAIStreamChunkToolCall[];
 		};
 		finish_reason: 'stop' | 'length' | 'content_filter' | 'tool_calls' | null;

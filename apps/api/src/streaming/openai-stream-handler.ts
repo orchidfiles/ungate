@@ -367,6 +367,17 @@ export class OpenAIStreamHandler {
 									}
 								}
 
+								if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta' && event.delta.thinking) {
+									if (!sentStart) {
+										safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamStart(streamId, modelName)));
+										sentStart = true;
+									}
+
+									safeEnqueue(
+										new TextEncoder().encode(AnthropicToOpenai.reasoningChunk(streamId, modelName, event.delta.thinking))
+									);
+								}
+
 								if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta?.text) {
 									if (!sentStart) {
 										safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamStart(streamId, modelName)));

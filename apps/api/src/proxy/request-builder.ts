@@ -120,7 +120,9 @@ export class RequestBuilder {
 			const effort = resolveEffort(budgetValue);
 
 			if (effort) {
-				prepared.thinking = { type: 'adaptive' };
+				// Claude 5 models default to `display: "omitted"`, which streams empty thinking.
+				// Ask for the summary so Cursor can show progress while Claude thinks.
+				prepared.thinking = { type: 'adaptive', display: 'summarized' };
 				prepared.output_config = { ...prepared.output_config, effort };
 				logger.log(`Reasoning budget (${budgetValue}) → adaptive thinking (effort: ${effort})`);
 			} else {

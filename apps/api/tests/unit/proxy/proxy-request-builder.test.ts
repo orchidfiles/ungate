@@ -28,7 +28,7 @@ describe('proxy-request-builder', () => {
 		});
 
 		expect(prepared.reasoning_budget).toBeUndefined();
-		expect(prepared.thinking).toEqual({ type: 'adaptive' });
+		expect(prepared.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
 		expect(prepared.output_config).toEqual({ effort: 'high' });
 		expect(Array.isArray(prepared.system)).toBe(true);
 		const system = prepared.system as { type: string; text?: string; cache_control?: { ttl?: number } }[];
@@ -48,9 +48,21 @@ describe('proxy-request-builder', () => {
 			});
 
 			expect(prepared.reasoning_budget).toBeUndefined();
-			expect(prepared.thinking).toEqual({ type: 'adaptive' });
+			expect(prepared.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
 			expect(prepared.output_config).toEqual({ effort: tier });
 		}
+	});
+
+	it('requests summarized thinking so it can be shown while Claude works', () => {
+		const prepared = RequestBuilder.prepareClaudeCodeBody({
+			model: 'claude-opus-5-5',
+			max_tokens: 32000,
+			reasoning_budget: 'xhigh',
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(prepared.thinking?.display).toBe('summarized');
+		expect(prepared.output_config).toEqual({ effort: 'xhigh' });
 	});
 
 	it('ignores a non-tier reasoning budget without enabling thinking', () => {
