@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.15 - 2026-11-13
+
+- Show Claude thinking summaries in Cursor while the model works
+- Keep Claude streams alive during long silent turns so Cursor does not cancel them
+- Preserve parallel Claude tool calls and mark unfinished tool streams incomplete
+- Fix the dashboard API port mapping for remote Cursor windows
+- Show why a ChatGPT sign-in failed instead of a generic token exchange error
+
 ## 1.7.14 - 2026-10-11
 
 - Add Claude Code version selector for Claude models that require a newer version
