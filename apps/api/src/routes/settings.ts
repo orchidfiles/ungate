@@ -14,6 +14,7 @@ import { Settings } from '../database/app-settings';
 import { DuplicateModelIdError } from '../database/model-mappings';
 import { logger } from '../utils/logger';
 
+import type { Config } from '../config';
 import type { FastifyPluginCallback } from 'fastify';
 
 const ModelMappingUpdateSchema = z
@@ -109,6 +110,13 @@ const plugin: FastifyPluginCallback = (app) => {
 			}
 
 			throw error;
+		}
+
+		// The model routes read the key from the running config on every request, so a rotated
+		// key takes effect now, including in a service the extension adopted and cannot restart.
+		if (validation.value.apiKey !== undefined) {
+			const running: Config = app.config;
+			running.apiKey = validation.value.apiKey ?? undefined;
 		}
 
 		return reply.send({ ok: true });

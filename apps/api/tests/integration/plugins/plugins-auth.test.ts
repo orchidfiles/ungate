@@ -65,4 +65,14 @@ describe('plugins-auth', () => {
 		expect((await app.inject({ method: 'GET', url: '/x', headers: { authorization: `Bearer ${key}` } })).statusCode).toBe(200);
 		await app.close();
 	});
+
+	it('stays closed after the last minted key is revoked, with no settings key', async () => {
+		const { client, key } = ClientKeys.create('coda-agent');
+		const app = await appWith(undefined);
+
+		ClientKeys.revoke(client.id);
+		expect((await app.inject({ method: 'GET', url: '/x' })).statusCode).toBe(403);
+		expect((await app.inject({ method: 'GET', url: '/x', headers: { 'x-api-key': key } })).statusCode).toBe(403);
+		await app.close();
+	});
 });
