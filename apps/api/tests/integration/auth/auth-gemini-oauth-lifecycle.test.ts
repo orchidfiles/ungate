@@ -5,6 +5,9 @@ import { UNSUPPORTED_CLIENT_MESSAGE } from 'src/auth/gemini/code-assist-setup';
 import { GeminiOAuthClient, GeminiOAuthNotConfiguredError } from 'src/auth/gemini/gemini-oauth-client';
 import { GeminiOAuthService } from 'src/auth/gemini/gemini-oauth-service';
 import { OAuthAccounts } from 'src/database/oauth-accounts';
+import authPlugin from 'src/routes/auth';
+
+import { withPlugin } from '../test-harness';
 
 const realFetch = globalThis.fetch;
 
@@ -71,6 +74,23 @@ describe('auth-gemini-oauth-lifecycle', () => {
 		await expect(GeminiOAuthService.startLogin()).rejects.toBeInstanceOf(GeminiOAuthNotConfiguredError);
 		expect(AccountLoginSessions.findPending('gemini')).toBeFalsy();
 	});
+
+	it.each(['your-client-id', 'test-client.example.com', 'apps.googleusercontent.com.evil'])(
+		'treats client id %s as unconfigured, so /auth/gemini/start answers 503 login_not_configured',
+		async (clientId) => {
+			vi.stubEnv('UNGATE_GEMINI_OAUTH_CLIENT_ID', clientId);
+			const warn = vi.spyOn(globalThis.console, 'warn').mockImplementation(() => undefined);
+			const app = await withPlugin(authPlugin);
+
+			const response = await app.inject({ method: 'POST', url: '/auth/gemini/start' });
+
+			expect(response.statusCode).toBe(503);
+			expect(response.json()).toMatchObject({ code: 'login_not_configured' });
+			expect(AccountLoginSessions.findPending('gemini')).toBeFalsy();
+			expect(warn.mock.calls.flat().join(' ')).not.toContain('test-client-secret');
+			await app.close();
+		}
+	);
 
 	it('keeps an account signed in when a refresh finds no OAuth client', async () => {
 		vi.stubEnv('UNGATE_GEMINI_OAUTH_CLIENT_ID', '');
