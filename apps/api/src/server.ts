@@ -71,13 +71,16 @@ const ABSENT_ADDRESS_RETRY_MS = 5000;
  *
  * A further address may belong to an interface that comes and goes, such as a container's veth.
  * While it is absent (`EADDRNOTAVAIL`) it is retried in the background and the other addresses
- * serve; any other failure to listen is fatal.
+ * serve; any other failure to listen is fatal. At startup that rejects; in a background retry it
+ * goes to `onLateFailure`, which by default ends the process so its supervisor restarts it
+ * rather than leaving an address unserved while loopback looks healthy.
  */
 export async function listenOnAll(
 	app: FastifyInstance,
 	hosts: string[],
 	port: number,
-	retryMs: number = ABSENT_ADDRESS_RETRY_MS
+	retryMs: number = ABSENT_ADDRESS_RETRY_MS,
+	onLateFailure: (error: unknown) => void = exitOnLateListenFailure
 ): Promise<void> {
 	const [first, ...rest] = hosts;
 	const extra: Server[] = [];
@@ -110,7 +113,7 @@ export async function listenOnAll(
 			if (closed) return;
 			listenExtra(host).then(
 				() => globalThis.console.log(`[startup] listening on ${host}:${port}`),
-				(error: unknown) => (isAbsentAddress(error) ? retryLater(host) : logger.error(`listen ${host}:${port}`, error))
+				(error: unknown) => (isAbsentAddress(error) ? retryLater(host) : onLateFailure(error))
 			);
 		}, retryMs);
 		retries.add(timer);
@@ -125,6 +128,11 @@ export async function listenOnAll(
 			retryLater(host);
 		}
 	}
+}
+
+function exitOnLateListenFailure(error: unknown): void {
+	globalThis.console.error('[ungate] a further listen address failed; exiting', error);
+	process.exit(1);
 }
 
 function isAbsentAddress(error: unknown): boolean {
