@@ -58,7 +58,8 @@ export class Analytics {
 				source: row.source,
 				inputTokens: row.inputTokens,
 				outputTokens: row.outputTokens,
-				estimatedCost: row.estimatedCost,
+				// Source is authoritative, including historical rows stored with a zero placeholder.
+				estimatedCost: row.source === 'cursor' ? null : row.estimatedCost,
 				stream: row.stream,
 				latencyMs: row.latencyMs,
 				error: row.error

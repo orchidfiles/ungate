@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { CursorRequestError, openaiToCursor } from 'src/adapter/openai-to-cursor';
 import { CompletionRequestTelemetry } from 'src/metrics';
@@ -19,6 +19,20 @@ import type {
 } from '@ungate/shared';
 import type { FastifyReply } from 'fastify';
 import type { OpenAIChatRequest } from 'src/types/openai';
+
+/**
+ * Ungate-owned identity derived from the telemetry session heuristic, not a native Cursor chat id.
+ * UUIDv8 reserves space for application-defined hashes; the domain keeps this separate from other ids.
+ */
+function conversationId(sessionKey: RequestTelemetry['sessionKey']): string {
+	if (!sessionKey) return randomUUID();
+	const bytes = createHash('sha256').update('ungate:cursor-inference:conversation:v1\0').update(sessionKey).digest();
+	bytes[6] = (bytes[6] & 0x0f) | 0x80;
+	bytes[8] = (bytes[8] & 0x3f) | 0x80;
+	const hex = bytes.subarray(0, 16).toString('hex');
+
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 /** Replays already-read events, then continues with the rest of the invocation. */
 async function* prepend(
@@ -118,6 +132,8 @@ export class CursorChatHandler {
 
 			throw error;
 		}
+
+		built.request.conversationId = conversationId(requestTelemetry.sessionKey);
 
 		const signal = clientAbortSignal(reply);
 		const iterator = client.invoke(built.request, signal)[Symbol.asyncIterator]();

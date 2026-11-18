@@ -72,6 +72,8 @@ export class CompletionErrorMapper {
 		});
 
 		switch (error.kind) {
+			case 'billing_blocked':
+				return build(403, 'permission_error', 'billing_blocked');
 			case 'tool_schema':
 				return build(
 					502,

@@ -27,7 +27,9 @@ class FakeTransport extends EventEmitter implements BridgeTransport {
 	send(message: unknown): void {
 		this.sent.push(message as Record<string, unknown>);
 		queueMicrotask(() =>
-			this.reply(message as { id: string; kind: string }, (event) => this.emit('message', { channel: 'ungate.cursor-bridge', ...event }))
+			this.reply(message as { id: string; kind: string }, (event) =>
+				this.emit('message', { channel: 'ungate.cursor-bridge', ...event })
+			)
 		);
 	}
 }
@@ -51,7 +53,9 @@ describe('CursorBridgeClient', () => {
 		const client = new CursorBridgeClient(transport);
 
 		expect(await client.status()).toMatchObject({ available: false, reason: 'no_bridge' });
-		expect(await collect(client.invoke(REQUEST))).toEqual([{ kind: 'end', error: expect.objectContaining({ kind: 'unavailable' }) }]);
+		expect(await collect(client.invoke(REQUEST))).toEqual([
+			{ kind: 'end', error: expect.objectContaining({ kind: 'unavailable' }) }
+		]);
 		expect(transport.sent).toEqual([]);
 	});
 
@@ -125,7 +129,8 @@ describe('SocketBridgeTransport', () => {
 				for (const line of lines) {
 					const { id, kind } = JSON.parse(line) as { id: string; kind: string };
 					const send = (event: object) => socket.write(`${JSON.stringify({ channel: 'ungate.cursor-bridge', id, ...event })}\n`);
-					if (kind === 'status') send({ kind: 'status', status: { available: true, connected: true, reason: 'ok', membershipType: 'pro' } });
+					if (kind === 'status')
+						send({ kind: 'status', status: { available: true, connected: true, reason: 'ok', membershipType: 'pro' } });
 					if (kind === 'invoke') {
 						send({ kind: 'text', text: 'hi' });
 						send({ kind: 'end', error: null });
@@ -172,6 +177,25 @@ describe('SocketBridgeTransport', () => {
 
 		expect(client.isAvailable()).toBe(true);
 		expect(await client.status()).toMatchObject({ connected: true });
+	});
+
+	it('ends the calls the previous connection was serving when a new one takes over', async () => {
+		const path = await listening();
+		const client = new CursorBridgeClient(transport);
+
+		// An extension that takes calls and never answers them.
+		const silent = await new Promise<Socket>((resolve) => {
+			const socket = createConnection(path, () => resolve(socket));
+		});
+		await until(() => client.isAvailable());
+		const pending = collect(client.invoke(REQUEST));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		await extension(path);
+		const events = await pending;
+		expect(events.at(-1)).toMatchObject({ kind: 'end', error: { kind: 'unavailable' } });
+		expect(client.isAvailable()).toBe(true);
+		silent.destroy();
 	});
 
 	it('replaces a socket file a previous run left behind', async () => {

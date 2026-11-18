@@ -24,6 +24,15 @@ const body = (extra: Partial<OpenAIChatRequest> = {}): OpenAIChatRequest =>
 	({ model: 'cursor-grok', stream: true, messages: [{ role: 'user', content: 'hi' }], ...extra }) as OpenAIChatRequest;
 
 describe('openaiToCursor', () => {
+	it('does not infer native context or built-in status from model names', () => {
+		for (const upstreamModel of ['composer-2.5', 'grok-4.7-low-fast', 'claude-sonnet-4.6']) {
+			const { request } = openaiToCursor(body(), { upstreamModel });
+			expect(request).not.toHaveProperty('conversationId');
+			expect(request).not.toHaveProperty('previousRequestId');
+			expect(request).not.toHaveProperty('builtInModel');
+		}
+	});
+
 	it('maps roles, tool history and parallel tool results', () => {
 		const { request } = openaiToCursor(
 			body({

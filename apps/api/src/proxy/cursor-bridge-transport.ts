@@ -78,9 +78,15 @@ export class SocketBridgeTransport extends EventEmitter implements BridgeTranspo
 	}
 
 	private adopt(socket: Socket): void {
+		// The new extension cannot answer what the previous one was serving, so those calls end
+		// as disconnected now, before any call can reach the new socket.
 		const previous = this.socket;
+		if (previous) {
+			this.socket = null;
+			previous.destroy();
+			this.emit('disconnect');
+		}
 		this.socket = socket;
-		previous?.destroy();
 
 		let buffered = '';
 		socket.setEncoding('utf8');
