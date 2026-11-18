@@ -2,7 +2,7 @@ import * as cp from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { sleep, type ApiStatus as ServerStatus, type LogEntry } from '@ungate/shared';
+import { localApiHealthUrl, sleep, type ApiStatus as ServerStatus, type LogEntry } from '@ungate/shared';
 import * as vscode from 'vscode';
 
 import { RuntimeStateStore } from './runtime-state';
@@ -10,8 +10,7 @@ import { config } from './runtime-state/config';
 import { BetterSqlite3Installer } from './utils/better-sqlite3-installer';
 import { NodeResolver } from './utils/node-resolver';
 
-const HEALTH_CHECK_URL = (port: number) => `http://localhost:${port}/health`;
-const STARTING_STATE_TIMEOUT_MS = 10000;
+const HEALTH_CHECK_URL = localApiHealthUrl;
 
 interface ApiServerCallbacks {
 	onLog(level: LogEntry['level'], message: string): void;
@@ -149,7 +148,7 @@ export class ApiServer {
 		if (runtimeState.api.status === 'starting' && runtimeState.api.ownerWindowId !== this.callbacks.getWindowId()) {
 			const startingStateAge = Date.now() - runtimeState.api.lastSeenAt;
 
-			if (startingStateAge < STARTING_STATE_TIMEOUT_MS) {
+			if (startingStateAge < config.apiServer.startingStateTimeoutMs) {
 				return;
 			}
 		}

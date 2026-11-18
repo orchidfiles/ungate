@@ -1,8 +1,57 @@
+import { localApiHealthUrl } from '@ungate/shared';
+
 import { config } from './config';
 import { RuntimeStateFileStore } from './file-store';
 import { RuntimeStateNormalizer } from './normalizer';
 
 import type { RuntimeCommand, RuntimeState } from '@ungate/shared/frontend';
+
+/**
+ * A saved `running` API is stale when its pid is gone or IPv4 health fails.
+ * A fresh `starting` state belongs to a window that is still booting, so it is left alone.
+ */
+export function staleRunningApiNeedsRestart(
+	api: RuntimeState['api'],
+	input: { now: number; pidAlive: boolean; portHealthy: boolean; startingTimeoutMs: number }
+): boolean {
+	if (api.startSuppressed) {
+		return false;
+	}
+
+	if (api.status === 'starting' && input.now - api.lastSeenAt < input.startingTimeoutMs) {
+		return false;
+	}
+
+	if (api.status !== 'running' && api.status !== 'starting') {
+		return false;
+	}
+
+	if (api.pid != null && !input.pidAlive) {
+		return true;
+	}
+
+	if (api.port != null && !input.portHealthy) {
+		return true;
+	}
+
+	return api.status === 'running' && api.pid == null;
+}
+
+export function isProcessAlive(pid: number | null): boolean {
+	if (pid == null || !Number.isInteger(pid) || pid <= 0) {
+		return false;
+	}
+
+	try {
+		process.kill(pid, 0);
+
+		return true;
+	} catch (error) {
+		const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+
+		return code === 'EPERM';
+	}
+}
 
 export class RuntimeStateStore {
 	public static read(): RuntimeState {
@@ -176,6 +225,18 @@ export class RuntimeStateStore {
 		});
 	}
 
+	public static async isApiPortHealthy(port: number): Promise<boolean> {
+		try {
+			const response = await fetch(localApiHealthUrl(port), {
+				signal: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)
+			});
+
+			return response.ok;
+		} catch {
+			return false;
+		}
+	}
+
 	private static isActiveTunnel(state: RuntimeState): boolean {
 		const status = state.tunnel.status;
 
@@ -190,17 +251,5 @@ export class RuntimeStateStore {
 		const ownerId = state.tunnel.ownerWindowId;
 
 		return ownerId === null || !this.getLiveClientIds(state, now).includes(ownerId);
-	}
-
-	private static async isApiPortHealthy(port: number): Promise<boolean> {
-		try {
-			const response = await fetch(`http://localhost:${port}/health`, {
-				signal: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)
-			});
-
-			return response.ok;
-		} catch {
-			return false;
-		}
 	}
 }

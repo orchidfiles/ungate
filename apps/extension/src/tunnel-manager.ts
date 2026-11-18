@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { localApiBaseUrl } from '@ungate/shared';
 import { bin, use, Tunnel } from 'cloudflared';
 
 import { RuntimeStateStore } from './runtime-state';
@@ -138,7 +139,7 @@ export class TunnelManager {
 	}
 
 	private spawnTunnel(port: number): void {
-		const t = Tunnel.quick(`http://localhost:${port}`, {
+		const t = Tunnel.quick(localApiBaseUrl(port), {
 			'--config': getCloudflaredConfigArg(),
 			'--edge-ip-version': '4'
 		});

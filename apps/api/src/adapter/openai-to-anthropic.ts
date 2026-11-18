@@ -29,7 +29,17 @@ export function normalizeModelName(model: string): { model: string; reasoningBud
 		return { model: modelMap[modelType], reasoningBudget: budget || undefined };
 	}
 
-	return { model };
+	return { model: canonicalizeAnthropicModel(model) };
+}
+
+// Anthropic's Opus 5.5 id is hyphenated. A dotted id returns
+// "model: claude-opus-5.5 was not found. Did you mean claude-opus-5-5?"
+export function canonicalizeAnthropicModel(model: string): string {
+	if (model.trim().toLowerCase() === 'claude-opus-5.5') {
+		return 'claude-opus-5-5';
+	}
+
+	return model;
 }
 
 export interface AnthropicModelOverride {
@@ -183,7 +193,7 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 	let normalized: { model: string; reasoningBudget?: string };
 
 	if (override) {
-		normalized = { model: override.model };
+		normalized = { model: canonicalizeAnthropicModel(override.model) };
 
 		if (override.reasoningBudget && override.reasoningBudget !== 'none') {
 			normalized.reasoningBudget = override.reasoningBudget;

@@ -35,6 +35,13 @@ describe('proxy-responses-input-normalizer-modules', () => {
 			model: 'gpt-5.6-sol',
 			reasoningEffort: 'max'
 		});
+		expect(ResponsesModelResolver.resolveModel('gpt-6-astra')).toEqual({
+			model: 'gpt-6-astra'
+		});
+		expect(ResponsesModelResolver.resolveModel('gpt-6-astra-high')).toEqual({
+			model: 'gpt-6-astra',
+			reasoningEffort: 'high'
+		});
 	});
 
 	it('maps function tool_choice and keeps passthrough object', () => {
@@ -67,7 +74,7 @@ describe('proxy-responses-input-normalizer-modules', () => {
 			{ instructionsFallback: 'fallback' }
 		);
 
-		const filtered = payload.input as Array<Record<string, unknown>>;
+		const filtered = payload.input as Record<string, unknown>[];
 
 		expect(filtered).toHaveLength(2);
 		expect(filtered[0]).toMatchObject({ type: 'function_call' });

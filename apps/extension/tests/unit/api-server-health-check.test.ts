@@ -77,7 +77,8 @@ vi.mock('../../src/utils/better-sqlite3-installer', () => {
 
 vi.mock('@ungate/shared', () => {
 	return {
-		sleep: sleepMock
+		sleep: sleepMock,
+		localApiHealthUrl: (port: number) => `http://127.0.0.1:${port}/health`
 	};
 });
 

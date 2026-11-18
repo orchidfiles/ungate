@@ -66,6 +66,9 @@ const runtimePeekCommandMock = vi.fn<() => RuntimeCommand | null>();
 const runtimeReconcileOrphanedTunnelMock = vi.fn<(state?: RuntimeState) => Promise<RuntimeState>>();
 const runtimeRemoveCommandMock = vi.fn<(commandId: string) => Promise<RuntimeState>>();
 const prepareApiForBootstrapMock = vi.fn(() => Promise.resolve(runtimeReadMock()));
+const isProcessAliveMock = vi.fn<(pid: number | null) => boolean>(() => true);
+const isApiPortHealthyMock = vi.fn<(port: number) => Promise<boolean>>(() => Promise.resolve(true));
+const resetApiForRestartMock = vi.fn<() => Promise<void>>(() => Promise.resolve());
 
 const apiServerStartMock = vi.fn().mockResolvedValue(undefined);
 const apiServerStopMock = vi.fn().mockResolvedValue(undefined);
@@ -106,9 +109,17 @@ vi.mock('vscode', () => {
 	};
 });
 
-vi.mock('../../src/runtime-state', () => {
+vi.mock('../../src/runtime-state', async () => {
+	const actual = await vi.importActual<typeof import('../../src/runtime-state/runtime-state-store')>(
+		'../../src/runtime-state/runtime-state-store'
+	);
+
 	return {
+		staleRunningApiNeedsRestart: actual.staleRunningApiNeedsRestart,
+		isProcessAlive: (pid: number | null) => isProcessAliveMock(pid),
 		RuntimeStateStore: {
+			isApiPortHealthy: (port: number) => isApiPortHealthyMock(port),
+			resetApiForRestart: () => resetApiForRestartMock(),
 			read: runtimeReadMock,
 			hasLiveClients: runtimeHasLiveClientsMock,
 			getLiveClientIds: runtimeGetLiveClientIdsMock,
@@ -313,6 +324,48 @@ describe('ExtensionController', () => {
 		apiServerSyncLeaderHealthMonitorMock.mockClear();
 		apiServerGetPortMock.mockReturnValue(null);
 		apiServerStartMock.mockResolvedValue(undefined);
+		isProcessAliveMock.mockReset();
+		isProcessAliveMock.mockReturnValue(true);
+		isApiPortHealthyMock.mockReset();
+		isApiPortHealthyMock.mockResolvedValue(true);
+		resetApiForRestartMock.mockReset();
+		resetApiForRestartMock.mockResolvedValue(undefined);
+	});
+
+	it('restarts a dead api from leader sync', async () => {
+		const { controller, apiServer } = createController('window-a');
+		const runtimeState = createRuntimeState(['window-a'], 47821);
+		const stoppedState = createRuntimeState(['window-a'], null);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a']);
+		runtimeTouchClientMock.mockResolvedValue(runtimeState);
+		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
+		isProcessAliveMock.mockReturnValue(false);
+		isApiPortHealthyMock.mockResolvedValue(false);
+		resetApiForRestartMock.mockImplementation(() => {
+			runtimeReadMock.mockReturnValue(stoppedState);
+
+			return Promise.resolve();
+		});
+
+		await getInternals(controller).syncFromRuntimeState();
+
+		expect(resetApiForRestartMock).toHaveBeenCalledTimes(1);
+		expect(apiServer.start).toHaveBeenCalledTimes(1);
+	});
+
+	it('leaves a healthy api alone during leader sync', async () => {
+		const { controller, apiServer } = createController('window-a');
+		const runtimeState = createRuntimeState(['window-a'], 47821);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a']);
+		runtimeTouchClientMock.mockResolvedValue(runtimeState);
+		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
+
+		await getInternals(controller).syncFromRuntimeState();
+
+		expect(resetApiForRestartMock).not.toHaveBeenCalled();
+		expect(apiServer.start).not.toHaveBeenCalled();
 	});
 
 	it('starts the api on activate bootstrap when leader has no port', async () => {

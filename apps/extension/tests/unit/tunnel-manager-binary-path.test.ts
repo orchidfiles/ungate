@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => {
 		existsSyncMock: vi.fn(),
 		renameSyncMock: vi.fn(),
 		useMock: vi.fn(),
+		quickMock: vi.fn(() => ({
+			on: vi.fn(),
+			stop: vi.fn()
+		})),
 		binExport: '/dev/cloudflared-package/bin/cloudflared'
 	};
 });
@@ -17,10 +21,7 @@ vi.mock('cloudflared', () => {
 		bin: mocks.binExport,
 		use: mocks.useMock,
 		Tunnel: {
-			quick: vi.fn(() => ({
-				on: vi.fn(),
-				stop: vi.fn()
-			}))
+			quick: mocks.quickMock
 		}
 	};
 });
@@ -134,5 +135,16 @@ describe('TunnelManager cloudflared binary path', () => {
 			error: 'Install failed: Checksum mismatch for cloudflared-linux-amd64'
 		});
 		expect(mocks.useMock).not.toHaveBeenCalled();
+	});
+
+	it('points the tunnel at IPv4 loopback', async () => {
+		Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+		mocks.existsSyncMock.mockReturnValue(true);
+		vi.spyOn(CloudflaredInstaller, 'isPinnedInstall').mockReturnValue(true);
+
+		await createManager().start(47821);
+
+		expect(mocks.quickMock).toHaveBeenCalledWith('http://127.0.0.1:47821', expect.objectContaining({ '--edge-ip-version': '4' }));
 	});
 });
