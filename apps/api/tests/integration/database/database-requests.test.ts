@@ -24,6 +24,35 @@ describe('database-requests', () => {
 		});
 	});
 
+	it('reports a failed request on a Cursor-routed model as unknown cost', () => {
+		getDb()
+			.insert(schema.modelMappings)
+			.values({ id: 'ungate-grok-4.7-high', label: 'Grok', provider: 'cursor', upstreamModel: 'grok-4.7-high' })
+			.run();
+		const cursorFailure = Requests.record({
+			model: 'ungate-grok-4.7-high',
+			source: 'error',
+			inputTokens: 0,
+			outputTokens: 0,
+			stream: false,
+			latencyMs: 5,
+			error: 'billing_blocked'
+		});
+		const otherFailure = Requests.record({
+			model: 'claude-sonnet-4-6',
+			source: 'error',
+			inputTokens: 0,
+			outputTokens: 0,
+			stream: false,
+			latencyMs: 5,
+			error: 'boom'
+		});
+
+		const recent = Analytics.getRecent();
+		expect(recent.find((row) => row.id === cursorFailure)?.estimatedCost).toBeNull();
+		expect(recent.find((row) => row.id === otherFailure)?.estimatedCost).toBe(0);
+	});
+
 	it('records request with estimated cost and error field', () => {
 		const id = Requests.record({
 			model: 'claude-sonnet-4-6',

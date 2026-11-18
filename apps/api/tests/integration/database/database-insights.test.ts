@@ -60,6 +60,23 @@ describe('Analytics.getInsights', () => {
 		]);
 	});
 
+	it('counts failed requests on Cursor-routed models as unknown cost', () => {
+		seedAccounts();
+		getSqlite()
+			.prepare(
+				"INSERT INTO model_mappings (id, label, provider, upstream_model) VALUES ('ungate-grok-4.7-high', 'Grok', 'cursor', 'grok-4.7-high')"
+			)
+			.run();
+		row(0, { source: 'error', model: 'ungate-grok-4.7-high', accountId: 'acct-a', error: 'billing_blocked' });
+		row(1, { source: 'error', accountId: 'acct-b', error: 'boom' });
+		const insights = Analytics.getInsights('day', BASE, BASE + 10 * 60_000);
+		expect(insights.accounts.find((account) => account.accountId === 'acct-a')).toMatchObject({
+			estimatedCost: null,
+			unknownCostRequests: 1
+		});
+		expect(insights.accounts.find((account) => account.accountId === 'acct-b')).toMatchObject({ unknownCostRequests: 0 });
+	});
+
 	it('aggregates telemetry for accounts, sessions, tools and continuations', () => {
 		seedAccounts();
 		// Legacy row from before telemetry: no cache split, no stop reason.

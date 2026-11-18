@@ -1,3 +1,5 @@
+import { unknownCostCondition } from './request-cost';
+
 import type {
 	AccountInsight,
 	AccountSeriesPoint,
@@ -252,8 +254,8 @@ export class UsageInsightsQuery {
 				COUNT(*) AS requests,
 				SUM(r.input_tokens) AS inputTokens,
 				SUM(r.output_tokens) AS outputTokens,
-				SUM(CASE WHEN r.source != 'cursor' THEN r.estimated_cost END) AS estimatedCost,
-				SUM(CASE WHEN r.source = 'cursor' THEN 1 ELSE 0 END) AS unknownCostRequests,
+				SUM(CASE WHEN NOT ${unknownCostCondition('r')} THEN r.estimated_cost END) AS estimatedCost,
+				SUM(CASE WHEN ${unknownCostCondition('r')} THEN 1 ELSE 0 END) AS unknownCostRequests,
 				SUM(CASE WHEN r.source = 'error' THEN 1 ELSE 0 END) AS errors,
 				SUM(CASE WHEN r.attempts > 1 THEN 1 ELSE 0 END) AS rotatedIn,
 				MAX(r.timestamp) AS lastUsed
