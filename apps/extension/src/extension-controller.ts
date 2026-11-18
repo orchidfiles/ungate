@@ -15,7 +15,7 @@ import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar } from './extension-status-bar';
 import { OpenAiKeyFix } from './openai-key-fix';
-import { isProcessAlive, RuntimeStateStore, staleRunningApiNeedsRestart } from './runtime-state';
+import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { TunnelManager } from './tunnel-manager';
 
@@ -592,10 +592,15 @@ export class ExtensionController {
 		}
 
 		const api = runtimeState.api;
-		const portHealthy = api.port != null ? await RuntimeStateStore.isApiPortHealthy(api.port) : false;
-		const needsRestart = staleRunningApiNeedsRestart(api, {
+		let portHealthy = false;
+
+		if (api.port != null) {
+			portHealthy = await RuntimeStateStore.isApiPortHealthy(api.port);
+		}
+
+		const needsRestart = RuntimeStateStore.staleRunningApiNeedsRestart(api, {
 			now: Date.now(),
-			pidAlive: isProcessAlive(api.pid),
+			pidAlive: RuntimeStateStore.isProcessAlive(api.pid),
 			portHealthy,
 			startingTimeoutMs: config.apiServer.startingStateTimeoutMs
 		});

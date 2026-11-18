@@ -6,6 +6,15 @@ Ungate is a Cursor extension that lets you use Claude, ChatGPT, and MiniMax subs
 
 Scope: one monorepo with the extension, proxy, and web UI. Tunnel integration is part of the product because Cursor cannot reach `localhost` from its backend. Hosted deployment, custom domains, and external key-management infrastructure are out of scope.
 
+## Code style
+
+Prefer OOP with classes over standalone pure functions.
+
+- Put named logic on classes: instance classes for stateful units, all-static classes for helpers and facades.
+- One class per file. Do not mix static and instance methods on the same class.
+- Do not add module-level helper functions (`function foo`, `export function bar`). Exceptions: VS Code `activate` / `deactivate` entrypoints.
+- Prefer self-documenting names and structure over comments.
+
 ## Monorepo (pnpm workspace)
 
 ```

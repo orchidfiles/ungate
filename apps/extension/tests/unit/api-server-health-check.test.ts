@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiServer } from '../../src/api-server';
+import { config } from '../../src/runtime-state/config';
 
 import { TestHelper } from './helpers/test-helper';
 
@@ -239,7 +240,48 @@ describe('ApiServer.runHealthCheckCycle', () => {
 
 		await internals.runHealthCheckCycle();
 
-		expect(onStatusChange).not.toHaveBeenCalledWith('stopped');
+		expect(onStatusChange).not.toHaveBeenCalled();
+		expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
+		expect(internals.port).toBe(4783);
+	});
+
+	it('does not latch auto-start after repeated health-check misses', async () => {
+		const runtimeState = createRuntimeState();
+		const { server, onStatusChange, onLog } = createServer();
+		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeHasLiveClientsMock.mockReturnValue(true);
+		runtimeMutateMock.mockImplementation((mutator) => {
+			const nextState = mutator(structuredClone(runtimeState));
+
+			return Promise.resolve(nextState);
+		});
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => {
+				return Promise.reject(new Error('connection refused'));
+			})
+		);
+
+		Object.assign(internals, {
+			port: 4783,
+			lastStatus: 'running',
+			process: null
+		});
+
+		for (let attempt = 0; attempt < config.apiServer.healthCheckFailureLimit - 1; attempt += 1) {
+			await internals.runHealthCheckCycle();
+		}
+
+		expect(onStatusChange).not.toHaveBeenCalled();
+		expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
+
+		await internals.runHealthCheckCycle();
+
+		expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
+		expect(onStatusChange).toHaveBeenCalledWith('error');
+		expect(onLog).toHaveBeenCalledWith('error', '[process] health check failed');
+		expect(internals.port).toBeNull();
 	});
 
 	it('attaches to an existing healthy api without spawning a new process', async () => {
@@ -569,11 +611,13 @@ describe('ApiServer.onExit', () => {
 			shutDownDeliberately: false,
 			process: null
 		});
+		suppressApiAutoStartMock.mockClear();
 
 		internals.onExit(1, null);
 		await flushPromises();
 
 		expect(onStatusChange).toHaveBeenCalledWith('error');
+		expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
 	});
 
 	it('does not respawn after a clean exit when extension host is inactive', async () => {

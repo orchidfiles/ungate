@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { localApiBaseUrl } from '@ungate/shared';
 import { bin, use, Tunnel } from 'cloudflared';
 
-import { RuntimeStateStore } from './runtime-state';
+import { CloudflaredProcess, RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
 
@@ -13,20 +13,9 @@ import type { LogEntry, TunnelState } from '@ungate/shared/frontend';
 
 const CLOUDFLARED_BIN_DIR = path.join(os.homedir(), '.ungate', 'bin');
 
-function getCloudflaredBinPath(): string {
-	return path.join(CLOUDFLARED_BIN_DIR, process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
-}
-
-function getCloudflaredLegacyBinPath(): string {
-	return path.join(CLOUDFLARED_BIN_DIR, 'cloudflared');
-}
-
-function getCloudflaredConfigArg(): string {
-	return process.platform === 'win32' ? 'NUL' : '/dev/null';
-}
-
 export class TunnelManager {
 	private tunnel: Tunnel | null = null;
+	private adoptedPid: number | null = null;
 	private state: TunnelState = { status: 'stopped', url: null, error: null };
 	private readonly windowId: string;
 	private autoStopTimer: NodeJS.Timeout | null = null;
@@ -46,6 +35,10 @@ export class TunnelManager {
 
 	async start(port: number): Promise<void> {
 		if (this.state.status === 'running') {
+			return;
+		}
+
+		if (this.adoptRunningTunnel(port)) {
 			return;
 		}
 
@@ -77,7 +70,42 @@ export class TunnelManager {
 			this.tunnel = null;
 		}
 
+		this.stopAdoptedProcess();
 		this.setState({ status: 'stopped', url: null, error: null });
+	}
+
+	/**
+	 * A cloudflared process is already proxying this port and the shared state
+	 * still has its public URL. Reuse that URL instead of requesting a new quick tunnel.
+	 */
+	private adoptRunningTunnel(port: number): boolean {
+		const serving = CloudflaredProcess.findServing(port);
+		const recordedUrl = RuntimeStateStore.read().tunnel?.url ?? null;
+
+		if (!serving || !recordedUrl) {
+			return false;
+		}
+
+		this.adoptedPid = serving.pid;
+		this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${recordedUrl}` });
+		this.setState({ status: 'running', url: recordedUrl, error: null });
+		this.scheduleAutoStop();
+
+		return true;
+	}
+
+	private stopAdoptedProcess(): void {
+		if (this.adoptedPid == null) {
+			return;
+		}
+
+		try {
+			process.kill(this.adoptedPid);
+		} catch {
+			// The process already exited.
+		}
+
+		this.adoptedPid = null;
 	}
 
 	async restart(port: number): Promise<void> {
@@ -102,7 +130,7 @@ export class TunnelManager {
 		this.onLog({ timestamp: Date.now(), level: 'info', message: `Downloading cloudflared ${CLOUDFLARED_VERSION}...` });
 
 		try {
-			const installedPath = await CloudflaredInstaller.install(getCloudflaredBinPath());
+			const installedPath = await CloudflaredInstaller.install(this.getCloudflaredBinPath());
 
 			use(installedPath);
 			this.onLog({
@@ -124,8 +152,8 @@ export class TunnelManager {
 	 * they get replaced by a checksum-verified one instead of being executed.
 	 */
 	private resolveUserBinaryPath(): string | null {
-		const binPath = getCloudflaredBinPath();
-		const legacyPath = getCloudflaredLegacyBinPath();
+		const binPath = this.getCloudflaredBinPath();
+		const legacyPath = this.getCloudflaredLegacyBinPath();
 
 		if (process.platform === 'win32' && !fs.existsSync(binPath) && fs.existsSync(legacyPath)) {
 			fs.renameSync(legacyPath, binPath);
@@ -138,9 +166,29 @@ export class TunnelManager {
 		return null;
 	}
 
+	private getCloudflaredBinPath(): string {
+		if (process.platform === 'win32') {
+			return path.join(CLOUDFLARED_BIN_DIR, 'cloudflared.exe');
+		}
+
+		return path.join(CLOUDFLARED_BIN_DIR, 'cloudflared');
+	}
+
+	private getCloudflaredLegacyBinPath(): string {
+		return path.join(CLOUDFLARED_BIN_DIR, 'cloudflared');
+	}
+
+	private getCloudflaredConfigArg(): string {
+		if (process.platform === 'win32') {
+			return 'NUL';
+		}
+
+		return '/dev/null';
+	}
+
 	private spawnTunnel(port: number): void {
 		const t = Tunnel.quick(localApiBaseUrl(port), {
-			'--config': getCloudflaredConfigArg(),
+			'--config': this.getCloudflaredConfigArg(),
 			'--edge-ip-version': '4'
 		});
 		this.tunnel = t;
@@ -152,7 +200,7 @@ export class TunnelManager {
 		});
 
 		t.on('stderr', (data) => {
-			const lines = data.split('\n').filter((l) => l.trim());
+			const lines = data.split('\n').filter((line) => line.trim());
 
 			for (const line of lines) {
 				this.onLog({ timestamp: Date.now(), level: 'info', message: line });
@@ -171,9 +219,17 @@ export class TunnelManager {
 			const wasStarting = this.state.status === 'starting';
 
 			if (this.state.status !== 'stopped') {
-				const next: TunnelState = wasStarting
-					? { status: 'error', url: null, error: `Process exited before tunnel was ready (code=${code})` }
-					: { status: 'stopped', url: null, error: null };
+				let next: TunnelState;
+
+				if (wasStarting) {
+					next = {
+						status: 'error',
+						url: null,
+						error: `Process exited before tunnel was ready (code=${code})`
+					};
+				} else {
+					next = { status: 'stopped', url: null, error: null };
+				}
 
 				this.setState(next);
 			}

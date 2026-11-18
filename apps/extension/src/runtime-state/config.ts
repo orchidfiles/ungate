@@ -27,6 +27,9 @@ export const config = {
 		restartDelayMs: 500,
 		// Request timeout for periodic API health checks.
 		healthCheckRequestTimeoutMs: 2000,
+		// Consecutive missed /health probes before the API is treated as down.
+		// A miss does not latch startSuppressed; the leader may start the API again.
+		healthCheckFailureLimit: 3,
 		// Request timeout used when validating an existing API port.
 		portHealthRequestTimeoutMs: 1500,
 		// Another window's `starting` state is left alone until this age.

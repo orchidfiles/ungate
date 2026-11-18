@@ -1,59 +1,80 @@
 import { localApiHealthUrl } from '@ungate/shared';
 
+import { CloudflaredProcess } from './cloudflared-process';
 import { config } from './config';
 import { RuntimeStateFileStore } from './file-store';
 import { RuntimeStateNormalizer } from './normalizer';
 
 import type { RuntimeCommand, RuntimeState } from '@ungate/shared/frontend';
 
-/**
- * A saved `running` API is stale when its pid is gone or IPv4 health fails.
- * A fresh `starting` state belongs to a window that is still booting, so it is left alone.
- */
-export function staleRunningApiNeedsRestart(
-	api: RuntimeState['api'],
-	input: { now: number; pidAlive: boolean; portHealthy: boolean; startingTimeoutMs: number }
-): boolean {
-	if (api.startSuppressed) {
-		return false;
-	}
-
-	if (api.status === 'starting' && input.now - api.lastSeenAt < input.startingTimeoutMs) {
-		return false;
-	}
-
-	if (api.status !== 'running' && api.status !== 'starting') {
-		return false;
-	}
-
-	if (api.pid != null && !input.pidAlive) {
-		return true;
-	}
-
-	if (api.port != null && !input.portHealthy) {
-		return true;
-	}
-
-	return api.status === 'running' && api.pid == null;
-}
-
-export function isProcessAlive(pid: number | null): boolean {
-	if (pid == null || !Number.isInteger(pid) || pid <= 0) {
-		return false;
-	}
-
-	try {
-		process.kill(pid, 0);
-
-		return true;
-	} catch (error) {
-		const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
-
-		return code === 'EPERM';
-	}
+export interface StaleApiRestartInput {
+	now: number;
+	pidAlive: boolean;
+	portHealthy: boolean;
+	startingTimeoutMs: number;
 }
 
 export class RuntimeStateStore {
+	/**
+	 * A saved API needs a leader start when it is `running` but its pid or IPv4 health is gone,
+	 * or when it is `stopped` / `error` and the port is down. A fresh `starting` state belongs
+	 * to a window that is still booting. `startSuppressed` stays down: that latch is for a
+	 * spawn that cannot run, not for a missed health check.
+	 */
+	public static staleRunningApiNeedsRestart(api: RuntimeState['api'], input: StaleApiRestartInput): boolean {
+		if (api.startSuppressed) {
+			return false;
+		}
+
+		if (api.status === 'starting' && input.now - api.lastSeenAt < input.startingTimeoutMs) {
+			return false;
+		}
+
+		if (api.status === 'stopped' || api.status === 'error') {
+			if (api.port == null || !input.portHealthy) {
+				return true;
+			}
+
+			return false;
+		}
+
+		if (api.status !== 'running' && api.status !== 'starting') {
+			return false;
+		}
+
+		if (api.pid != null && !input.pidAlive) {
+			return true;
+		}
+
+		if (api.port != null && !input.portHealthy) {
+			return true;
+		}
+
+		if (api.status === 'running' && api.pid == null) {
+			return true;
+		}
+
+		return false;
+	}
+
+	public static isProcessAlive(pid: number | null): boolean {
+		if (pid == null || !Number.isInteger(pid) || pid <= 0) {
+			return false;
+		}
+
+		try {
+			process.kill(pid, 0);
+
+			return true;
+		} catch (error) {
+			if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') {
+				return true;
+			}
+
+			return false;
+		}
+	}
+
 	public static read(): RuntimeState {
 		return RuntimeStateFileStore.read();
 	}
@@ -117,8 +138,18 @@ export class RuntimeStateStore {
 			return state;
 		}
 
+		// The owner window is gone, but cloudflared may still be proxying the API.
+		// Dropping the URL here is what mints a new quick-tunnel name on the next start.
+		if (state.tunnel.url && CloudflaredProcess.findServing(state.api.port)) {
+			return state;
+		}
+
 		return await this.mutate((current) => {
 			if (!this.isOrphanedTunnel(current)) {
+				return current;
+			}
+
+			if (current.tunnel.url && CloudflaredProcess.findServing(current.api.port)) {
 				return current;
 			}
 
@@ -170,8 +201,11 @@ export class RuntimeStateStore {
 
 	public static async prepareApiForBootstrap(): Promise<RuntimeState> {
 		const current = this.read();
+		let portHealthy = false;
 
-		const portHealthy = current.api.port !== null ? await this.isApiPortHealthy(current.api.port) : false;
+		if (current.api.port !== null) {
+			portHealthy = await this.isApiPortHealthy(current.api.port);
+		}
 
 		if (portHealthy) {
 			return await this.mutate((state) => {
@@ -240,7 +274,11 @@ export class RuntimeStateStore {
 	private static isActiveTunnel(state: RuntimeState): boolean {
 		const status = state.tunnel.status;
 
-		return status === 'running' || status === 'starting' || status === 'installing';
+		if (status === 'running' || status === 'starting' || status === 'installing') {
+			return true;
+		}
+
+		return false;
 	}
 
 	private static isOrphanedTunnel(state: RuntimeState, now = Date.now()): boolean {
@@ -250,6 +288,14 @@ export class RuntimeStateStore {
 
 		const ownerId = state.tunnel.ownerWindowId;
 
-		return ownerId === null || !this.getLiveClientIds(state, now).includes(ownerId);
+		if (ownerId === null) {
+			return true;
+		}
+
+		if (!this.getLiveClientIds(state, now).includes(ownerId)) {
+			return true;
+		}
+
+		return false;
 	}
 }
