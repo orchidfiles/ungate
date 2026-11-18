@@ -41,14 +41,11 @@ vi.mock('node:fs', async (importOriginal) => {
 	};
 });
 
-vi.mock('../../src/runtime-state/cloudflared-process', () => {
-	return {
-		findServingCloudflared: (port: number) => mocks.findServingCloudflaredMock(port)
-	};
-});
-
 vi.mock('../../src/runtime-state', () => {
 	return {
+		CloudflaredProcess: {
+			findServing: (port: number) => mocks.findServingCloudflaredMock(port)
+		},
 		RuntimeStateStore: {
 			mutate: vi.fn((mutator: (state: unknown) => unknown) => Promise.resolve(mutator({ tunnel: {} }))),
 			read: () => mocks.runtimeReadMock(),

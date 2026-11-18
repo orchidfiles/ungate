@@ -429,11 +429,11 @@ export class ApiServer {
 
 	private async probeHealth(port: number): Promise<boolean> {
 		try {
-			const res = await fetch(HEALTH_CHECK_URL(port), {
+			const response = await fetch(HEALTH_CHECK_URL(port), {
 				signal: AbortSignal.timeout(config.apiServer.healthCheckRequestTimeoutMs)
 			});
 
-			return res.ok;
+			return response.ok;
 		} catch {
 			return false;
 		}

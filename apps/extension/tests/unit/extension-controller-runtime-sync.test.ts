@@ -115,9 +115,10 @@ vi.mock('../../src/runtime-state', async () => {
 	);
 
 	return {
-		staleRunningApiNeedsRestart: actual.staleRunningApiNeedsRestart,
-		isProcessAlive: (pid: number | null) => isProcessAliveMock(pid),
 		RuntimeStateStore: {
+			staleRunningApiNeedsRestart: (...args: Parameters<typeof actual.RuntimeStateStore.staleRunningApiNeedsRestart>) =>
+				actual.RuntimeStateStore.staleRunningApiNeedsRestart(...args),
+			isProcessAlive: (pid: number | null) => isProcessAliveMock(pid),
 			isApiPortHealthy: (port: number) => isApiPortHealthyMock(port),
 			resetApiForRestart: () => resetApiForRestartMock(),
 			read: runtimeReadMock,
