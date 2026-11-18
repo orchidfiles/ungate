@@ -151,7 +151,16 @@ function balanceText(value: number | null): string {
 									{percent(account.requests > 0 ? account.errors / account.requests : null, 1)}
 								</td>
 								<td class="py-2 pr-3 text-right">{compact(account.rotatedIn)}</td>
-								<td class="py-2 pr-3 text-right">${account.estimatedCost.toFixed(2)}</td>
+								<td class="py-2 pr-3 text-right">
+									{#if account.estimatedCost == null}
+										Unknown (not free)
+									{:else}
+										${account.estimatedCost.toFixed(2)}
+									{/if}
+									{#if account.unknownCostRequests > 0}
+										<span class="block text-xs text-surface-400">Incomplete pricing: {account.unknownCostRequests} unknown</span>
+									{/if}
+								</td>
 								<td class="py-2 text-right">{busiestWindow(account.accountId)}</td>
 							</tr>
 						{/each}

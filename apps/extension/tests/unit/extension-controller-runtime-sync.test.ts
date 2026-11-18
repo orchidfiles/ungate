@@ -27,7 +27,6 @@ interface MockDashboard {
 	pushLog: ReturnType<typeof vi.fn>;
 	sendKeyFixState: ReturnType<typeof vi.fn>;
 	sendAutoTunnelState: ReturnType<typeof vi.fn>;
-	sendTunnelConfig: ReturnType<typeof vi.fn>;
 	sendCursorProviderState: ReturnType<typeof vi.fn>;
 	show: ReturnType<typeof vi.fn>;
 }
