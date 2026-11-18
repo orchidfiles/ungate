@@ -1,4 +1,5 @@
 import { ClaudeCliVersion } from '@ungate/shared/frontend';
+import { SvelteSet } from 'svelte/reactivity';
 
 import type { AppSettings, ClaudeCliVersionMode, ModelMappingConfig, ModelMappingProvider } from '@ungate/shared/frontend';
 
@@ -112,13 +113,25 @@ function validate(): string | null {
 		return 'Port must be an integer between 1 and 65535.';
 	}
 
+	const seenIds = new SvelteSet<string>();
+
 	for (const model of models) {
-		if (!model.id.trim()) {
+		const modelId = model.id.trim();
+
+		if (!modelId) {
 			return 'Every model must have a Model ID.';
 		}
 
+		const idKey = modelId.toLowerCase();
+
+		if (seenIds.has(idKey)) {
+			return `Model ID "${modelId}" is used more than once.`;
+		}
+
+		seenIds.add(idKey);
+
 		if (!model.label.trim()) {
-			return `Model "${model.id}" must have a label.`;
+			return `Model "${modelId}" must have a label.`;
 		}
 
 		if (!model.upstreamModel.trim()) {

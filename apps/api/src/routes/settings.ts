@@ -10,6 +10,7 @@ import {
 } from '@ungate/shared';
 
 import { Settings } from '../database/app-settings';
+import { DuplicateModelIdError } from '../database/model-mappings';
 import { logger } from '../utils/logger';
 
 import type { FastifyPluginCallback } from 'fastify';
@@ -94,7 +95,17 @@ const plugin: FastifyPluginCallback = (app) => {
 			return reply.code(400).send({ ok: false, error: validation.error });
 		}
 
-		Settings.update(validation.value);
+		try {
+			Settings.update(validation.value);
+		} catch (error) {
+			if (error instanceof DuplicateModelIdError) {
+				logger.error(`Settings update failed: ${error.message}`);
+
+				return reply.code(400).send({ ok: false, error: error.message });
+			}
+
+			throw error;
+		}
 
 		return reply.send({ ok: true });
 	});
