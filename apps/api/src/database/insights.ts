@@ -242,7 +242,8 @@ export class UsageInsightsQuery {
 			requests: number;
 			inputTokens: number;
 			outputTokens: number;
-			estimatedCost: number;
+			estimatedCost: number | null;
+			unknownCostRequests: number;
 			errors: number;
 			rotatedIn: number;
 			lastUsed: number | null;
@@ -251,7 +252,8 @@ export class UsageInsightsQuery {
 				COUNT(*) AS requests,
 				SUM(r.input_tokens) AS inputTokens,
 				SUM(r.output_tokens) AS outputTokens,
-				SUM(r.estimated_cost) AS estimatedCost,
+				SUM(CASE WHEN r.source != 'cursor' THEN r.estimated_cost END) AS estimatedCost,
+				SUM(CASE WHEN r.source = 'cursor' THEN 1 ELSE 0 END) AS unknownCostRequests,
 				SUM(CASE WHEN r.source = 'error' THEN 1 ELSE 0 END) AS errors,
 				SUM(CASE WHEN r.attempts > 1 THEN 1 ELSE 0 END) AS rotatedIn,
 				MAX(r.timestamp) AS lastUsed

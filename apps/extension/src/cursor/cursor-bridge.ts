@@ -1,6 +1,7 @@
 import {
 	CURSOR_BRIDGE_CHANNEL,
 	CURSOR_BRIDGE_MAX_REQUEST_BYTES,
+	cursorInferenceBillingError,
 	isCursorBridgeMessage,
 	type CursorBridgeError,
 	type CursorBridgeEventBody,
@@ -200,6 +201,14 @@ export class CursorBridge {
 	}
 
 	private async invoke(id: string, request: CursorInferenceRequest): Promise<void> {
+		// Billing policy precedes auth recovery, request validation, pacing and transport.
+		const billingBlocked = cursorInferenceBillingError();
+		if (billingBlocked) {
+			this.emit(id, { kind: 'end', error: billingBlocked });
+
+			return;
+		}
+
 		const gated = await this.gate();
 		const blocked = gated ?? this.validate(id, request);
 		if (blocked) {

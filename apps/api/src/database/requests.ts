@@ -12,7 +12,8 @@ const MAX_TOOL_NAMES = 32;
 export class Requests {
 	static record(record: RequestRecord): number {
 		const db = getDb();
-		// Cursor subscription models have no published API price; never show an estimate for them.
+		// The legacy NOT NULL column requires a placeholder for Cursor. It is not a price:
+		// analytics must interpret source='cursor' as unknown, including historical rows.
 		const estimatedCost =
 			record.source === 'cursor'
 				? 0

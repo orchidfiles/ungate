@@ -2,9 +2,28 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { getDb, schema } from 'src/database';
+import { Analytics } from 'src/database/analytics';
 import { Requests } from 'src/database/requests';
 
 describe('database-requests', () => {
+	it('keeps Cursor pricing unknown after recording and updating tokens', () => {
+		const id = Requests.record({
+			model: 'claude-sonnet-4-6',
+			source: 'cursor',
+			inputTokens: 10,
+			outputTokens: 20,
+			stream: true,
+			latencyMs: null
+		});
+		expect(Analytics.getRecent().find((row) => row.id === id)?.estimatedCost).toBeNull();
+		Requests.updateTokens(id, 100, 200);
+		expect(Analytics.getRecent().find((row) => row.id === id)).toMatchObject({
+			inputTokens: 100,
+			outputTokens: 200,
+			estimatedCost: null
+		});
+	});
+
 	it('records request with estimated cost and error field', () => {
 		const id = Requests.record({
 			model: 'claude-sonnet-4-6',

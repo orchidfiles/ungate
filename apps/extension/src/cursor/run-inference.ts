@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
+import {
+	cursorInferenceBillingError,
+	type CursorBridgeError,
+	type CursorBridgeErrorKind,
+	type CursorBridgeEventBody,
+	type CursorInferenceRequest,
+	type CursorUsage
+} from '@ungate/shared';
+
 import { CONNECT_FLAG_END_STREAM, openBidiStream, type Http2Connect } from './connect-transport';
 
 import type { CursorRequestCredentials } from './cursor-session';
-import type {
-	CursorBridgeError,
-	CursorBridgeErrorKind,
-	CursorBridgeEventBody,
-	CursorInferenceRequest,
-	CursorUsage
-} from '@ungate/shared';
 
 export const RUN_INFERENCE_PATH = '/aiserver.v1.InferenceService/RunInference';
 
@@ -280,11 +282,23 @@ export interface RunInferenceOptions {
 
 const DEFAULT_DEADLINE_MS = 10 * 60 * 1000;
 
-function buildRunRequest(modelId: string): JsonRecord {
+/**
+ * Pure wire builder. Cursor 3.29.9 cursor-agent-host/dist/900.js passes
+ * conversationId, requestedModel and previousRequestId on runRequest, not the
+ * invocation. Callers supply only verified model metadata and genuine linkage;
+ * absent provenance stays absent. No lineage headers are synthesized.
+ */
+export function buildRunRequest(request: CursorInferenceRequest, fallbackConversationId: string): JsonRecord {
 	return {
 		runRequest: {
-			conversationId: randomUUID(),
-			requestedModel: { modelId, maxMode: false, parameters: [], builtInModel: true },
+			conversationId: request.conversationId ?? fallbackConversationId,
+			...(request.previousRequestId === undefined ? {} : { previousRequestId: request.previousRequestId }),
+			requestedModel: {
+				modelId: request.modelId,
+				maxMode: false,
+				parameters: [],
+				...(request.builtInModel === undefined ? {} : { builtInModel: request.builtInModel })
+			},
 			supportsLongReasoningReminder: false,
 			supportsAgentLoopError: true,
 			supportsDeltaInvocations: false,
@@ -296,7 +310,7 @@ function buildRunRequest(modelId: string): JsonRecord {
 }
 
 /** Run-scoped fields belong on `runRequest`; Cursor rejects them inside `invokeModel.request`. */
-function buildStreamRequest(request: CursorInferenceRequest): JsonRecord {
+export function buildStreamRequest(request: CursorInferenceRequest): JsonRecord {
 	const body: JsonRecord = { messages: request.messages, tools: request.tools };
 	if (request.modelConfig && Object.keys(request.modelConfig).length > 0) body.modelConfig = request.modelConfig;
 
@@ -308,12 +322,18 @@ interface AttemptOutcome {
 }
 
 /**
- * Runs one model invocation over Cursor's bidirectional `RunInference` stream:
- * `runRequest` -> `runReady` -> `invokeModel` -> `invocationResponse`* -> `invocationEnd` -> `finishRun`.
- * Always finishes with exactly one `end` event. Retries only an auth failure that happens
- * before any output, after one session refresh.
+ * Public inference boundary. Always emits a terminal billing denial before reading credentials
+ * or opening a transport; opt-in flags and injected transports cannot bypass this policy.
  */
 export async function* runInference(options: RunInferenceOptions): AsyncGenerator<CursorBridgeEventBody> {
+	const blocked = cursorInferenceBillingError();
+	if (blocked) {
+		yield { kind: 'end', error: blocked };
+
+		return;
+	}
+
+	const conversationId = options.request.conversationId ?? randomUUID();
 	let refreshed = false;
 
 	for (;;) {
@@ -332,7 +352,7 @@ export async function* runInference(options: RunInferenceOptions): AsyncGenerato
 			return;
 		}
 
-		for await (const event of attempt(options, creds, !refreshed, outcome)) {
+		for await (const event of attempt(options, creds, !refreshed, outcome, conversationId)) {
 			yield event;
 		}
 
@@ -350,11 +370,12 @@ async function* attempt(
 	options: RunInferenceOptions,
 	creds: CursorRequestCredentials,
 	mayRetryAuth: boolean,
-	outcome: AttemptOutcome
+	outcome: AttemptOutcome,
+	conversationId: string
 ): AsyncGenerator<CursorBridgeEventBody> {
 	const invocationId = randomUUID();
 	const stream = openBidiStream({
-		url: creds.agentUrl,
+		url: creds.inferenceUrl,
 		path: RUN_INFERENCE_PATH,
 		headers: creds.headers,
 		signal: options.signal,
@@ -385,7 +406,7 @@ async function* attempt(
 		return { kind: 'end', error };
 	};
 
-	stream.write(buildRunRequest(options.request.modelId));
+	stream.write(buildRunRequest(options.request, conversationId));
 
 	try {
 		for await (const item of stream.items()) {

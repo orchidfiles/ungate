@@ -70,6 +70,12 @@ export interface CursorInferenceModelConfig {
 export interface CursorInferenceRequest {
 	/** Cursor model id, e.g. `grok-4.7-low-fast`. */
 	modelId: string;
+	/** Genuine caller conversation context, or an Ungate-owned identity; never implies native Cursor provenance. */
+	conversationId?: string;
+	/** Actual upstream request id only, when verified; never synthesize a chain from local request ids. */
+	previousRequestId?: string;
+	/** Set only from verified model metadata, never inferred from a model name or provider. */
+	builtInModel?: boolean;
 	messages: CursorInferenceMessage[];
 	tools: CursorInferenceTool[];
 	modelConfig?: CursorInferenceModelConfig;
@@ -84,6 +90,7 @@ export interface CursorUsage {
 }
 
 export type CursorBridgeErrorKind =
+	| 'billing_blocked'
 	| 'disabled'
 	| 'unavailable'
 	| 'auth'
@@ -97,6 +104,15 @@ export type CursorBridgeErrorKind =
 	| 'timeout'
 	| 'cancelled'
 	| 'upstream';
+
+/** Fail closed until Cursor provides an enforceable subscription-only billing contract. */
+export function cursorInferenceBillingError(): CursorBridgeError {
+	return {
+		kind: 'billing_blocked',
+		code: 'billing_blocked',
+		message: 'Cursor inference is blocked because subscription-only billing cannot be guaranteed.'
+	};
+}
 
 /** Sanitized upstream error. `message` never includes credentials or raw headers. */
 export interface CursorBridgeError {

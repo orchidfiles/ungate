@@ -5,9 +5,11 @@ vi.mock('src/database/requests', () => ({ Requests: { record: (...args: unknown[
 
 const { CursorResponseAccumulator, CursorStreamHandler } = await import('src/streaming/cursor-stream-handler');
 const { CompletionErrorMapper, CompletionModelRouting } = await import('src/orchestration/openai');
-const { buildRepairRequest } = await import('src/orchestration/openai/provider-handlers/cursor-chat-handler');
+const { CursorBridgeClient } = await import('src/proxy/cursor-bridge-client');
+const { buildRepairRequest, CursorChatHandler } = await import('src/orchestration/openai/provider-handlers/cursor-chat-handler');
 
-import type { CursorBridgeEventBody, ModelMappingConfig, RequestTelemetry } from '@ungate/shared';
+import type { CursorBridgeEventBody, CursorInferenceRequest, ModelMappingConfig, RequestTelemetry } from '@ungate/shared';
+import type { FastifyReply } from 'fastify';
 import type { RepairRound } from 'src/streaming/cursor-stream-handler';
 import type { OpenAITool } from 'src/types/openai';
 
@@ -271,6 +273,28 @@ describe('tool argument repair', () => {
 		expect(streamedCalls(chunks).map((entry) => [entry.id, entry.function.arguments])).toEqual([['s1', '{}']]);
 	});
 
+	it('preserves billing denial during repair without releasing original calls', async () => {
+		const failed: CursorBridgeEventBody[] = [
+			{ kind: 'end', error: { kind: 'billing_blocked', message: 'Billing cannot be guaranteed' } }
+		];
+		const { repair, opts } = repairOptions(EMPTY_BATCH, failed);
+		const chunks = await readSse(CursorStreamHandler.createStreamResponse(opts).stream as ReadableStream<Uint8Array>);
+		expect(repair).toHaveBeenCalledTimes(1);
+		expect(streamedCalls(chunks)).toEqual([]);
+		expect(chunks).toContainEqual(expect.objectContaining({ error: expect.objectContaining({ code: 'billing_blocked' }) }));
+		const collected = await CursorStreamHandler.collect(repairOptions(EMPTY_BATCH, failed).opts);
+		expect(collected.response).toBeNull();
+		expect(collected.error?.kind).toBe('billing_blocked');
+	});
+
+	it('does not repair an initial billing denial', async () => {
+		const { repair, opts } = repairOptions([{ kind: 'end', error: { kind: 'billing_blocked', message: 'Blocked' } }], REPAIRED);
+		const result = await CursorStreamHandler.collect(opts);
+		expect(result.response).toBeNull();
+		expect(result.error?.kind).toBe('billing_blocked');
+		expect(repair).not.toHaveBeenCalled();
+	});
+
 	it('restores the original calls when the repair invocation errors', async () => {
 		const failed: CursorBridgeEventBody[] = [{ kind: 'end', error: { kind: 'rate_limit', message: 'slow down' } }];
 		const { opts } = repairOptions(EMPTY_BATCH, failed);
@@ -320,6 +344,76 @@ describe('tool argument repair', () => {
 	});
 });
 
+describe('Cursor handler conversation context', () => {
+	async function capture(sessionKey?: string, model = 'composer-2.5', turn = 0) {
+		let captured!: CursorInferenceRequest;
+		const client = {
+			invoke: (request: CursorInferenceRequest) => {
+				captured = request;
+
+				return from([{ kind: 'end', error: { kind: 'billing_blocked', message: 'blocked' } }]);
+			}
+		} as InstanceType<typeof CursorBridgeClient>;
+		const reply = {
+			raw: { once: vi.fn() },
+			request: { headers: { 'x-conversation-id': 'untrusted', 'x-previous-request-id': 'untrusted' } },
+			header: vi.fn().mockReturnThis(),
+			code: vi.fn().mockReturnThis(),
+			send: vi.fn().mockReturnThis()
+		} as unknown as FastifyReply;
+		await CursorChatHandler.handle(
+			{ model, messages: [{ role: 'user', content: 'hello' }, ...(turn ? [{ role: 'assistant' as const, content: 'hi' }] : [])] },
+			{
+				id: model,
+				upstreamModel: model,
+				provider: 'cursor',
+				label: model,
+				sortOrder: 0,
+				reasoningBudget: null,
+				serviceTier: null,
+				toolMode: null
+			},
+			reply,
+			{ sessionKey, turnIndex: turn },
+			client
+		);
+
+		return captured;
+	}
+
+	it('keeps an Ungate UUID stable across turns and model changes, but separates sessions', async () => {
+		const first = await capture('session-a');
+		const next = await capture('session-a', 'grok-4.7-low-fast', 1);
+		const other = await capture('session-b');
+		expect(first.conversationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+		expect(next.conversationId).toBe(first.conversationId);
+		expect(other.conversationId).not.toBe(first.conversationId);
+		for (const request of [first, next, other]) {
+			expect(request).not.toHaveProperty('previousRequestId');
+			expect(request).not.toHaveProperty('builtInModel');
+		}
+	});
+
+	it('uses a fresh per-request UUID without session context and ignores client headers', async () => {
+		const first = await capture();
+		const next = await capture();
+		expect(first.conversationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+		expect(next.conversationId).not.toBe(first.conversationId);
+		expect(first).not.toHaveProperty('previousRequestId');
+		expect(first).not.toHaveProperty('builtInModel');
+	});
+
+	it('preserves conversation context through repair without inventing upstream metadata', async () => {
+		for (const key of ['session-a', undefined]) {
+			const original = await capture(key);
+			const repaired = buildRepairRequest(original, { text: '', calls: [], invalid: [] });
+			expect(repaired.conversationId).toBe(original.conversationId);
+			expect(repaired).not.toHaveProperty('previousRequestId');
+			expect(repaired).not.toHaveProperty('builtInModel');
+		}
+	});
+});
+
 describe('Cursor error mapping', () => {
 	it.each([
 		['tool_schema', 502, 'upstream_tool_schema_rejected'],
@@ -327,6 +421,7 @@ describe('Cursor error mapping', () => {
 		['rate_limit', 429, 'rate_limit_exceeded'],
 		['bad_model', 404, 'model_not_found'],
 		['disabled', 403, 'cursor_provider_disabled'],
+		['billing_blocked', 403, 'billing_blocked'],
 		['unavailable', 503, 'cursor_provider_unavailable']
 	] as const)('%s -> %d %s', (kind, status, code) => {
 		const mapped = CompletionErrorMapper.cursorError({ kind, message: 'x' });

@@ -30,11 +30,11 @@ let importing = $state<string | null>(null);
 let error = $state<string | null>(null);
 
 const reasonText: Record<CursorSessionStatus['reason'], string> = {
-	ok: 'Connected',
+	ok: 'Session connected — inference blocked',
 	disabled: 'Not connected',
 	no_bridge: 'Unavailable: the API was not started by this Cursor window',
 	no_cursor_api: 'Unavailable: this editor does not expose a Cursor session',
-	not_signed_in: 'Sign in to Cursor to use Cursor models',
+	not_signed_in: 'Not signed in to Cursor — inference remains blocked',
 	error: 'Could not read the Cursor session'
 };
 
@@ -120,13 +120,13 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 <div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
 	<div class="flex items-center gap-2">
 		<p class="text-sm font-semibold">Cursor</p>
-		<span class="badge text-[10px] preset-tonal-warning uppercase tracking-wide">Experimental</span>
+		<span class="badge text-[10px] preset-tonal-warning uppercase tracking-wide">Inference blocked</span>
 	</div>
 
 	<p class="text-xs text-surface-400">
-		Uses your signed-in Cursor account to run Cursor models (Grok, Composer, …) behind Ungate, so they keep working while the
-		OpenAI base URL override is on. Usage billing is not verified: these requests may or may not count as included plan usage. The
-		session token stays inside the extension and is never sent to the API process or through the tunnel.
+		Cursor inference is blocked because subscription-only billing cannot be guaranteed. Signing in, connecting a session,
+		discovering models, or importing a model mapping does not grant permission to run inference or prove included plan usage.
+		Billing for historical Cursor requests is unknown, not free. The session token stays inside the extension.
 	</p>
 
 	{#if loading}
@@ -165,7 +165,7 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 						{:else}
 							<IconPlug class="size-4" />
 						{/if}
-						Connect
+						Connect for discovery
 					</button>
 				{/if}
 			</div>
@@ -174,7 +174,7 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 		{#if connected}
 			<div class="space-y-2">
 				<div class="flex items-center justify-between gap-2">
-					<p class="text-xs font-medium text-surface-300">Usable models</p>
+					<p class="text-xs font-medium text-surface-300">Discovered models — inference blocked</p>
 					<button
 						class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
 						disabled={modelsLoading}
@@ -217,8 +217,8 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 						{/each}
 					</ul>
 					<p class="text-xs text-surface-400">
-						Imported models appear below as <code class="code">cursor-&lt;model&gt;</code>; add that ID as a custom model in
-						Cursor.
+						Imported mappings appear below as <code class="code">cursor-&lt;model&gt;</code> for configuration only. Importing does
+						not enable inference; subscription-only billing remains unverified.
 					</p>
 				{/if}
 			</div>
