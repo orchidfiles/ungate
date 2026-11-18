@@ -24,7 +24,8 @@ export interface RequestRecord {
 	source: RequestSource;
 	inputTokens: number;
 	outputTokens: number;
-	estimatedCost?: number;
+	/** Null means billing is unknown, not free (including all Cursor requests). */
+	estimatedCost?: number | null;
 	stream: boolean;
 	latencyMs: number | null;
 	error?: string | null;
@@ -84,7 +85,10 @@ export interface AccountInsight {
 	requests: number;
 	inputTokens: number;
 	outputTokens: number;
-	estimatedCost: number;
+	/** Known-price subtotal; null when no requests have known pricing. */
+	estimatedCost: number | null;
+	/** Requests excluded from the subtotal because billing is unknown. */
+	unknownCostRequests: number;
 	errors: number;
 	/** Requests this account served after another account hit its limit. */
 	rotatedIn: number;

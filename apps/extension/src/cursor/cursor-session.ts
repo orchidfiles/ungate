@@ -13,6 +13,7 @@ export interface CursorRequestCredentials {
 	headers: Record<string, string>;
 	backendUrl: string;
 	agentUrl: string;
+	inferenceUrl: string;
 }
 
 interface CursorApi {
@@ -188,6 +189,7 @@ export class CursorSession {
 	private urls(source: { creds?: unknown; backendUrl?: string | null; privacyMode: boolean }): {
 		backendUrl: string;
 		agentUrl: string;
+		inferenceUrl: string;
 	} {
 		const creds = source.creds ?? null;
 		const backendUrl = safeOrigin(source.backendUrl ?? readString(creds, 'backendUrl'), DEFAULT_BACKEND_URL);
@@ -196,6 +198,13 @@ export class CursorSession {
 		const nonPrivacyUrl = readString(record.agentBackendUrlNonPrivacy, 'default');
 		const agentRaw = source.privacyMode ? (privacyUrl ?? nonPrivacyUrl) : nonPrivacyUrl;
 
-		return { backendUrl, agentUrl: safeOrigin(agentRaw, DEFAULT_AGENT_URL) };
+		// Cursor 3.29.9 cursor-agent-host/dist/main.js assigns RunInference to
+		// localLoopInferenceTransport only when HTTP/2 is enabled and the URL has
+		// not previously fallen back; otherwise runInferenceBackendTransport ??
+		// agenticComposerTransport (backendUrl). Agent Run uses a separate transport.
+		// We cannot prove the server/client HTTP/2 or fallback state here, so a
+		// localLoopInferenceUrl alone is NOT eligibility. Keep the trusted backend,
+		// including in privacy mode; never borrow the non-privacy agent endpoint.
+		return { backendUrl, agentUrl: safeOrigin(agentRaw, DEFAULT_AGENT_URL), inferenceUrl: backendUrl };
 	}
 }
