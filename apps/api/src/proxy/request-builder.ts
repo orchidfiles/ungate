@@ -6,6 +6,8 @@ import { logger } from 'src/utils/logger';
 import { config } from '../config';
 import { Settings } from '../database/app-settings';
 
+import { CLAUDE_CODE_OPUS_PACKET } from './claude-code-packet';
+
 import type { AnthropicRequest, ContentBlock, ThinkingEffort } from '../types';
 
 const VALID_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -77,11 +79,7 @@ export class RequestBuilder {
 		const headers: Record<string, string> = {
 			Accept: 'application/json',
 			Authorization: `Bearer ${accessToken}`,
-			'anthropic-beta': [
-				config.anthropic.beta.claudeCode,
-				config.anthropic.beta.oauth,
-				config.anthropic.beta.interleavedThinking
-			].join(','),
+			'anthropic-beta': config.anthropic.betas.join(','),
 			'anthropic-dangerous-direct-browser-access': 'true',
 			'anthropic-version': '2023-06-01',
 			'Content-Type': 'application/json',
@@ -121,9 +119,15 @@ export class RequestBuilder {
 
 			if (effort) {
 				// Claude 5 models default to `display: "omitted"`, which streams empty thinking.
-				// Ask for the summary so Cursor can show progress while Claude thinks.
-				prepared.thinking = { type: 'adaptive', display: 'summarized' };
+				// Claude Code asks for thinking updates, which Cursor shows while Claude thinks.
+				prepared.thinking = {
+					type: CLAUDE_CODE_OPUS_PACKET.thinking.type,
+					display: CLAUDE_CODE_OPUS_PACKET.thinking.display
+				};
 				prepared.output_config = { ...prepared.output_config, effort };
+				prepared.context_management = {
+					edits: CLAUDE_CODE_OPUS_PACKET.contextManagement.edits.map((edit) => ({ type: edit.type, keep: edit.keep }))
+				};
 				logger.log(`Reasoning budget (${budgetValue}) → adaptive thinking (effort: ${effort})`);
 			} else {
 				logger.log(`Reasoning budget (${budgetValue}) ignored — no matching effort tier`);

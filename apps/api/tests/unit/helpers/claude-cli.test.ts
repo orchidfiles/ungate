@@ -4,12 +4,12 @@ import { ClaudeCliVersion } from '@ungate/shared';
 
 describe('ClaudeCliVersion', () => {
 	it('formats User-Agent like Claude Code OAuth client', () => {
-		expect(ClaudeCliVersion.formatUserAgent('2.1.280')).toBe('claude-cli/2.1.280 (external, claude-vscode, agent-sdk/0.2.7)');
+		expect(ClaudeCliVersion.formatUserAgent('2.1.280')).toBe('claude-cli/2.1.280 (external, claude-vscode)');
 	});
 
 	it('resolves stable, latest, and custom versions', () => {
 		expect(ClaudeCliVersion.resolve('stable', null)).toBe('2.1.9');
-		expect(ClaudeCliVersion.resolve('latest', null)).toBe('2.1.296');
+		expect(ClaudeCliVersion.resolve('latest', null)).toBe('2.1.322');
 		expect(ClaudeCliVersion.resolve('custom', '2.1.280')).toBe('2.1.280');
 	});
 

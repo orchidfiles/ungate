@@ -10,6 +10,7 @@ vi.mock('src/database/app-settings', () => ({
 	}
 }));
 
+import { CLAUDE_CODE_OPUS_PACKET } from 'src/proxy/claude-code-packet';
 import { RequestBuilder } from 'src/proxy/request-builder';
 
 describe('proxy-request-builder', () => {
@@ -28,10 +29,12 @@ describe('proxy-request-builder', () => {
 		});
 
 		expect(prepared.reasoning_budget).toBeUndefined();
-		expect(prepared.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+		expect(prepared.thinking).toEqual(CLAUDE_CODE_OPUS_PACKET.thinking);
 		expect(prepared.output_config).toEqual({ effort: 'high' });
+		expect(prepared.context_management).toEqual(CLAUDE_CODE_OPUS_PACKET.contextManagement);
 		expect(Array.isArray(prepared.system)).toBe(true);
 		const system = prepared.system as { type: string; text?: string; cache_control?: { ttl?: number } }[];
+		expect(system[0]).toEqual({ type: 'text', text: CLAUDE_CODE_OPUS_PACKET.identity });
 		expect(system.some((block) => block.text === 'extra instruction from settings')).toBe(true);
 		expect(system.find((block) => block.text === 'sys')?.cache_control?.ttl).toBeUndefined();
 		const userBlock = (prepared.messages[0].content as { cache_control?: { ttl?: number } }[])[0];
@@ -48,12 +51,13 @@ describe('proxy-request-builder', () => {
 			});
 
 			expect(prepared.reasoning_budget).toBeUndefined();
-			expect(prepared.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+			expect(prepared.thinking).toEqual(CLAUDE_CODE_OPUS_PACKET.thinking);
 			expect(prepared.output_config).toEqual({ effort: tier });
+			expect(prepared.context_management).toEqual(CLAUDE_CODE_OPUS_PACKET.contextManagement);
 		}
 	});
 
-	it('requests summarized thinking so it can be shown while Claude works', () => {
+	it('requests thinking updates so they can be shown while Claude works', () => {
 		const prepared = RequestBuilder.prepareClaudeCodeBody({
 			model: 'claude-opus-5-5',
 			max_tokens: 32000,
@@ -61,7 +65,7 @@ describe('proxy-request-builder', () => {
 			messages: [{ role: 'user', content: 'hello' }]
 		});
 
-		expect(prepared.thinking?.display).toBe('summarized');
+		expect(prepared.thinking?.display).toBe('updates');
 		expect(prepared.output_config).toEqual({ effort: 'xhigh' });
 	});
 
@@ -76,6 +80,7 @@ describe('proxy-request-builder', () => {
 		expect(prepared.reasoning_budget).toBeUndefined();
 		expect(prepared.thinking).toBeUndefined();
 		expect(prepared.output_config).toBeUndefined();
+		expect(prepared.context_management).toBeUndefined();
 	});
 
 	it('does not set thinking when no reasoning budget is provided', () => {
@@ -87,6 +92,24 @@ describe('proxy-request-builder', () => {
 
 		expect(prepared.thinking).toBeUndefined();
 		expect(prepared.output_config).toBeUndefined();
+		expect(prepared.context_management).toBeUndefined();
+	});
+
+	it('matches the Claude Code Opus packet for a medium reasoning body', () => {
+		const prepared = RequestBuilder.prepareClaudeCodeBody({
+			model: 'claude-opus-5-5',
+			max_tokens: 128000,
+			reasoning_budget: 'medium',
+			tools: [{ name: 'Shell', description: 'Run a command', input_schema: { type: 'object', properties: {} } }],
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(prepared.max_tokens).toBe(128000);
+		expect(prepared.thinking).toEqual(CLAUDE_CODE_OPUS_PACKET.thinking);
+		expect(prepared.output_config).toEqual({ effort: 'medium' });
+		expect(prepared.context_management).toEqual(CLAUDE_CODE_OPUS_PACKET.contextManagement);
+		expect((prepared.system as { text?: string }[])[0]?.text).toBe(CLAUDE_CODE_OPUS_PACKET.identity);
+		expect(prepared.tools?.map((tool) => tool.name)).toEqual(['Shell']);
 	});
 
 	it('converts string system prompt into system blocks', () => {
@@ -99,11 +122,22 @@ describe('proxy-request-builder', () => {
 
 		const system = prepared.system as { type: string; text?: string }[];
 		expect(Array.isArray(system)).toBe(true);
+		expect(system[0]).toEqual({ type: 'text', text: CLAUDE_CODE_OPUS_PACKET.identity });
 		expect(system.some((block) => block.text === 'custom system')).toBe(true);
 		expect(system.some((block) => block.text === 'extra instruction from settings')).toBe(true);
 	});
 
 	it('builds Claude OAuth User-Agent from app settings', () => {
-		expect(RequestBuilder.getClaudeOAuthUserAgent()).toBe('claude-cli/2.1.296 (external, claude-vscode, agent-sdk/0.2.7)');
+		expect(RequestBuilder.getClaudeOAuthUserAgent()).toBe(CLAUDE_CODE_OPUS_PACKET.userAgent);
+	});
+
+	it('sends the Claude Code beta list with the bearer redacted from the fingerprint comparison', () => {
+		const headers = RequestBuilder.getClaudeOAuthHeaders('secret-token');
+		const comparable: Record<string, string> = { ...headers, Authorization: '[redacted]' };
+
+		expect(comparable.Authorization).toBe('[redacted]');
+		expect(comparable['anthropic-beta']).toBe(CLAUDE_CODE_OPUS_PACKET.betas.join(','));
+		expect(comparable['User-Agent']).toBe(CLAUDE_CODE_OPUS_PACKET.userAgent);
+		expect(JSON.stringify(comparable)).not.toContain('secret-token');
 	});
 });
