@@ -22,6 +22,19 @@ import settingsPlugin from './routes/settings';
 /** Dashboard webviews call account routes cross-origin; PATCH/DELETE must pass the preflight. */
 export const CORS_OPTIONS: FastifyCorsOptions = { origin: '*', methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'] };
 
+/**
+ * Removes the bridge socket when the API stops. A signal is re-raised after cleanup so whoever
+ * stopped the API still sees it exit by that signal.
+ */
+function removeSocketOnShutdown(transport: SocketBridgeTransport): void {
+	process.once('exit', () => transport.removeSocketFile());
+	for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+		process.once(signal, () => {
+			void transport.close().finally(() => process.kill(process.pid, signal));
+		});
+	}
+}
+
 export async function startServer(): Promise<void> {
 	globalThis.console.log('[startup] getDb...');
 	getDb();
@@ -68,6 +81,7 @@ export async function startServer(): Promise<void> {
 		const socketPath = cursorBridgeSocketPath(config.port);
 		await bridgeTransport.listen(socketPath);
 		globalThis.console.log(`[startup] cursor bridge socket ${socketPath}`);
+		removeSocketOnShutdown(bridgeTransport);
 	}
 
 	// Always print port to stdout — extension parses this to detect the running port.

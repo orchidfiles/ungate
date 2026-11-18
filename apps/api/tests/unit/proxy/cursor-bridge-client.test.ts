@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { createConnection, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -210,5 +211,23 @@ describe('SocketBridgeTransport', () => {
 		const client = new CursorBridgeClient(transport);
 		await extension(path);
 		await until(() => client.isAvailable());
+	});
+
+	it('removes its socket file on close, so a stopped API leaves nothing behind', async () => {
+		const path = await listening();
+		await extension(path);
+		expect(existsSync(path)).toBe(true);
+
+		await transport.close();
+
+		expect(existsSync(path)).toBe(false);
+	});
+
+	it('removes its socket file synchronously for an exiting process', async () => {
+		const path = await listening();
+
+		transport.removeSocketFile();
+
+		expect(existsSync(path)).toBe(false);
 	});
 });
