@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { rmSync } from 'node:fs';
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import { homedir } from 'node:os';
@@ -42,6 +43,7 @@ export class ProcessBridgeTransport extends EventEmitter implements BridgeTransp
  */
 export class SocketBridgeTransport extends EventEmitter implements BridgeTransport {
 	private server: Server | null = null;
+	private path: string | null = null;
 	private socket: Socket | null = null;
 
 	isConnected(): boolean {
@@ -68,13 +70,23 @@ export class SocketBridgeTransport extends EventEmitter implements BridgeTranspo
 		});
 		await chmod(path, 0o600);
 		this.server = server;
+		this.path = path;
 	}
 
+	/** Stops listening and removes the socket file, so no stale `cursor-bridge-<port>.sock` outlives the API. */
 	async close(): Promise<void> {
 		this.socket?.destroy();
 		const server = this.server;
 		this.server = null;
 		if (server) await new Promise((resolve) => server.close(resolve));
+		this.removeSocketFile();
+	}
+
+	/** Synchronous, for `process.on('exit')` where nothing async runs. */
+	removeSocketFile(): void {
+		const path = this.path;
+		this.path = null;
+		if (path) rmSync(path, { force: true });
 	}
 
 	private adopt(socket: Socket): void {
