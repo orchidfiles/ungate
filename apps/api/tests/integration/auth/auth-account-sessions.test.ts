@@ -247,7 +247,7 @@ describe('OpenAI login sessions', () => {
 		});
 		const result = await OpenAIOAuthService.completeLogin('code', login.sessionId);
 		expect(result.ok).toBe(true);
-		const row = OAuthAccounts.get(result.accountId)!;
+		const row = OAuthAccounts.get(result.accountId!)!;
 		expect(row).toMatchObject({ providerUserId: 'b', providerAccountId: 'ws', email: 'b@example.com' });
 		expect(OpenAIOAuthService.getSession(login.sessionId)).toMatchObject({ status: 'succeeded', accountId: row.id });
 		expect(OAuthAccounts.active('openai')?.accessToken).toBe('a');
