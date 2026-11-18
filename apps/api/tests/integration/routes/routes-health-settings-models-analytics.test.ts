@@ -108,6 +108,20 @@ describe('routes: health/settings/models/analytics', () => {
 		await app.close();
 	});
 
+	it('a saved apiKey replaces the running one at once, and null clears it', async () => {
+		const app = await withPlugin(settingsPlugin, { apiKey: 'old' });
+
+		await app.inject({ method: 'POST', url: '/settings', payload: { apiKey: 'new' } });
+		expect(app.config.apiKey).toBe('new');
+
+		await app.inject({ method: 'POST', url: '/settings', payload: { quiet: true } });
+		expect(app.config.apiKey).toBe('new');
+
+		await app.inject({ method: 'POST', url: '/settings', payload: { apiKey: null } });
+		expect(app.config.apiKey).toBeUndefined();
+		await app.close();
+	});
+
 	it('models returns all mappings', async () => {
 		settingsGetMock.mockReturnValueOnce({
 			models: [

@@ -96,8 +96,9 @@ export class ClientKeys {
 
 	/**
 	 * The single rule for model-route access. `settingsKey` is the running config's `apiKey`.
-	 * Open only when there is no settings key and no active minted key, which keeps an install
-	 * that never set a key working as before.
+	 * Open only when there is no settings key and no key was ever minted, which keeps an install
+	 * that never set a key working as before. Revoked keys still count: revoking the last one
+	 * must close the routes, not open them.
 	 */
 	static resolve(presented: string | undefined, settingsKey: string | undefined): ClientResolution {
 		if (presented !== undefined && presented !== '') {
@@ -111,17 +112,12 @@ export class ClientKeys {
 			if (minted) return { kind: 'client', clientId: minted.id };
 		}
 
-		return settingsKey || this.anyActiveMinted() ? { kind: 'refused' } : { kind: 'open' };
+		return settingsKey || this.everMinted() ? { kind: 'refused' } : { kind: 'open' };
 	}
 
-	private static anyActiveMinted(): boolean {
+	private static everMinted(): boolean {
 		return (
-			getDb()
-				.select({ id: clientKeys.id })
-				.from(clientKeys)
-				.where(and(eq(clientKeys.kind, 'minted'), isNull(clientKeys.revokedAt)))
-				.limit(1)
-				.get() !== undefined
+			getDb().select({ id: clientKeys.id }).from(clientKeys).where(eq(clientKeys.kind, 'minted')).limit(1).get() !== undefined
 		);
 	}
 
