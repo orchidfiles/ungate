@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { logger } from 'src/utils/logger';
 
 import { UsageInsightsQuery } from './insights';
+import { unknownCostCondition } from './request-cost';
 import { requests } from './schema';
 
 import { getDb, getSqlite } from './index';
@@ -46,20 +47,20 @@ export class Analytics {
 		const db = getDb();
 
 		return db
-			.select()
+			.select({ row: requests, unknownCost: sql<number>`${sql.raw(unknownCostCondition())}` })
 			.from(requests)
 			.orderBy(sql`${requests.timestamp} DESC`)
 			.limit(limit)
 			.all()
-			.map((row) => ({
+			.map(({ row, unknownCost }) => ({
 				id: row.id,
 				timestamp: row.timestamp,
 				model: row.model,
 				source: row.source,
 				inputTokens: row.inputTokens,
 				outputTokens: row.outputTokens,
-				// Source is authoritative, including historical rows stored with a zero placeholder.
-				estimatedCost: row.source === 'cursor' ? null : row.estimatedCost,
+				// Computed per read, so historical rows stored with a zero placeholder stay unknown.
+				estimatedCost: unknownCost ? null : row.estimatedCost,
 				stream: row.stream,
 				latencyMs: row.latencyMs,
 				error: row.error

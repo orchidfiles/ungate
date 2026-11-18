@@ -13,7 +13,7 @@ export class Requests {
 	static record(record: RequestRecord): number {
 		const db = getDb();
 		// The legacy NOT NULL column requires a placeholder for Cursor. It is not a price:
-		// analytics must interpret source='cursor' as unknown, including historical rows.
+		// analytics reads it as unknown via `unknownCostCondition`, including historical rows.
 		const estimatedCost =
 			record.source === 'cursor'
 				? 0
