@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Settings } from 'src/database/app-settings';
 import { ModelMappings } from 'src/database/model-mappings';
+
 describe('database-app-settings', () => {
 	it('creates defaults when row is missing', () => {
 		const expectedModels = [

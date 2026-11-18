@@ -113,6 +113,14 @@ export class CursorResponseAccumulator {
 		const deltas: CursorDelta[] = [];
 		const hasCalls = this.slots.length > 0;
 
+		if (this.error?.kind === 'billing_blocked') {
+			this.slots = [];
+			this.byKey.clear();
+			this.repairText = '';
+
+			return deltas;
+		}
+
 		if (this.error || (!hasCalls && !this.repairText)) {
 			if (this.error && this.error.kind !== 'cancelled') {
 				logger.warn(`[cursor] ${this.modelId} tool argument repair failed (${this.error.kind}); sending the original calls`);
@@ -567,7 +575,10 @@ export class CursorStreamHandler {
 		const aborted = options.signal?.aborted === true || acc.error?.kind === 'cancelled';
 		recordRow(options, acc, false, aborted);
 
-		if (acc.error && acc.finishReason() !== 'length' && !acc.text && acc.toolCalls.length === 0) {
+		if (
+			acc.error?.kind === 'billing_blocked' ||
+			(acc.error && acc.finishReason() !== 'length' && !acc.text && acc.toolCalls.length === 0)
+		) {
 			return { response: null, error: acc.error };
 		}
 

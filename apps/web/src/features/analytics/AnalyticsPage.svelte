@@ -95,6 +95,13 @@ function handleConfirmReset() {
 				variant="error" />
 		</div>
 
+		{#if store.summary.cursorRequests > 0}
+			<p class="text-sm text-surface-400">
+				Cursor billing is unknown, not free, for all current and historical requests. Cost subtotals exclude Cursor;
+				mixed-provider totals have incomplete pricing and do not establish subscription-only usage.
+			</p>
+		{/if}
+
 		<TokenChart
 			series={store.tokenSeries}
 			period={store.period} />
