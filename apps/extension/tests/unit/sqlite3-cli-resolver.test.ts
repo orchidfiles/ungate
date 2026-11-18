@@ -75,6 +75,7 @@ describe('Sqlite3CliResolver', () => {
 
 	it('ignores an existing binary that carries no pinned checksum stamp', async () => {
 		forceHost('linux', 'x64');
+		vi.spyOn(InstallStamp, 'matches').mockReturnValue(false);
 		mocks.existsSyncMock.mockImplementation((target) => {
 			const value = String(target);
 

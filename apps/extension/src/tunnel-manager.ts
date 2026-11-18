@@ -248,16 +248,20 @@ export class TunnelManager {
 		this.scheduleAutoStop();
 
 		child.stdout?.on('data', (chunk: Buffer) => {
+			if (this.ngrok !== child) return;
 			this.consumeNgrokOutput(chunk.toString('utf8'));
 		});
 		child.stderr?.on('data', (chunk: Buffer) => {
+			if (this.ngrok !== child) return;
 			this.consumeNgrokOutput(chunk.toString('utf8'));
 		});
 		child.on('error', (err) => {
+			if (this.ngrok !== child) return;
 			this.onLog({ timestamp: Date.now(), level: 'error', message: `Tunnel error: ${err.message}` });
 			this.setState({ status: 'error', url: null, error: err.message });
 		});
 		child.on('exit', (code, signal) => {
+			if (this.ngrok !== child) return;
 			this.onLog({ timestamp: Date.now(), level: 'warn', message: `Tunnel exited code=${code} signal=${signal}` });
 
 			if (this.state.status !== 'stopped') {

@@ -141,7 +141,19 @@ describe('ngrok tunnel', () => {
 			['http', '47822', '--authtoken', 'token-1', '--log', 'stdout', '--log-format', 'json'],
 			expect.any(Object)
 		);
-		expect(manager.getState().url).toBe('https://stable.ngrok-free.app');
+		first.stdout.emit('data', Buffer.from('https://obsolete.ngrok-free.app\n'));
+		first.stderr.emit('data', Buffer.from('https://obsolete.ngrok-free.app\n'));
+		first.emit('error', new Error('Late error from stopped process'));
+		first.emit('exit', 0, 'SIGTERM');
+
+		expect(manager.getState()).toEqual({
+			status: 'running',
+			url: 'https://stable.ngrok-free.app',
+			error: null
+		});
+
+		manager.stop();
+		expect(second.killed).toEqual(['kill']);
 	});
 
 	it('reports a failed ngrok install instead of starting a process', async () => {
