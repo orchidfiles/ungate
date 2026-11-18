@@ -6,7 +6,9 @@ import { AccountRefreshRejected } from '../account-token-service';
 /** Gemini sign-in needs an OAuth client from the environment; see `geminiOAuthClient()`. */
 export class GeminiOAuthNotConfiguredError extends Error {
 	constructor() {
-		super('Gemini sign-in is not configured: set UNGATE_GEMINI_OAUTH_CLIENT_ID and UNGATE_GEMINI_OAUTH_CLIENT_SECRET');
+		super(
+			'Gemini sign-in is not configured: set UNGATE_GEMINI_OAUTH_CLIENT_ID (ending in .apps.googleusercontent.com) and UNGATE_GEMINI_OAUTH_CLIENT_SECRET'
+		);
 	}
 }
 

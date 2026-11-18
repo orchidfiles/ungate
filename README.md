@@ -150,7 +150,7 @@ Using a subscription through a third-party client may violate the provider's ter
 | Cursor stops using the proxy | Check the OpenAI API key toggle. Enable OpenAI Key Fix if Cursor keeps disabling it. |
 | Proxy returns `401` | Copy the proxy key from the dashboard into Cursor again. |
 | Provider authentication fails | Check provider status and reconnect the affected account. ChatGPT sessions require a new login when they expire. |
-| Gemini sign-in says it is not configured | Ungate ships no Google OAuth client. Set `UNGATE_GEMINI_OAUTH_CLIENT_ID` and `UNGATE_GEMINI_OAUTH_CLIENT_SECRET` to an installed-app (desktop) OAuth client in the extension host's environment, then restart the API. |
+| Gemini sign-in says it is not configured | Ungate ships no Google OAuth client. Set `UNGATE_GEMINI_OAUTH_CLIENT_ID` and `UNGATE_GEMINI_OAUTH_CLIENT_SECRET` to an installed-app (desktop) OAuth client in the extension host's environment, then restart the API. The client id must end with `.apps.googleusercontent.com`; any other value (such as a placeholder) is treated as unset and the API logs a warning. |
 | Tunnel returns `404`, times out, or chat shows `Reconnecting...` | Check API and tunnel state. Restart the tunnel after network interruptions and update Cursor if the URL changes. |
 | Model is missing in Cursor | Add the exact ID from Ungate's Models settings as a custom model. |
 | Image request fails | Images are not supported on the ChatGPT integration. On supported providers, check API logs for HTTP `413`; request-size and context limits can also apply. |

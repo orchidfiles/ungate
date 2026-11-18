@@ -1,6 +1,7 @@
 import { MINIMAX_BASE_URLS, type AppSettings } from '@ungate/shared';
 
 import { CLAUDE_CODE_OPUS_PACKET } from './proxy/claude-code-packet';
+import { logger } from './utils/logger';
 
 import type { ProxyConfig } from './types';
 
@@ -73,15 +74,29 @@ export interface GeminiOAuthClientCredentials {
 	clientSecret: string;
 }
 
+const GOOGLE_CLIENT_ID_SUFFIX = '.apps.googleusercontent.com';
+let warnedInvalidGeminiClientId = false;
+
 /**
  * Google OAuth installed-app client for Gemini sign-in, from `UNGATE_GEMINI_OAUTH_CLIENT_ID` and
- * `UNGATE_GEMINI_OAUTH_CLIENT_SECRET`. Ungate ships no client of its own; null when either is unset.
+ * `UNGATE_GEMINI_OAUTH_CLIENT_SECRET`. Ungate ships no client of its own; null when either is unset,
+ * or when the id is not a Google OAuth client id (a placeholder would only fail later at Google).
  */
 export function geminiOAuthClient(): GeminiOAuthClientCredentials | null {
 	const clientId = process.env.UNGATE_GEMINI_OAUTH_CLIENT_ID?.trim();
 	const clientSecret = process.env.UNGATE_GEMINI_OAUTH_CLIENT_SECRET?.trim();
+	if (!clientId || !clientSecret) return null;
 
-	return clientId && clientSecret ? { clientId, clientSecret } : null;
+	if (!clientId.endsWith(GOOGLE_CLIENT_ID_SUFFIX)) {
+		if (!warnedInvalidGeminiClientId) {
+			warnedInvalidGeminiClientId = true;
+			logger.warn(`UNGATE_GEMINI_OAUTH_CLIENT_ID does not end with ${GOOGLE_CLIENT_ID_SUFFIX}; Gemini sign-in stays off`);
+		}
+
+		return null;
+	}
+
+	return { clientId, clientSecret };
 }
 
 export function getConfig(settings: AppSettings): ProxyConfig {
