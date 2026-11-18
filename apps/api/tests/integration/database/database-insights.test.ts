@@ -35,6 +35,31 @@ function row(minutes: number, overrides: Partial<RequestRecord>): void {
 }
 
 describe('Analytics.getInsights', () => {
+	it('reports Cursor costs as unknown without rewriting historical placeholders', () => {
+		seedAccounts();
+		row(0, { source: 'cursor', accountId: 'acct-a' });
+		row(1, { source: 'cursor', accountId: 'acct-b' });
+		row(2, { source: 'claude', accountId: 'acct-b' });
+		// Historical values must never be treated as a trustworthy Cursor price.
+		getSqlite().prepare("UPDATE requests SET estimated_cost = 99 WHERE source = 'cursor'").run();
+		const recent = Analytics.getRecent();
+		expect(recent.filter((request) => request.source === 'cursor').map((request) => request.estimatedCost)).toEqual([null, null]);
+		const knownCost = recent.find((request) => request.source === 'claude')!.estimatedCost;
+		const insights = Analytics.getInsights('day', BASE, BASE + 10 * 60_000);
+		expect(insights.accounts.find((account) => account.accountId === 'acct-a')).toMatchObject({
+			estimatedCost: null,
+			unknownCostRequests: 1
+		});
+		expect(insights.accounts.find((account) => account.accountId === 'acct-b')).toMatchObject({
+			estimatedCost: knownCost,
+			unknownCostRequests: 1
+		});
+		expect(getSqlite().prepare("SELECT estimated_cost AS cost FROM requests WHERE source = 'cursor'").all()).toEqual([
+			{ cost: 99 },
+			{ cost: 99 }
+		]);
+	});
+
 	it('aggregates telemetry for accounts, sessions, tools and continuations', () => {
 		seedAccounts();
 		// Legacy row from before telemetry: no cache split, no stop reason.

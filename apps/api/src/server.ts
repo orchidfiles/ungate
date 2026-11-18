@@ -8,7 +8,6 @@ const BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 import { getConfig } from './config';
 import { getDb } from './database/index';
 import { Settings } from './database/settings';
-import { directLocalOnly } from './plugins/local-or-api-key';
 import { bridgeTransport } from './proxy/cursor-bridge-client';
 import { cursorBridgeSocketPath, SocketBridgeTransport } from './proxy/cursor-bridge-transport';
 import analyticsPlugin from './routes/analytics';
