@@ -25,7 +25,9 @@ function resolveDbPath(): string {
  * Claude/OpenAI rows in `provider_settings` can reappear after `_0011` ran when an older Ungate
  * build (pre multi-account) shares the same database file and refreshes or logs in. The row is
  * left in place so that build keeps working; its credentials are adopted only when useful:
- * - no account saved for the provider → insert `legacy-<provider>` and make it active;
+ * - no account saved for the provider → insert `legacy-<provider>` and make it active, unless the
+ *   list is empty because the user removed the last account (policy `last_switch_reason` is
+ *   `removed`): an explicit removal wins, even after the older build refreshes the row;
  * - `legacy-<provider>` still unverified (never reconnected) and the row's token expires later
  *   (i.e. is newer) → take over its credentials;
  * - anything else → no-op (never overwrite a verified account or a newer generation).
@@ -45,6 +47,10 @@ export function adoptLegacyOAuthRows(sqlite: DatabaseType): void {
 				.n;
 			const now = Date.now();
 			if (count === 0) {
+				const policy = sqlite.prepare('SELECT last_switch_reason FROM oauth_policies WHERE provider = ?').get(provider) as
+					| { last_switch_reason: string | null }
+					| undefined;
+				if (policy?.last_switch_reason === 'removed') continue;
 				sqlite
 					.prepare(
 						`INSERT INTO oauth_accounts (id, provider, label, email, provider_account_id, access_token, refresh_token, expires_at, created_at, updated_at)
