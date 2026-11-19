@@ -32,6 +32,8 @@ export class TunnelManager {
 	private state: TunnelState = { status: 'stopped', url: null, error: null };
 	private readonly windowId: string;
 	private autoStopTimer: NodeJS.Timeout | null = null;
+	/** Bumped by every start and stop; a start resuming after an await quits once it is stale. */
+	private generation = 0;
 
 	constructor(
 		windowId: string,
@@ -48,6 +50,8 @@ export class TunnelManager {
 	}
 
 	async start(port: number): Promise<void> {
+		const generation = ++this.generation;
+
 		if (this.state.status === 'running') {
 			return;
 		}
@@ -61,16 +65,16 @@ export class TunnelManager {
 		const provider = RuntimeStateStore.read().tunnelProvider;
 
 		if (provider === 'ngrok') {
-			await this.startNgrok(port);
+			await this.startNgrok(port, generation);
 
 			return;
 		}
 
 		this.setState({ status: 'starting', url: null, error: null });
 
-		await this.ensureBinary();
+		await this.ensureBinary(generation);
 
-		if (this.state.status === 'error') {
+		if (generation !== this.generation || this.state.status === 'error') {
 			return;
 		}
 
@@ -79,6 +83,8 @@ export class TunnelManager {
 	}
 
 	stop(): void {
+		this.generation++;
+
 		if (this.autoStopTimer) {
 			clearInterval(this.autoStopTimer);
 			this.autoStopTimer = null;
@@ -141,7 +147,7 @@ export class TunnelManager {
 		await this.start(port);
 	}
 
-	private async ensureBinary(): Promise<void> {
+	private async ensureBinary(generation: number): Promise<void> {
 		if (fs.existsSync(bin)) {
 			return;
 		}
@@ -161,6 +167,7 @@ export class TunnelManager {
 			const installedPath = await CloudflaredInstaller.install(this.getCloudflaredBinPath());
 
 			use(installedPath);
+			if (generation !== this.generation) return;
 			this.onLog({
 				timestamp: Date.now(),
 				level: 'info',
@@ -170,6 +177,7 @@ export class TunnelManager {
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			this.onLog({ timestamp: Date.now(), level: 'error', message: `Failed to install cloudflared: ${message}` });
+			if (generation !== this.generation) return;
 			this.setState({ status: 'error', url: null, error: `Install failed: ${message}` });
 		}
 	}
@@ -222,8 +230,12 @@ export class TunnelManager {
 		return path.join(CLOUDFLARED_BIN_DIR, 'ngrok');
 	}
 
-	private async startNgrok(port: number): Promise<void> {
+	private async startNgrok(port: number, generation: number): Promise<void> {
 		const token = await this.ngrokToken.read();
+
+		if (generation !== this.generation) {
+			return;
+		}
 
 		if (!token) {
 			const error = 'Add an ngrok authtoken before starting the stable tunnel';
@@ -235,9 +247,9 @@ export class TunnelManager {
 
 		this.setState({ status: 'starting', url: null, error: null });
 
-		const binaryPath = await this.ensureNgrokBinary();
+		const binaryPath = await this.ensureNgrokBinary(generation);
 
-		if (!binaryPath) {
+		if (!binaryPath || generation !== this.generation) {
 			return;
 		}
 
@@ -290,7 +302,7 @@ export class TunnelManager {
 		}
 	}
 
-	private async ensureNgrokBinary(): Promise<string | null> {
+	private async ensureNgrokBinary(generation: number): Promise<string | null> {
 		const binPath = this.getNgrokBinPath();
 
 		if (NgrokInstaller.isPinnedInstall(binPath)) {
@@ -307,12 +319,14 @@ export class TunnelManager {
 				level: 'info',
 				message: `ngrok ${NGROK_VERSION} installed and checksum-verified`
 			});
+			if (generation !== this.generation) return null;
 			this.setState({ status: 'starting', url: null, error: null });
 
 			return installedPath;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			this.onLog({ timestamp: Date.now(), level: 'error', message: `Failed to install ngrok: ${message}` });
+			if (generation !== this.generation) return null;
 			this.setState({ status: 'error', url: null, error: `Install failed: ${message}` });
 
 			return null;

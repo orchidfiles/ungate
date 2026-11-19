@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { InstallStamp, VerifiedArtifact, type PinnedArtifact } from './verified-artifact';
+import { ZipExtractor } from './zip-extractor';
 
 /**
  * Exactly one pinned ngrok agent. The `stable` download URLs silently change
@@ -100,7 +100,7 @@ export class NgrokInstaller {
 			// Verified before extraction and before any chmod/copy of an executable.
 			await VerifiedArtifact.download(artifact, downloadPath);
 
-			const stagedBinary = artifact.archived ? this.extractZip(downloadPath, stagingRoot) : downloadPath;
+			const stagedBinary = artifact.archived ? await this.extractZip(downloadPath, stagingRoot) : downloadPath;
 
 			fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
 			fs.copyFileSync(stagedBinary, binaryPath);
@@ -127,11 +127,11 @@ export class NgrokInstaller {
 		return { url: entry.url, sha256: entry.sha256, archived: entry.archived };
 	}
 
-	private static extractZip(zipPath: string, stagingRoot: string): string {
+	private static async extractZip(zipPath: string, stagingRoot: string): Promise<string> {
 		const extractDir = path.join(stagingRoot, 'extracted');
 
 		fs.mkdirSync(extractDir, { recursive: true });
-		execFileSync('unzip', ['-o', zipPath, '-d', extractDir]);
+		await ZipExtractor.extract(zipPath, extractDir);
 
 		const extracted = path.join(extractDir, 'ngrok.exe');
 

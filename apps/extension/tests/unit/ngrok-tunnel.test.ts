@@ -168,4 +168,49 @@ describe('ngrok tunnel', () => {
 		expect(manager.getState().error).toBe('Install failed: No pinned ngrok binary');
 		expect(mocks.spawnMock).not.toHaveBeenCalled();
 	});
+
+	it('does not launch ngrok when stopped while the binary is installing', async () => {
+		let finishInstall: (path: string) => void = () => {};
+		vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(false);
+		vi.spyOn(NgrokInstaller, 'install').mockReturnValue(
+			new Promise((resolve) => {
+				finishInstall = resolve;
+			})
+		);
+
+		const { manager } = createManager('token-1');
+		const starting = manager.start(47821);
+		await vi.waitFor(() => expect(manager.getState().status).toBe('installing'));
+
+		manager.stop();
+		finishInstall('/tmp/ngrok');
+		await starting;
+
+		expect(mocks.spawnMock).not.toHaveBeenCalled();
+		expect(manager.getState()).toEqual({ status: 'stopped', url: null, error: null });
+	});
+
+	it('launches only the latest start when restarted while installing', async () => {
+		const child = new FakeProcess();
+		let finishInstall: (path: string) => void = () => {};
+		mocks.spawnMock.mockReturnValue(child);
+		const pinned = vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(false);
+		vi.spyOn(NgrokInstaller, 'install').mockReturnValue(
+			new Promise((resolve) => {
+				finishInstall = resolve;
+			})
+		);
+
+		const { manager } = createManager('token-1');
+		const first = manager.start(47821);
+		await vi.waitFor(() => expect(manager.getState().status).toBe('installing'));
+
+		pinned.mockReturnValue(true);
+		await manager.restart(47822);
+		finishInstall('/tmp/ngrok');
+		await first;
+
+		expect(mocks.spawnMock).toHaveBeenCalledTimes(1);
+		expect(mocks.spawnMock.mock.calls[0][1]).toContain('47822');
+	});
 });
