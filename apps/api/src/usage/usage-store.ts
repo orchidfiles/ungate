@@ -1,4 +1,4 @@
-import { parseClaudeUsageHeaders, parseCodexPlanHeader, parseCodexUsageHeaders } from './usage-parsers';
+import { parseClaudeUsageHeaders, parseCodexPlanHeader, parseCodexUsageHeaders, type UsageEndpointResult } from './usage-parsers';
 
 import type { AccountUsage, SubscriptionProvider, UsageWindow } from '@ungate/shared';
 
@@ -44,12 +44,16 @@ export class AccountUsageStore {
 		});
 	}
 
-	/** Records a successful usage-endpoint fetch; clears any previous fetch error. */
-	static recordEndpoint(accountId: string, windows: UsageWindow[], planType: string | null, now = Date.now()): void {
+	/**
+	 * Records a successful usage-endpoint fetch and clears any previous fetch error. Windows the
+	 * endpoint reports as null are dropped so a limit the account no longer has stops showing.
+	 */
+	static recordEndpoint(accountId: string, result: UsageEndpointResult, now = Date.now()): void {
 		const existing = this.entries.get(accountId);
+		const kept = (existing?.windows ?? []).filter((window) => !result.cleared.includes(window.id));
 		this.entries.set(accountId, {
-			windows: merge(existing?.windows ?? [], windows),
-			planType: planType ?? existing?.planType ?? null,
+			windows: merge(kept, result.windows),
+			planType: result.planType ?? existing?.planType ?? null,
 			source: 'endpoint',
 			updatedAt: now,
 			error: null
