@@ -125,6 +125,7 @@ User entry point. Manages the API server and tunnel lifecycle.
 - `dashboard.ts` — WebView dashboard (Svelte UI). Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__`. Handshake: frontend sends `webview-ready` before extension sends initial state
 - `extension-status-bar.ts` — status bar (API + tunnel state)
 - `extension-commands.ts` — command registration (openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix)
+- `auto-tunnel.ts` — opt-in auto-start of the tunnel and per-URL "paste this base URL" assist (see Auto tunnel below)
 - `openai-key-fix.ts` — auto-enable OpenAI API Key in Cursor settings. Uses `aiSettings.usingOpenAIKey.toggle` command. SQLite writes to `state.vscdb` do not work — Cursor does not re-read reactive storage
 - `runtime-state/` — multi-window coordination via file-based state. Windows heartbeat, leader election, command queue
 
@@ -176,6 +177,8 @@ Types, constants, Zod schemas, helpers.
 **Multi-window:** multiple Cursor windows sync via a file-based runtime state in `~/.ungate/`. One window is the leader (runs the API), others read state. Heartbeat-based liveness, command queue for coordinated actions (start/restart/stop tunnel, restart API). Tunnel owner window handles tunnel lifecycle.
 
 **OpenAI Key Fix:** Cursor periodically resets the OpenAI API Key field in settings. Ungate automatically restores it via `aiSettings.usingOpenAIKey.toggle` command. Direct SQLite writes to `state.vscdb` do not work — Cursor never re-reads reactive storage. Only the leader window runs the fix loop, state is shared via runtime state file.
+
+**Auto tunnel:** opt-in toggle (`autoTunnel` in the runtime state file, default off, next to the key auto-fix in the dashboard tunnel panel and status bar, command `ungate.toggleAutoTunnel`). `auto-tunnel.ts` starts the quick tunnel once per API process in the window that owns tunnel commands, as soon as the API is running; it never retries a failed start in a loop. Each time the tunnel URL changes (`autoTunnel.lastAppliedUrl`, shared so only one window announces), it copies `<url>/v1`, turns on Cursor's OpenAI API Key switch, and shows a notification that opens Cursor Settings → Models. Cursor exposes no command for extensions to write `openAIBaseUrl` (reactive storage) or the key (`secret://cursorAuth/openAIKey`), so pasting the URL stays a manual step.
 
 **Codex streaming variants:** ChatGPT Codex `/responses` has two tool streaming formats — classic `function_call` + `response.function_call_arguments.*` and extended `custom_tool_call` + `response.custom_tool_call_input.*`. Both must be mapped to OpenAI `tool_calls`. Stream mapper processes both. OmniRoute only handles `function_call` — `custom_tool_call` is Ungate-specific.
 

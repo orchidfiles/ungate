@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 
 import {
+	DEFAULT_AUTO_TUNNEL_ENABLED,
 	DEFAULT_KEY_FIX_ENABLED,
 	sleep,
 	type ApiStatus as ApiLifecycleStatus,
@@ -11,6 +12,7 @@ import {
 import * as vscode from 'vscode';
 
 import { ApiServer } from './api-server';
+import { AutoTunnel } from './auto-tunnel';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar } from './extension-status-bar';
@@ -28,6 +30,7 @@ export class ExtensionController {
 	private tunnelManager!: TunnelManager;
 	private apiServer!: ApiServer;
 	private keyFix!: OpenAiKeyFix;
+	private autoTunnel!: AutoTunnel;
 	private currentPort: number | null = null;
 	private lastApiStatus: ApiLifecycleStatus | null = null;
 	private currentTunnelState: TunnelState = { status: 'stopped', url: null, error: null };
@@ -67,6 +70,23 @@ export class ExtensionController {
 			}
 		);
 
+		this.autoTunnel = new AutoTunnel({
+			startTunnel: (port) => {
+				void this.tunnelManager.start(port).catch((err: unknown) => {
+					const message = this.formatError(err);
+					this.reportTunnelError(`[auto-tunnel] start failed: ${message}`, `Start failed: ${message}`);
+				});
+			},
+			ensureKeyEnabled: () => this.keyFix.ensureKeyEnabled(),
+			onStateChange: (enabled) => {
+				this.dashboard.sendAutoTunnelState(enabled);
+				this.updateStatusBar();
+			},
+			log: (message) => {
+				this.log(message);
+			}
+		});
+
 		this.tunnelManager = new TunnelManager(
 			this.windowId,
 			() => this.extensionHostActive,
@@ -74,6 +94,12 @@ export class ExtensionController {
 				this.currentTunnelState = state;
 				this.dashboard.sendTunnelState(state);
 				this.updateStatusBar();
+
+				if (state.status === 'running' && state.url) {
+					void this.autoTunnel.onTunnelUrl(state.url).catch((error: unknown) => {
+						this.log(`[auto-tunnel] announce failed: ${this.formatError(error)}`);
+					});
+				}
 			},
 			(entry) => {
 				this.log(`[tunnel] ${entry.message}`);
@@ -117,8 +143,11 @@ export class ExtensionController {
 		const toggleKeyFix = vscode.commands.registerCommand(extensionCommands.toggleKeyFix, () => {
 			void this.setKeyFixByUser(!this.keyFix.isEnabled());
 		});
+		const toggleAutoTunnel = vscode.commands.registerCommand(extensionCommands.toggleAutoTunnel, () => {
+			void this.setAutoTunnelByUser(!this.autoTunnel.isEnabled());
+		});
 
-		this.context.subscriptions.push(openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix);
+		this.context.subscriptions.push(openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix, toggleAutoTunnel);
 
 		this.startHeartbeat();
 		this.startRuntimeSync();
@@ -205,9 +234,10 @@ export class ExtensionController {
 		const tunnel = this.currentTunnelState;
 		const tunnelApiUrl = this.getTunnelApiUrl();
 		const keyFixEnabled = this.keyFix?.isEnabled() ?? DEFAULT_KEY_FIX_ENABLED;
+		const autoTunnelEnabled = this.autoTunnel?.isEnabled() ?? DEFAULT_AUTO_TUNNEL_ENABLED;
 
 		this.statusBar.text = ExtensionStatusBar.barText(apiState, tunnel);
-		this.statusBar.tooltip = ExtensionStatusBar.createTooltip(apiState, tunnel, tunnelApiUrl, keyFixEnabled);
+		this.statusBar.tooltip = ExtensionStatusBar.createTooltip(apiState, tunnel, tunnelApiUrl, keyFixEnabled, autoTunnelEnabled);
 		this.statusBar.show();
 	}
 
@@ -248,6 +278,28 @@ export class ExtensionController {
 		}
 
 		this.applyApiServerStatus(status);
+
+		if (status === 'running') {
+			void this.reconcileAutoTunnel(RuntimeStateStore.read());
+		}
+	}
+
+	private async reconcileAutoTunnel(runtimeState: RuntimeState): Promise<void> {
+		try {
+			await this.autoTunnel.reconcile(runtimeState, {
+				port: this.currentPort,
+				ownsTunnel: this.shouldHandleTunnel(runtimeState)
+			});
+		} catch (error: unknown) {
+			this.log(`[auto-tunnel] reconcile failed: ${this.formatError(error)}`);
+		}
+	}
+
+	private shouldHandleTunnel(runtimeState: RuntimeState): boolean {
+		const tunnelOwner = runtimeState.tunnel.ownerWindowId;
+		const ownerIsLive = tunnelOwner !== null && RuntimeStateStore.getLiveClientIds(runtimeState).includes(tunnelOwner);
+
+		return ownerIsLive ? tunnelOwner === this.windowId : this.isLeaderWindow(runtimeState);
 	}
 
 	private restartTunnelFromStatusBar(): void {
@@ -309,6 +361,7 @@ export class ExtensionController {
 		if (message.type === 'webview-ready') {
 			this.dashboard.sendInitialState(this.tunnelManager.getState());
 			this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
+			this.dashboard.sendAutoTunnelState(this.autoTunnel.isEnabled());
 
 			return;
 		}
@@ -343,6 +396,12 @@ export class ExtensionController {
 			return;
 		}
 
+		if (message.type === 'set-auto-tunnel-enabled') {
+			void this.setAutoTunnelByUser(message.enabled);
+
+			return;
+		}
+
 		if (message.type === 'clear-logs') {
 			this.dashboard.clearLogs(message.source);
 			this.enqueueCommand('clear-logs', { logSource: message.source });
@@ -369,6 +428,21 @@ export class ExtensionController {
 		}
 
 		void vscode.window.showInformationMessage(message);
+	}
+
+	private async setAutoTunnelByUser(enabled: boolean): Promise<void> {
+		try {
+			await this.autoTunnel.setEnabledByUser(enabled);
+		} catch (error: unknown) {
+			void vscode.window.showErrorMessage(`Could not change auto tunnel: ${this.formatError(error)}`);
+			this.dashboard.sendAutoTunnelState(this.autoTunnel.isEnabled());
+
+			return;
+		}
+
+		this.dashboard.sendAutoTunnelState(enabled);
+		this.updateStatusBar();
+		await this.reconcileAutoTunnel(RuntimeStateStore.read());
 	}
 
 	private handleDashboardStartTunnel(): void {
@@ -458,6 +532,7 @@ export class ExtensionController {
 		this.applyRuntimeState(runtimeState);
 		this.apiServer.syncLeaderHealthMonitor(this.isLeaderWindow(runtimeState));
 		this.tryHandleCommand(runtimeState);
+		await this.reconcileAutoTunnel(runtimeState);
 	}
 
 	private applyRuntimeState(runtimeState: RuntimeState): void {
@@ -473,6 +548,7 @@ export class ExtensionController {
 		this.dashboard.setPort(this.currentPort);
 		this.dashboard.sendTunnelState(this.currentTunnelState);
 		this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
+		this.dashboard.sendAutoTunnelState(runtimeState.autoTunnel.enabled);
 		this.updateStatusBar();
 	}
 
@@ -504,9 +580,7 @@ export class ExtensionController {
 			this.lastCommandId = command.id;
 		}
 
-		const tunnelOwner = runtimeState.tunnel.ownerWindowId;
-		const ownerIsLive = tunnelOwner !== null && RuntimeStateStore.getLiveClientIds(runtimeState).includes(tunnelOwner);
-		const shouldHandleTunnelCommand = ownerIsLive ? tunnelOwner === this.windowId : this.isLeaderWindow(runtimeState);
+		const shouldHandleTunnelCommand = this.shouldHandleTunnel(runtimeState);
 
 		if (command.action === 'restart-api') {
 			if (!this.isLeaderWindow(runtimeState)) {

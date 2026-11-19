@@ -39,6 +39,13 @@ export class RuntimeStateNormalizer {
 			};
 		}
 
+		if (parsed.success && parsed.data.autoTunnel) {
+			next.autoTunnel = {
+				...next.autoTunnel,
+				...parsed.data.autoTunnel
+			};
+		}
+
 		if (typeof next.api.lastSeenAt !== 'number') {
 			next.api.lastSeenAt = now;
 		}

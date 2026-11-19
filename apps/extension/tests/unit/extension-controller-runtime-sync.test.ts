@@ -25,6 +25,7 @@ interface MockDashboard {
 	sendTunnelState: ReturnType<typeof vi.fn>;
 	pushLog: ReturnType<typeof vi.fn>;
 	sendKeyFixState: ReturnType<typeof vi.fn>;
+	sendAutoTunnelState: ReturnType<typeof vi.fn>;
 	show: ReturnType<typeof vi.fn>;
 }
 
@@ -144,6 +145,7 @@ vi.mock('../../src/dashboard', () => {
 	return {
 		Dashboard: class {
 			sendKeyFixState = vi.fn();
+			sendAutoTunnelState = vi.fn();
 			pushLog = vi.fn();
 			setPort = vi.fn();
 			sendTunnelState = vi.fn();
@@ -241,6 +243,7 @@ function createController(windowId: string): {
 		sendTunnelState: vi.fn(),
 		pushLog: vi.fn(),
 		sendKeyFixState: vi.fn(),
+		sendAutoTunnelState: vi.fn(),
 		show: vi.fn()
 	};
 	const statusBar = {
@@ -270,6 +273,11 @@ function createController(windowId: string): {
 			},
 			applySharedState: applySharedStateMock,
 			stop() {}
+		},
+		autoTunnel: {
+			isEnabled: () => false,
+			reconcile: vi.fn().mockResolvedValue(undefined),
+			onTunnelUrl: vi.fn().mockResolvedValue(undefined)
 		},
 		currentTunnelState,
 		currentPort: null,
