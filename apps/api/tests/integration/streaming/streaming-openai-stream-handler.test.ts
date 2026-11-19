@@ -287,12 +287,19 @@ describe('streaming-openai-stream-handler', () => {
 				event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"done"}' } }),
 				event({ type: 'content_block_stop', index: 0 }),
 				event({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'open', name: 'Write' } }),
-				event({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"path":"unfinished"' } }),
+				event({
+					type: 'content_block_delta',
+					index: 1,
+					delta: { type: 'input_json_delta', partial_json: '{"path":"unfinished"' }
+				}),
 				event({ type: 'message_delta', delta: { stop_reason: stopReason } }),
 				event({ type: 'message_stop' })
 			]);
 			const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'incomplete', 'model', {
-				model: 'model', source: 'claude', startTime: Date.now(), reverseToolMapping: {}
+				model: 'model',
+				source: 'claude',
+				startTime: Date.now(),
+				reverseToolMapping: {}
 			});
 			const output = await readStream(stream);
 			expect(output).toContain('\\"path\\":\\"done\\"');
@@ -312,7 +319,10 @@ describe('streaming-openai-stream-handler', () => {
 			ending === 'done' ? 'data: [DONE]' : event({ type: 'message_stop' })
 		]);
 		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'incomplete', 'model', {
-			model: 'model', source: 'claude', startTime: Date.now(), reverseToolMapping: {}
+			model: 'model',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: {}
 		});
 		const output = await readStream(stream);
 		expect(output).not.toContain('unfinished');
@@ -436,10 +446,20 @@ describe('streaming-openai-stream-handler', () => {
 			new ReadableStream<Uint8Array>({
 				async start(controller) {
 					controller.enqueue(event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }));
-					controller.enqueue(event({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_slow', name: 'Write' } }));
-					controller.enqueue(event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"big.md",' } }));
+					controller.enqueue(
+						event({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_slow', name: 'Write' } })
+					);
+					controller.enqueue(
+						event({
+							type: 'content_block_delta',
+							index: 0,
+							delta: { type: 'input_json_delta', partial_json: '{"path":"big.md",' }
+						})
+					);
 					await new Promise((resolve) => setTimeout(resolve, 120));
-					controller.enqueue(event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"contents":"x"}' } }));
+					controller.enqueue(
+						event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"contents":"x"}' } })
+					);
 					controller.enqueue(event({ type: 'content_block_stop', index: 0 }));
 					controller.enqueue(event({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 9 } }));
 					controller.enqueue(event({ type: 'message_stop' }));
@@ -657,7 +677,9 @@ describe('streaming-openai-stream-handler', () => {
 						controller.enqueue(encoder.encode('event: ping\ndata: {"type":"ping"}\n'));
 					}
 
-					controller.enqueue(event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'slow but alive' } }));
+					controller.enqueue(
+						event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'slow but alive' } })
+					);
 					controller.enqueue(event({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 4 } }));
 					controller.enqueue(event({ type: 'message_stop' }));
 					controller.close();
@@ -772,6 +794,44 @@ describe('streaming-openai-stream-handler', () => {
 			{ index: 0, function: { arguments: '{"path":"a.ts"}' } }
 		]);
 		expect(output).toContain('"finish_reason":"tool_calls"');
+	});
+
+	it('surfaces an upstream Anthropic error event as an error (no synthetic finish/[DONE]) and records one failure', async () => {
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const onStreamError = vi.fn();
+		const response = createResponseWithSse([
+			'event: message_start',
+			'data: {"type":"message_start","message":{"usage":{"input_tokens":3,"output_tokens":0}}}',
+			'event: content_block_delta',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}',
+			'event: content_block_start',
+			'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu9","name":"Read"}}',
+			'event: error',
+			'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+			'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"after-error"}}',
+			'data: {"type":"message_stop"}'
+		]);
+
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st-err', 'model-err', {
+			model: 'model-err',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: {},
+			onStreamError
+		});
+
+		const output = await readStream(stream);
+		errorSpy.mockRestore();
+
+		expect(output).toContain('"content":"partial"');
+		expect(output).toContain('"error":{"message":"Overloaded","type":"overloaded_error"');
+		expect(output).not.toContain('after-error');
+		expect(output).not.toContain('finish_reason":"length"');
+		expect(output).not.toContain('finish_reason":"tool_calls"');
+		expect(output).not.toContain('[DONE]');
+		expect(onStreamError).toHaveBeenCalledWith({ type: 'overloaded_error', message: 'Overloaded' });
+		expect(recordMock).toHaveBeenCalledTimes(1);
+		expect(recordMock.mock.calls[0][0]).toMatchObject({ source: 'error', stream: true, error: 'Overloaded' });
 	});
 
 	it('logs downstream cancellation without flushing an open tool', async () => {
