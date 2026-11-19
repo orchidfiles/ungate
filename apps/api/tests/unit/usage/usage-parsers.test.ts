@@ -26,13 +26,15 @@ describe('labelForMinutes', () => {
 
 describe('Claude usage', () => {
 	it('parses the /api/oauth/usage body (percent scale, ISO resets, null windows skipped)', () => {
-		const windows = parseClaudeUsageBody({
+		const { windows, cleared } = parseClaudeUsageBody({
 			five_hour: { utilization: 42.5, resets_at: '2027-01-15T12:00:00Z' },
 			seven_day: { utilization: 120, resets_at: null },
 			seven_day_opus: { utilization: 7, resets_at: '2027-01-20T00:00:00Z' },
 			seven_day_sonnet: null,
+			seven_day_oauth_apps: { utilization: null, resets_at: null },
 			extra_usage: { is_enabled: false }
 		});
+		expect(cleared).toEqual(['7d_sonnet', '7d_oauth_apps']);
 		expect(windows).toEqual([
 			{ id: '5h', label: '5-hour', usedPercent: 42.5, resetsAt: Date.parse('2027-01-15T12:00:00Z'), windowMinutes: 300 },
 			{ id: '7d', label: 'Weekly', usedPercent: 100, resetsAt: null, windowMinutes: 10080 },
@@ -47,8 +49,8 @@ describe('Claude usage', () => {
 	});
 
 	it('ignores non-object bodies', () => {
-		expect(parseClaudeUsageBody(null)).toEqual([]);
-		expect(parseClaudeUsageBody([1])).toEqual([]);
+		expect(parseClaudeUsageBody(null)).toEqual({ windows: [], cleared: [] });
+		expect(parseClaudeUsageBody([1])).toEqual({ windows: [], cleared: [] });
 	});
 
 	it('parses unified rate-limit headers (fraction scale, unix-second resets)', () => {
@@ -84,6 +86,7 @@ describe('ChatGPT usage', () => {
 		);
 		expect(result).toEqual({
 			planType: 'plus',
+			cleared: [],
 			windows: [
 				{ id: 'primary', label: '5-hour', usedPercent: 12, resetsAt: (SEC + 600) * 1000, windowMinutes: 300 },
 				{ id: 'secondary', label: 'Weekly', usedPercent: 55.5, resetsAt: NOW + 7_200_000, windowMinutes: 10080 }
@@ -92,8 +95,18 @@ describe('ChatGPT usage', () => {
 	});
 
 	it('handles missing rate limits', () => {
-		expect(parseCodexUsageBody({ plan_type: 'free', rate_limit: null })).toEqual({ planType: 'free', windows: [] });
-		expect(parseCodexUsageBody('nope')).toEqual({ planType: null, windows: [] });
+		expect(parseCodexUsageBody({ plan_type: 'free', rate_limit: null })).toEqual({
+			planType: 'free',
+			windows: [],
+			cleared: ['primary', 'secondary']
+		});
+		expect(parseCodexUsageBody({ rate_limit: { primary_window: { used_percent: 3 }, secondary_window: null } })).toEqual({
+			planType: null,
+			windows: [expect.objectContaining({ id: 'primary', usedPercent: 3 })],
+			cleared: ['secondary']
+		});
+		expect(parseCodexUsageBody({ plan_type: 'plus' })).toEqual({ planType: 'plus', windows: [], cleared: [] });
+		expect(parseCodexUsageBody('nope')).toEqual({ planType: null, windows: [], cleared: [] });
 	});
 
 	it('parses x-codex-* headers', () => {
