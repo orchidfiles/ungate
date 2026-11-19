@@ -218,7 +218,8 @@ export class OAuthAccounts {
 			const next = this.nextEligible(provider, id);
 			getDb().delete(oauthAccounts).where(eq(oauthAccounts.id, id)).run();
 			const policy = this.policy(provider);
-			if (policy.activeAccountId === id) {
+			// Emptying the list is recorded too: legacy adoption reads it as "the user removed these".
+			if (policy.activeAccountId === id || this.list(provider).length === 0) {
 				getDb()
 					.update(oauthPolicies)
 					.set({ activeAccountId: next?.id ?? null, revision: policy.revision + 1, lastSwitchReason: 'removed' })
