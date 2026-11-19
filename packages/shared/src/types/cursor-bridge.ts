@@ -122,7 +122,14 @@ export interface CursorBridgeError {
 	code?: number | string;
 }
 
-export type CursorSessionReason = 'ok' | 'disabled' | 'no_bridge' | 'no_cursor_api' | 'not_signed_in' | 'error';
+export type CursorSessionReason =
+	| 'ok'
+	| 'disabled'
+	| 'no_bridge'
+	| 'no_cursor_api'
+	| 'not_signed_in'
+	| 'token_encrypted'
+	| 'error';
 
 /** Safe for dashboards and the tunnel: no token, email or URLs. */
 export interface CursorSessionStatus {

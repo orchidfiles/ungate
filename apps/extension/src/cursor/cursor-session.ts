@@ -92,6 +92,11 @@ export class CursorSession {
 		return this.isSignedIn();
 	}
 
+	/** No usable token because Cursor encrypted the persisted one and the API is blocked. */
+	tokenEncrypted(): boolean {
+		return this.readToken() === null && (this.disk?.tokenEncrypted() ?? false);
+	}
+
 	membershipType(): string | null {
 		const value = this.callApi(() => this.api?.membershipType?.());
 		if (typeof value === 'string' && value.length > 0) return value;
