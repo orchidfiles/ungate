@@ -115,6 +115,7 @@ export class CursorBridge {
 		if (!this.child) return { available: false, connected: false, reason: 'no_bridge', membershipType: null };
 		if (!session.hasApi()) return { available: false, connected: false, reason: 'no_cursor_api', membershipType: null };
 		if (!this.options.isEnabled()) return { available: true, connected: false, reason: 'disabled', membershipType: null };
+		if (session.tokenEncrypted()) return { available: false, connected: false, reason: 'token_encrypted', membershipType: null };
 		if (!session.isSignedIn()) return { available: true, connected: false, reason: 'not_signed_in', membershipType: null };
 
 		return { available: true, connected: true, reason: 'ok', membershipType: session.membershipType() };
@@ -162,6 +163,11 @@ export class CursorBridge {
 		if (status.reason === 'disabled')
 			return { kind: 'disabled', message: 'Cursor provider is disabled. Connect it in the Ungate dashboard.' };
 		if (status.reason === 'not_signed_in') return { kind: 'auth', message: 'Sign in to Cursor to use Cursor models' };
+		if (status.reason === 'token_encrypted')
+			return {
+				kind: 'unavailable',
+				message: 'This Cursor version encrypts its session token at rest, so Ungate cannot use the Cursor provider'
+			};
 
 		return { kind: 'unavailable', message: 'Cursor provider is unavailable in this window' };
 	}

@@ -1,5 +1,8 @@
+import { EventEmitter } from 'node:events';
+
 import { describe, expect, it, vi } from 'vitest';
 
+import { CursorBridge } from '../../src/cursor/cursor-bridge';
 import { CursorDiskSession, cursorChecksum, jwtExpiryMs } from '../../src/cursor/cursor-disk-session';
 import { CursorSession } from '../../src/cursor/cursor-session';
 
@@ -126,6 +129,26 @@ describe('CursorSession with a blocked vscode.cursor API', () => {
 		expect(creds?.headers['x-cursor-checksum']).toBeDefined();
 		expect(creds?.backendUrl).toBe('https://api2.cursor.sh');
 		expect(getCursorAuthToken).toHaveBeenCalledTimes(1);
+	});
+
+	it('never sends a safeStorage-encrypted token as a bearer and reports why', async () => {
+		const { session: diskSession } = disk({
+			'cursorAuth/accessToken': 'cursor-safe-storage:djEwAAAA',
+			'cursorAuth/stripeMembershipType': 'unified_ultra'
+		});
+		const session = new CursorSession(
+			{ getCursorAuthToken: blocked, getAllRequestHeadersExceptAccessToken: blocked },
+			diskSession
+		);
+		const signedIn = await session.ensureSignedIn();
+		expect(signedIn).toBe(false);
+		expect(diskSession.current()).toBeNull();
+		expect(session.credentials()).toBeNull();
+		expect(session.tokenEncrypted()).toBe(true);
+
+		const bridge = new CursorBridge({ session, isEnabled: () => true });
+		bridge.attach(Object.assign(new EventEmitter(), { send: () => true, connected: true }) as never);
+		expect(bridge.status()).toMatchObject({ connected: false, reason: 'token_encrypted' });
 	});
 
 	it('reports signed out when neither source has a token', async () => {
