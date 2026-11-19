@@ -10,11 +10,14 @@ describe('AccountUsageStore', () => {
 	it('merges header updates without dropping endpoint-only windows', () => {
 		AccountUsageStore.recordEndpoint(
 			'a',
-			[
-				{ id: '7d_opus', label: 'Weekly (Opus)', usedPercent: 5, resetsAt: null, windowMinutes: 10080 },
-				{ id: '5h', label: '5-hour', usedPercent: 10, resetsAt: null, windowMinutes: 300 }
-			],
-			null,
+			{
+				windows: [
+					{ id: '7d_opus', label: 'Weekly (Opus)', usedPercent: 5, resetsAt: null, windowMinutes: 10080 },
+					{ id: '5h', label: '5-hour', usedPercent: 10, resetsAt: null, windowMinutes: 300 }
+				],
+				planType: null,
+				cleared: []
+			},
 			NOW
 		);
 		AccountUsageStore.recordHeaders('claude', 'a', new Headers({ 'anthropic-ratelimit-unified-5h-utilization': '0.5' }), NOW + 1);
@@ -48,11 +51,38 @@ describe('AccountUsageStore', () => {
 			windows: [{ id: 'primary', usedPercent: 20 }]
 		});
 
-		AccountUsageStore.recordEndpoint('a', [], null, NOW + 10);
+		AccountUsageStore.recordEndpoint('a', { windows: [], planType: null, cleared: [] }, NOW + 10);
 		expect(AccountUsageStore.get('a')).toMatchObject({ planType: 'plus', error: null, source: 'endpoint' });
 
 		AccountUsageStore.delete('a');
 		expect(AccountUsageStore.get('a')).toBeUndefined();
+	});
+
+	it('drops a window the usage endpoint now reports as null, keeping unmentioned ones', () => {
+		AccountUsageStore.recordHeaders(
+			'claude',
+			'a',
+			new Headers({
+				'anthropic-ratelimit-unified-5h-utilization': '0.5',
+				'anthropic-ratelimit-unified-7d_sonnet-utilization': '0.8',
+				'anthropic-ratelimit-unified-7d_opus-utilization': '0.3'
+			}),
+			NOW
+		);
+		AccountUsageStore.recordEndpoint(
+			'a',
+			{
+				windows: [{ id: '5h', label: '5-hour', usedPercent: 60, resetsAt: null, windowMinutes: 300 }],
+				planType: null,
+				cleared: ['7d_sonnet']
+			},
+			NOW + 1
+		);
+
+		expect(AccountUsageStore.get('a')!.windows.map((window) => [window.id, window.usedPercent])).toEqual([
+			['5h', 60],
+			['7d_opus', 30]
+		]);
 	});
 
 	it('records an error for an account with no prior usage', () => {

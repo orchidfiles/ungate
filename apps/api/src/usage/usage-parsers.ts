@@ -72,19 +72,36 @@ function describeClaudeWindow(id: string): { label: string; windowMinutes: numbe
 
 const CLAUDE_BODY_PREFIXES: Record<string, string> = { five_hour: '5h', seven_day: '7d' };
 
-/** Claude `/api/oauth/usage` body → windows (null / malformed windows are skipped). */
-export function parseClaudeUsageBody(body: unknown): UsageWindow[] {
+/**
+ * What a usage-endpoint body says: windows it reports, and window ids it explicitly reports as
+ * null (no longer tracked for this account), which the store drops. Ids it does not mention at
+ * all are neither, so windows learned from response headers survive.
+ */
+export interface UsageEndpointResult {
+	planType: string | null;
+	windows: UsageWindow[];
+	cleared: string[];
+}
+
+/** Claude `/api/oauth/usage` body → windows; `null` windows (or null utilization) are cleared. */
+export function parseClaudeUsageBody(body: unknown): Omit<UsageEndpointResult, 'planType'> {
 	const root = record(body);
-	if (!root) return [];
+	if (!root) return { windows: [], cleared: [] };
 	const windows: UsageWindow[] = [];
+	const cleared: string[] = [];
 
 	for (const [key, value] of Object.entries(root)) {
 		const match = /^(five_hour|seven_day)(?:_(.+))?$/.exec(key);
+		if (!match) continue;
+		const id = match[2] ? `${CLAUDE_BODY_PREFIXES[match[1]]}_${match[2]}` : CLAUDE_BODY_PREFIXES[match[1]];
 		const window = record(value);
-		if (!match || !window) continue;
+		if (value === null || window?.utilization === null) {
+			cleared.push(id);
+			continue;
+		}
+		if (!window) continue;
 		const utilization = finiteNumber(window.utilization);
 		if (utilization === undefined) continue;
-		const id = match[2] ? `${CLAUDE_BODY_PREFIXES[match[1]]}_${match[2]}` : CLAUDE_BODY_PREFIXES[match[1]];
 		const { label, windowMinutes } = describeClaudeWindow(id);
 		windows.push({
 			id,
@@ -95,7 +112,7 @@ export function parseClaudeUsageBody(body: unknown): UsageWindow[] {
 		});
 	}
 
-	return windows;
+	return { windows, cleared };
 }
 
 const CLAUDE_UTILIZATION_HEADER = /^anthropic-ratelimit-unified-([a-z0-9_]+)-utilization$/;
@@ -138,16 +155,22 @@ function codexWindow(
 	};
 }
 
-/** ChatGPT `/backend-api/wham/usage` body → plan type and windows. */
-export function parseCodexUsageBody(body: unknown, now = Date.now()): { planType: string | null; windows: UsageWindow[] } {
+/** ChatGPT `/backend-api/wham/usage` body → plan type and windows; null windows are cleared. */
+export function parseCodexUsageBody(body: unknown, now = Date.now()): UsageEndpointResult {
 	const root = record(body);
-	if (!root) return { planType: null, windows: [] };
+	if (!root) return { planType: null, windows: [], cleared: [] };
 	const planType = typeof root.plan_type === 'string' && root.plan_type ? root.plan_type : null;
 	const rateLimit = record(root.rate_limit);
 	const windows: UsageWindow[] = [];
+	const cleared: string[] = [];
 
 	for (const id of ['primary', 'secondary'] as const) {
-		const window = record(rateLimit?.[`${id}_window`]);
+		const raw = root.rate_limit === null ? null : rateLimit?.[`${id}_window`];
+		const window = record(raw);
+		if (raw === null || window?.used_percent === null) {
+			cleared.push(id);
+			continue;
+		}
 		const used = finiteNumber(window?.used_percent);
 		if (!window || used === undefined) continue;
 		const seconds = finiteNumber(window.limit_window_seconds);
@@ -156,7 +179,7 @@ export function parseCodexUsageBody(body: unknown, now = Date.now()): { planType
 		windows.push(codexWindow(id, used, seconds !== undefined ? Math.round(seconds / 60) : undefined, resetsAt));
 	}
 
-	return { planType, windows };
+	return { planType, windows, cleared };
 }
 
 /** ChatGPT `x-codex-{primary,secondary}-*` response headers → windows. */
