@@ -6,10 +6,10 @@ import { config } from '../config';
 import { OAuthAccounts, type OAuthAccountRow } from '../database/oauth-accounts';
 import { RequestBuilder } from '../proxy/request-builder';
 
-import { parseClaudeUsageBody, parseCodexUsageBody } from './usage-parsers';
+import { parseClaudeUsageBody, parseCodexUsageBody, type UsageEndpointResult } from './usage-parsers';
 import { AccountUsageStore } from './usage-store';
 
-import type { SubscriptionProvider, UsageWindow } from '@ungate/shared';
+import type { SubscriptionProvider } from '@ungate/shared';
 
 /** Accounts fetched (successfully or not) more recently than this are not fetched again. */
 export const USAGE_FETCH_THROTTLE_MS = 60_000;
@@ -22,7 +22,7 @@ interface Token {
 	workspaceId?: string | null;
 }
 
-type FetchResult = { ok: true; windows: UsageWindow[]; planType: string | null } | { ok: false; status: number; error: string };
+type FetchResult = ({ ok: true } & UsageEndpointResult) | { ok: false; status: number; error: string };
 
 class UsageFetchError extends Error {}
 
@@ -81,7 +81,7 @@ export class UsageFetcher {
 		if (!result.ok) throw new UsageFetchError(result.error);
 		// The account may have been removed while the request was in flight.
 		if (!OAuthAccounts.get(accountId, provider)) return;
-		AccountUsageStore.recordEndpoint(accountId, result.windows, result.planType);
+		AccountUsageStore.recordEndpoint(accountId, result);
 	}
 
 	private static async token(provider: SubscriptionProvider, accountId: string): Promise<Token | null> {
@@ -140,9 +140,8 @@ export class UsageFetcher {
 		const body: unknown = await response.json().catch(() => undefined);
 		if (body === undefined) return { ok: false, status: response.status, error: 'Usage response was not JSON' };
 
-		if (provider === 'claude') return { ok: true, windows: parseClaudeUsageBody(body), planType: null };
-		const parsed = parseCodexUsageBody(body);
+		if (provider === 'claude') return { ok: true, planType: null, ...parseClaudeUsageBody(body) };
 
-		return { ok: true, windows: parsed.windows, planType: parsed.planType };
+		return { ok: true, ...parseCodexUsageBody(body) };
 	}
 }

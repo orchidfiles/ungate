@@ -104,7 +104,7 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 
 **Subscription usage (`src/usage/`):**
 - `usage-parsers.ts` — pure parsers for Claude `GET /api/oauth/usage` (`five_hour`/`seven_day[_<model>]`, utilization 0–100), `anthropic-ratelimit-unified-<window>-utilization` headers (0–1 fraction), ChatGPT `GET /backend-api/wham/usage` (`rate_limit.{primary,secondary}_window`) and `x-codex-{primary,secondary}-*` headers
-- `usage-store.ts` — `AccountUsageStore`, in-memory per-account cache (not persisted). Updates merge by window id so header updates never drop endpoint-only windows (e.g. `7d_opus`)
+- `usage-store.ts` — `AccountUsageStore`, in-memory per-account cache (not persisted). Updates merge by window id so header updates never drop endpoint-only windows (e.g. `7d_opus`); a window the usage endpoint reports as `null` is dropped
 - `usage-fetcher.ts` — `UsageFetcher.refresh(provider, accountId?)`: live fetch per non-needs-login account, one 401 refresh retry, 60 s per-account throttle, in-flight dedupe, 10 s timeout. Never changes cooldowns or needs-login state
 - `AccountFallback.run` records rate-limit headers of every upstream attempt; `OAuthAccounts.dto()` exposes `usage`; `POST /v1/auth/:provider/usage/refresh` (`{ accountId? }`) fetches and returns the account list
 
