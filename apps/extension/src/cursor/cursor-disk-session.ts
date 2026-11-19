@@ -15,6 +15,11 @@ const KEYS = {
 	privacy: 'cursorai/donotchange/privacyMode'
 } as const;
 
+/**
+ * Cursor 3.29+ wraps persisted tokens in Electron `safeStorage`. The key lives in the OS keychain,
+ * reachable only from Cursor's main process, so such a value is never usable as a bearer token.
+ */
+const ENCRYPTED_PREFIX = 'cursor-safe-storage:';
 const SNAPSHOT_TTL_MS = 30_000;
 const EXPIRY_SKEW_MS = 60_000;
 
@@ -87,6 +92,7 @@ export class CursorDiskSession {
 	private snapshot: CursorDiskSnapshot | null = null;
 	private readAt = 0;
 	private inFlight: Promise<void> | null = null;
+	private encrypted = false;
 	private readonly sessionId = createHash('sha256').update(randomUUID()).digest('hex').slice(0, 32);
 	private readonly now: () => number;
 	private readonly readFile: (filePath: string) => string;
@@ -104,6 +110,11 @@ export class CursorDiskSession {
 		if (exp !== null && exp - EXPIRY_SKEW_MS <= this.now()) return null;
 
 		return snap;
+	}
+
+	/** True when the last read found a token Cursor encrypted at rest. */
+	tokenEncrypted(): boolean {
+		return this.encrypted;
 	}
 
 	/** Re-reads the files when the snapshot is stale (or always when `force`). Never throws. */
@@ -147,7 +158,8 @@ export class CursorDiskSession {
 			]);
 			const ids = this.machineIds();
 			this.readAt = this.now();
-			if (!token || !ids) {
+			this.encrypted = token?.startsWith(ENCRYPTED_PREFIX) ?? false;
+			if (!token || this.encrypted || !ids) {
 				this.snapshot = null;
 
 				return;
@@ -162,6 +174,7 @@ export class CursorDiskSession {
 			};
 		} catch {
 			this.snapshot = null;
+			this.encrypted = false;
 		}
 	}
 

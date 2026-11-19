@@ -35,6 +35,7 @@ const reasonText: Record<CursorSessionStatus['reason'], string> = {
 	no_bridge: 'Unavailable: the API was not started by this Cursor window',
 	no_cursor_api: 'Unavailable: this editor does not expose a Cursor session',
 	not_signed_in: 'Not signed in to Cursor — inference remains blocked',
+	token_encrypted: 'Unavailable: this Cursor version encrypts its session token, which Ungate cannot read',
 	error: 'Could not read the Cursor session'
 };
 
