@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import BetterSqlite3 from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
-import { adoptLegacyOAuthRows } from 'src/database/index';
+import { adoptLegacyOAuthRows, getSqlite } from 'src/database/index';
 import { OAuthAccounts } from 'src/database/oauth-accounts';
 
 const add = (user: string, workspace = 'workspace') =>
@@ -197,6 +197,40 @@ describe('OAuth account repository', () => {
 		const d = add('d');
 		expect(OAuthAccounts.active('openai')?.id).toBe(d.id);
 	});
+	it('keeps the last account deleted when an older build left its legacy row behind', () => {
+		const sqlite = getSqlite();
+		const legacyRow = sqlite.prepare(
+			'INSERT OR REPLACE INTO provider_settings (provider, access_token, refresh_token, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
+		);
+		legacyRow.run('claude', 'legacy-access', 'legacy-refresh', Date.now() + 60_000, 1);
+		adoptLegacyOAuthRows(sqlite);
+		const adopted = OAuthAccounts.active('claude');
+		expect(adopted?.id).toBe('legacy-claude');
+
+		OAuthAccounts.remove('claude', adopted!.id);
+		// Restart: the older build's row is still there, and it may have refreshed since.
+		adoptLegacyOAuthRows(sqlite);
+		legacyRow.run('claude', 'legacy-access-2', 'legacy-refresh-2', Date.now() + 120_000, 1);
+		adoptLegacyOAuthRows(sqlite);
+
+		expect(OAuthAccounts.list('claude')).toHaveLength(0);
+		expect(OAuthAccounts.active('claude')).toBeUndefined();
+	});
+
+	it('keeps the last account deleted even when it was not the active one', () => {
+		const sqlite = getSqlite();
+		sqlite
+			.prepare('INSERT INTO provider_settings (provider, access_token, created_at) VALUES (?, ?, ?)')
+			.run('openai', 'legacy-access', 1);
+		const only = add('a');
+		sqlite.prepare("UPDATE oauth_policies SET active_account_id = NULL WHERE provider = 'openai'").run();
+
+		OAuthAccounts.remove('openai', only.id);
+		adoptLegacyOAuthRows(sqlite);
+
+		expect(OAuthAccounts.list('openai')).toHaveLength(0);
+	});
+
 	it('backfills legacy credentials idempotently and preserves MiniMax', () => {
 		const db = new BetterSqlite3(':memory:');
 		try {
