@@ -93,6 +93,12 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 - OpenAI chat completion → Codex `/responses` payload transformation
 - `input-shape.ts`, `build-body.ts`, `input-text.ts`, `resolve-model.ts`, `types.ts`
 
+**Subscription usage (`src/usage/`):**
+- `usage-parsers.ts` — pure parsers for Claude `GET /api/oauth/usage` (`five_hour`/`seven_day[_<model>]`, utilization 0–100), `anthropic-ratelimit-unified-<window>-utilization` headers (0–1 fraction), ChatGPT `GET /backend-api/wham/usage` (`rate_limit.{primary,secondary}_window`) and `x-codex-{primary,secondary}-*` headers
+- `usage-store.ts` — `AccountUsageStore`, in-memory per-account cache (not persisted). Updates merge by window id so header updates never drop endpoint-only windows (e.g. `7d_opus`); a window the usage endpoint reports as `null` is dropped
+- `usage-fetcher.ts` — `UsageFetcher.refresh(provider, accountId?)`: live fetch per non-needs-login account, one 401 refresh retry, 60 s per-account throttle, in-flight dedupe, 10 s timeout. Never changes cooldowns or needs-login state
+- `AccountFallback.run` records rate-limit headers of every upstream attempt; `OAuthAccounts.dto()` exposes `usage`; `POST /v1/auth/:provider/usage/refresh` (`{ accountId? }`) fetches and returns the account list
+
 **Database (`src/database/`):**
 - SQLite via Drizzle ORM + better-sqlite3
 - Tables: `app_settings` (port, apiKey, quiet, extraInstruction, claudeCliVersionMode, claudeCliVersionCustom), `provider_settings` (per-provider OAuth tokens, refresh tokens, expiry), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget), `requests` (analytics)
@@ -150,6 +156,7 @@ Dashboard for managing providers, tunnel, settings.
 - `src/shared/api.ts` — HTTP client to API
 - `src/shared/vscode.ts` — `acquireVsCodeApi()` singleton
 - `src/features/settings/` — settings and providers (settings-store, settings-ui-store, provider-store)
+- `src/features/auth/` — subscription accounts (account-store, AccountManager, `UsageBars.svelte` for per-account usage windows)
 - `src/features/tunnel/` — tunnel management (tunnel-store)
 - `src/features/analytics/` — request statistics (analytics-store)
 - `src/features/logs/` — log viewer (logs-store)
@@ -173,6 +180,8 @@ Types, constants, Zod schemas, helpers.
 **System prompt conflict:** Claude Code's system prompt describing tools conflicts with Cursor's actual `input_schema`. The prompt must be minimal — identity only — and delegate tool shape to `input_schema`. The `extraInstruction` field in `app_settings` reinforces this priority. Full removal breaks API contract (empty blocks error), long prompts cause `invalid arguments` on large plans.
 
 **Tool mapping:** Cursor tool names (Shell, LS, StrReplace) are mapped to Claude Code names (Bash, Glob, Edit) on outbound requests and reverse-mapped in responses. Required for Anthropic OAuth whitelist — Anthropic validates tool names server-side and only allows standard Claude Code names. Mapping covers: Bash↔Shell, Read↔Read, Write↔Write, Edit↔StrReplace, Edit↔Delete, Glob↔LS, Grep↔Grep, WebFetch↔WebFetch, WebSearch↔WebSearch.
+
+**Usage limits:** each saved Claude/ChatGPT account card in the dashboard shows its subscription windows (5-hour, weekly, model-specific) with % used and reset time. Two sources feed the in-memory `AccountUsageStore`: rate-limit headers on every proxied response (free, arrive with the 5 s account-list poll) and the providers' usage endpoints (`/api/oauth/usage` for Claude with `anthropic-beta: oauth-2025-04-20`; `/backend-api/wham/usage` for ChatGPT with `chatgpt-account-id`), fetched on dashboard attach/focus, every 5 min while visible, and via "Refresh usage". Usage is display-only: it never drives cooldowns or account switching. It is lost on API restart and refilled by the next refresh.
 
 **Multi-window:** multiple Cursor windows sync via a file-based runtime state in `~/.ungate/`. One window is the leader (runs the API), others read state. Heartbeat-based liveness, command queue for coordinated actions (start/restart/stop tunnel, restart API). Tunnel owner window handles tunnel lifecycle.
 
