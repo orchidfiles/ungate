@@ -146,6 +146,7 @@ vi.mock('../../src/dashboard', () => {
 		Dashboard: class {
 			sendKeyFixState = vi.fn();
 			sendAutoTunnelState = vi.fn();
+			sendTunnelConfig = vi.fn();
 			pushLog = vi.fn();
 			setPort = vi.fn();
 			sendTunnelState = vi.fn();
@@ -208,7 +209,11 @@ function createRuntimeState(windowIds: string[], apiPort: number | null = 4783):
 function createContext() {
 	return {
 		subscriptions: [],
-		extensionPath: '/tmp/ungate-extension'
+		extensionPath: '/tmp/ungate-extension',
+		secrets: {
+			get: () => Promise.resolve(undefined),
+			store: () => Promise.resolve()
+		}
 	};
 }
 
@@ -244,6 +249,7 @@ function createController(windowId: string): {
 		pushLog: vi.fn(),
 		sendKeyFixState: vi.fn(),
 		sendAutoTunnelState: vi.fn(),
+		sendTunnelConfig: vi.fn(),
 		show: vi.fn()
 	};
 	const statusBar = {
@@ -278,6 +284,9 @@ function createController(windowId: string): {
 			isEnabled: () => false,
 			reconcile: vi.fn().mockResolvedValue(undefined),
 			onTunnelUrl: vi.fn().mockResolvedValue(undefined)
+		},
+		ngrokToken: {
+			isSet: () => Promise.resolve(false)
 		},
 		currentTunnelState,
 		currentPort: null,

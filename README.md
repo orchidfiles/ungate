@@ -81,7 +81,7 @@ The Models settings list the IDs configured in your installation, and you can ad
 
 With proxying enabled, switch between connected providers by choosing another custom model ID in the model picker. With proxying off, built-in models such as Composer use Cursor's normal billing and routing.
 
-The local API starts together with the extension, while the tunnel starts only when you ask for it. Both need your computer to stay online. A restarted quick tunnel may get a new URL, so update Cursor's Base URL whenever that happens.
+The local API starts together with the extension, while the tunnel starts only when you ask for it. Both need your computer to stay online. The default quick tunnel gets a new URL on every restart, so update Cursor's Base URL whenever that happens. The dashboard's ngrok option keeps one dev-domain URL across restarts; it needs an authtoken from the ngrok dashboard, and the free plan gives one domain, 1 GB a month, and no uptime guarantee.
 
 The status bar shows the state of the API and the tunnel. Its tooltip has shortcuts for opening the dashboard, restarting the tunnel, and copying the URL. Click the proxy toggle beside the chat to switch between Ungate's custom models and Cursor's built-in models such as Composer. The dashboard holds provider settings, models, request analytics, and separate API and tunnel logs. Runtime state and logs are shared across all your Cursor windows.
 
@@ -108,7 +108,7 @@ If you need a workflow sanctioned by the provider, use the official clients. If 
 
 Cursor sends requests to your custom Base URL from its backend, not from your computer. To that backend, `localhost` means its own machine, not yours.
 
-Ungate solves this with a Cloudflare quick tunnel that exposes the local proxy over HTTPS. You don't need to open inbound ports, set up port forwarding, or create a Cloudflare account.
+Ungate solves this with a tunnel that exposes the local proxy over HTTPS. The default is a Cloudflare quick tunnel, which needs no account. A ngrok tunnel is optional and keeps the same URL. Either way you don't need to open inbound ports or set up port forwarding.
 
 ```mermaid
 sequenceDiagram

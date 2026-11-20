@@ -1,5 +1,5 @@
 <script lang="ts">
-import { sleep } from '@ungate/shared/frontend';
+import { sleep, type TunnelProvider } from '@ungate/shared/frontend';
 import IconCopy from 'virtual:icons/lucide/copy';
 import IconPlay from 'virtual:icons/lucide/play';
 import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
@@ -26,6 +26,9 @@ const statusDotClass: Record<string, string> = {
 };
 
 let copied = $state(false);
+let tokenDraft = $state('');
+
+const ngrok = $derived(store.provider === 'ngrok');
 
 function handleCopy() {
 	if (!store.tunnel.url) return;
@@ -46,11 +49,27 @@ function handleAutoTunnelChange(event: Event): void {
 	const target = event.currentTarget as HTMLInputElement;
 	store.setAutoTunnelEnabled(target.checked);
 }
+
+function handleProviderChange(event: Event): void {
+	const target = event.currentTarget as HTMLSelectElement;
+	store.setProvider(target.value as TunnelProvider);
+}
+
+function saveToken(): void {
+	const token = tokenDraft.trim();
+
+	if (!token) {
+		return;
+	}
+
+	store.setNgrokAuthToken(token);
+	tokenDraft = '';
+}
 </script>
 
 <div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
 	<div class="flex items-center justify-between">
-		<p class="text-sm font-semibold">Cloudflare Tunnel</p>
+		<p class="text-sm font-semibold">{ngrok ? 'Stable tunnel' : 'Cloudflare Tunnel'}</p>
 		<div class="flex items-center gap-2">
 			<span class="size-2 rounded-full {statusDotClass[store.tunnel.status] ?? 'bg-surface-400'}"></span>
 			<span class="text-xs text-surface-400">{statusLabel[store.tunnel.status] ?? store.tunnel.status}</span>
@@ -72,7 +91,11 @@ function handleAutoTunnelChange(event: Event): void {
 			<div class="text-xs text-surface-400 space-y-1">
 				<p>Paste this URL into Cursor Settings → Models → OpenAI API Base URL.</p>
 				<p>In the API Key field paste the key from Server Configuration below (or leave empty if no key is set).</p>
-				<p class="text-surface-500">The URL changes on each restart.</p>
+				{#if ngrok}
+					<p class="text-surface-500">This URL stays the same across restarts.</p>
+				{:else}
+					<p class="text-surface-500">The URL changes on each restart.</p>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -117,6 +140,44 @@ function handleAutoTunnelChange(event: Event): void {
 				<IconSquare class="size-4" />
 				Stop
 			</button>
+		{/if}
+	</div>
+
+	<div class="card preset-tonal-surface border border-surface-700/30 p-3 space-y-2">
+		<label class="flex items-center justify-between gap-3">
+			<span class="text-sm leading-5">Tunnel</span>
+			<select
+				class="select text-sm"
+				value={store.provider}
+				onchange={handleProviderChange}>
+				<option value="quick">Quick (rotating URL)</option>
+				<option value="ngrok">ngrok (stable URL)</option>
+			</select>
+		</label>
+		{#if ngrok}
+			<p class="text-xs text-surface-400">
+				Free plan: one dev domain, 1 GB per month, and no uptime guarantee. The authtoken comes from
+				<a
+					class="anchor"
+					href="https://dashboard.ngrok.com/get-started/your-authtoken">dashboard.ngrok.com</a
+				>.
+			</p>
+			<div class="flex items-center gap-2">
+				<input
+					class="input text-sm flex-1"
+					type="password"
+					placeholder={store.tokenSet ? 'Authtoken saved' : 'Paste ngrok authtoken'}
+					autocomplete="off"
+					bind:value={tokenDraft} />
+				<button
+					class="btn btn-sm preset-tonal-surface"
+					disabled={!tokenDraft.trim()}
+					onclick={saveToken}>
+					Save
+				</button>
+			</div>
+		{:else}
+			<p class="text-xs text-surface-400">Nothing to configure. The public URL is new every time the tunnel starts.</p>
 		{/if}
 	</div>
 

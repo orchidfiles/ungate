@@ -51,6 +51,7 @@ function createState(apiStatus: RuntimeState['api']['status'], lastError: string
 		},
 		keyFix: { enabled: false },
 		autoTunnel: { enabled: false, lastAppliedUrl: null },
+		tunnelProvider: 'quick',
 		clients: {},
 		commands: []
 	};
