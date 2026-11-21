@@ -173,7 +173,8 @@ export class UsageFetcher {
 				headers: {
 					Accept: 'application/json',
 					Authorization: `Bearer ${token.accessToken}`,
-					'Content-Type': 'application/json'
+					'Content-Type': 'application/json',
+					'User-Agent': config.gemini.userAgent
 				},
 				body: JSON.stringify({ project: token.workspaceId }),
 				signal: AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS)

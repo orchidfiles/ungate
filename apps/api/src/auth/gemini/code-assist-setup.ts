@@ -1,14 +1,12 @@
 import { sleep } from '@ungate/shared';
 import { config } from 'src/config';
 
-/** Same client metadata gemini-cli sends from `code_assist/setup.ts`. */
-const CLIENT_METADATA = { ideType: 'IDE_UNSPECIFIED', platform: 'PLATFORM_UNSPECIFIED', pluginType: 'GEMINI' } as const;
 const SETUP_TIMEOUT_MS = 15_000;
-const ONBOARD_POLL_MS = 5_000;
-const ONBOARD_MAX_POLLS = 12;
+const ONBOARD_POLL_MS = 2_000;
+const ONBOARD_MAX_POLLS = 5;
 
 export const UNSUPPORTED_CLIENT_MESSAGE =
-	'Google no longer allows Gemini CLI sign-in for this account type (individual, AI Pro and Ultra accounts were moved off this path on 2026-06-18). Use a Google Workspace / Code Assist Standard account, or reconnect after Google restores access.';
+	'Google rejected this Antigravity client for your account. Check your account eligibility in Antigravity. Reconnecting cannot override a Google access restriction.';
 
 interface GeminiTier {
 	id?: string;
@@ -26,49 +24,61 @@ export interface LoadCodeAssistResponse {
 	paidTier?: GeminiTier | null;
 	allowedTiers?: GeminiTier[] | null;
 	ineligibleTiers?: IneligibleTier[] | null;
-	cloudaicompanionProject?: string | null;
+	cloudaicompanionProject?: string | { id?: string } | null;
 }
 
 interface OnboardOperation {
-	name?: string;
 	done?: boolean;
-	response?: { cloudaicompanionProject?: { id?: string } };
+	response?: { cloudaicompanionProject?: string | { id?: string } };
 }
 
 export type CodeAssistSetup =
 	| { ok: true; projectId: string; tierId: string | null; tierName: string | null }
-	/** `unsupported` = Google rejected this client for the account (needs-login with a migration message). */
 	| { ok: false; unsupported: boolean; error: string };
 
-/** Code Assist project + tier discovery (`loadCodeAssist`, then `onboardUser` when no project exists). */
 export class CodeAssistSetupClient {
 	static async setup(accessToken: string): Promise<CodeAssistSetup> {
-		const load = await this.post<LoadCodeAssistResponse>(accessToken, 'loadCodeAssist', { metadata: CLIENT_METADATA });
+		const load = await this.post<LoadCodeAssistResponse>(accessToken, 'loadCodeAssist', {
+			metadata: { ideType: 'ANTIGRAVITY' }
+		});
 		const ineligible = load.ineligibleTiers ?? [];
 		const unsupported = ineligible.find((tier) => tier.reasonCode === 'UNSUPPORTED_CLIENT');
+		if (unsupported) return this.ineligible(ineligible, unsupported);
 
-		if (load.currentTier) {
-			const tier = load.paidTier ?? load.currentTier;
-			if (load.cloudaicompanionProject) {
-				return { ok: true, projectId: load.cloudaicompanionProject, tierId: tier.id ?? null, tierName: tier.name ?? null };
-			}
-
-			return this.ineligible(ineligible, unsupported);
+		const tier = load.paidTier ?? load.currentTier;
+		const projectId = this.projectId(load.cloudaicompanionProject);
+		if (projectId) {
+			return { ok: true, projectId, tierId: tier?.id ?? null, tierName: tier?.name ?? null };
 		}
-		if (unsupported) return { ok: false, unsupported: true, error: UNSUPPORTED_CLIENT_MESSAGE };
+		if (ineligible.length) return this.ineligible(ineligible, unsupported);
 
-		const tier = (load.allowedTiers ?? []).find((candidate) => candidate.isDefault);
-		if (!tier?.id) return this.ineligible(ineligible, unsupported);
-		// The free tier uses a Google-managed project; sending one fails with Precondition Failed.
-		let operation = await this.post<OnboardOperation>(accessToken, 'onboardUser', { tierId: tier.id, metadata: CLIENT_METADATA });
-		for (let poll = 0; !operation.done && operation.name && poll < ONBOARD_MAX_POLLS; poll++) {
-			await sleep(ONBOARD_POLL_MS);
-			operation = await this.get<OnboardOperation>(accessToken, operation.name);
+		const onboardTier = (load.allowedTiers ?? []).find((candidate) => candidate.isDefault) ?? load.currentTier;
+		const tierId = onboardTier?.id ?? 'free-tier';
+		for (let poll = 0; poll < ONBOARD_MAX_POLLS; poll++) {
+			if (poll) await sleep(ONBOARD_POLL_MS);
+			const operation = await this.post<OnboardOperation>(accessToken, 'onboardUser', {
+				tier_id: tierId,
+				metadata: { ide_type: 'ANTIGRAVITY', ide_version: config.gemini.clientVersion, ide_name: 'antigravity' }
+			});
+			if (!operation.done) continue;
+			const onboardedProject = this.projectId(operation.response?.cloudaicompanionProject);
+			if (!onboardedProject) return this.ineligible([], undefined);
+
+			return {
+				ok: true,
+				projectId: onboardedProject,
+				tierId: tier?.id ?? tierId,
+				tierName: tier?.name ?? onboardTier?.name ?? null
+			};
 		}
-		const projectId = operation.response?.cloudaicompanionProject?.id;
-		if (!projectId) return this.ineligible(ineligible, unsupported);
 
-		return { ok: true, projectId, tierId: tier.id, tierName: tier.name ?? null };
+		return { ok: false, unsupported: false, error: 'Antigravity account onboarding timed out. Try signing in again.' };
+	}
+
+	private static projectId(value: string | { id?: string } | null | undefined): string | null {
+		const id = typeof value === 'string' ? value : value?.id;
+
+		return typeof id === 'string' && id.trim() ? id.trim() : null;
 	}
 
 	private static ineligible(tiers: IneligibleTier[], unsupported: IneligibleTier | undefined): CodeAssistSetup {
@@ -79,35 +89,32 @@ export class CodeAssistSetupClient {
 			ok: false,
 			unsupported: false,
 			error: reasons.length
-				? `Gemini Code Assist is unavailable for this account: ${reasons.join('; ')}`
-				: 'Gemini Code Assist did not assign a project to this account'
+				? `Antigravity is unavailable for this account: ${reasons.join('; ')}`
+				: 'Antigravity did not assign a project to this account'
 		};
 	}
 
 	private static async post<T>(accessToken: string, method: string, body: object): Promise<T> {
-		return this.call<T>(accessToken, `${config.gemini.codeAssistUrl}:${method}`, {
+		const onboarding = method === 'onboardUser';
+		const response = await fetch(`${config.gemini.codeAssistUrl}:${method}`, {
 			method: 'POST',
-			body: JSON.stringify(body)
-		});
-	}
-
-	private static async get<T>(accessToken: string, operationName: string): Promise<T> {
-		return this.call<T>(accessToken, `${config.gemini.codeAssistUrl}/${operationName}`, { method: 'GET' });
-	}
-
-	private static async call<T>(accessToken: string, url: string, init: RequestInit): Promise<T> {
-		const response = await fetch(url, {
-			...init,
-			headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+			body: JSON.stringify(body),
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				'Content-Type': 'application/json',
+				Accept: 'application/json',
+				'User-Agent': config.gemini.userAgent + (onboarding ? ' google-api-nodejs-client/10.3.0' : ''),
+				...(onboarding ? { 'X-Goog-Api-Client': 'gl-node/22.21.1' } : {})
+			},
 			signal: AbortSignal.timeout(SETUP_TIMEOUT_MS)
 		});
 		if (!response.ok) {
-			const text = await response.text().catch(() => '');
-			throw new Error(`Gemini Code Assist setup failed (HTTP ${response.status})${text ? `: ${text.slice(0, 300)}` : ''}`);
+			await response.body?.cancel().catch(() => undefined);
+			throw new Error(`Antigravity account setup failed (HTTP ${response.status})`);
 		}
 
-		const body: unknown = await response.json();
+		const result: unknown = await response.json();
 
-		return body as T;
+		return result as T;
 	}
 }

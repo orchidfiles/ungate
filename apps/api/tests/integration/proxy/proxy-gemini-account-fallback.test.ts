@@ -60,7 +60,7 @@ const geminiSse = (text: string) =>
 
 interface Sent {
 	auth: string;
-	envelope: { model: string; project: string; user_prompt_id: string; request: Record<string, unknown> };
+	envelope: { model: string; project: string; requestId: string; request: Record<string, unknown> };
 }
 
 function stubUpstream(responses: (() => Response)[]): Sent[] {
@@ -68,7 +68,7 @@ function stubUpstream(responses: (() => Response)[]): Sent[] {
 	vi.stubGlobal(
 		'fetch',
 		vi.fn((url: string, init?: RequestInit) => {
-			expect(url).toBe('https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse');
+			expect(url).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse');
 			sent.push({
 				auth: (init?.headers as Record<string, string>).Authorization,
 				envelope: JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Sent['envelope']
@@ -102,7 +102,10 @@ describe('Gemini account fallback (GeminiClient.proxy)', () => {
 			project: 'project-a',
 			request: { generationConfig: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'medium' } } }
 		});
-		expect(sent[0].envelope.user_prompt_id).toBeTruthy();
+		expect(sent[0].envelope.requestId).toMatch(/^agent-/);
+		expect(sent[0].envelope).toMatchObject({ userAgent: 'antigravity', requestType: 'agent' });
+		expect(sent[0].envelope.request.sessionId).toMatch(/^-\d+$/);
+		expect(sent[0].envelope).not.toHaveProperty('user_prompt_id');
 		expect(result.context).toMatchObject({ source: 'gemini', inputTokens: 3, outputTokens: 2 });
 	});
 
@@ -122,7 +125,7 @@ describe('Gemini account fallback (GeminiClient.proxy)', () => {
 			['Bearer token-a', 'project-a'],
 			['Bearer token-b', 'project-b']
 		]);
-		expect(sent[0].envelope.user_prompt_id).toBe(sent[1].envelope.user_prompt_id);
+		expect(sent[0].envelope.requestId).toBe(sent[1].envelope.requestId);
 		const policy = OAuthAccounts.policy('gemini');
 		expect(policy.activeAccountId).toBe(b.id);
 		expect(policy.lastSwitchReason).toBe('gemini_quota_exhausted');

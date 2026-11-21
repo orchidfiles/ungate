@@ -3,7 +3,7 @@ import { logger } from 'src/utils/logger';
 
 import { AccountRefreshRejected } from '../account-token-service';
 
-/** Gemini sign-in needs an OAuth client from the environment; see `geminiOAuthClient()`. */
+/** OAuth credentials must be supplied as a complete valid pair in the environment. */
 export class GeminiOAuthNotConfiguredError extends Error {
 	constructor() {
 		super(

@@ -48,7 +48,9 @@ export const config = {
 		usageUrl: 'https://chatgpt.com/backend-api/wham/usage'
 	},
 	gemini: {
-		/** The installed-app client comes from the environment; see `geminiOAuthClient()`. */
+		/** Antigravity installed-app OAuth requires a complete client pair from the environment. */
+		clientVersion: '2.33.0',
+		userAgent: `antigravity/hub/2.33.0 (aidev_client; os_type=${process.platform}; arch=${process.arch}; cl=1023160026)`,
 		oauth: {
 			authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
 			tokenUrl: 'https://oauth2.googleapis.com/token',
@@ -56,14 +58,17 @@ export const config = {
 			scope: [
 				'https://www.googleapis.com/auth/cloud-platform',
 				'https://www.googleapis.com/auth/userinfo.email',
-				'https://www.googleapis.com/auth/userinfo.profile'
+				'https://www.googleapis.com/auth/userinfo.profile',
+				'https://www.googleapis.com/auth/aicode',
+				'https://www.googleapis.com/auth/cclog',
+				'https://www.googleapis.com/auth/experimentsandconfigs'
 			].join(' '),
 			callbackPath: '/oauth2callback',
 			successUrl: 'https://developers.google.com/gemini-code-assist/auth_success_gemini',
 			failureUrl: 'https://developers.google.com/gemini-code-assist/auth_failure_gemini'
 		},
-		/** Code Assist internal API (what gemini-cli talks to), not the paid Gemini API. */
-		codeAssistUrl: 'https://cloudcode-pa.googleapis.com/v1internal'
+		/** Consumer Antigravity endpoint. Never fall back to the enterprise Code Assist host. */
+		codeAssistUrl: 'https://daily-cloudcode-pa.googleapis.com/v1internal'
 	}
 } as const;
 
@@ -78,9 +83,8 @@ const GOOGLE_CLIENT_ID_SUFFIX = '.apps.googleusercontent.com';
 let warnedInvalidGeminiClientId = false;
 
 /**
- * Google OAuth installed-app client for Gemini sign-in, from `UNGATE_GEMINI_OAUTH_CLIENT_ID` and
- * `UNGATE_GEMINI_OAUTH_CLIENT_SECRET`. Ungate ships no client of its own; null when either is unset,
- * or when the id is not a Google OAuth client id (a placeholder would only fail later at Google).
+ * Antigravity-compatible installed-app credentials come only from the environment.
+ * Missing, partial or invalid pairs disable sign-in; no OAuth client is bundled.
  */
 export function geminiOAuthClient(): GeminiOAuthClientCredentials | null {
 	const clientId = process.env.UNGATE_GEMINI_OAUTH_CLIENT_ID?.trim();

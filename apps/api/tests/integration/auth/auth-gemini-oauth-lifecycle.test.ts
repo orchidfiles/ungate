@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccountLoginSessions } from 'src/auth/account-login-sessions';
-import { UNSUPPORTED_CLIENT_MESSAGE } from 'src/auth/gemini/code-assist-setup';
+import { CodeAssistSetupClient, UNSUPPORTED_CLIENT_MESSAGE } from 'src/auth/gemini/code-assist-setup';
 import { GeminiOAuthClient, GeminiOAuthNotConfiguredError } from 'src/auth/gemini/gemini-oauth-client';
 import { GeminiOAuthService } from 'src/auth/gemini/gemini-oauth-service';
 import { OAuthAccounts } from 'src/database/oauth-accounts';
@@ -68,6 +68,57 @@ afterEach(async () => {
 });
 
 describe('auth-gemini-oauth-lifecycle', () => {
+	it('fails closed when neither OAuth credential is supplied', async () => {
+		vi.stubEnv('UNGATE_GEMINI_OAUTH_CLIENT_ID', undefined);
+		vi.stubEnv('UNGATE_GEMINI_OAUTH_CLIENT_SECRET', undefined);
+		await expect(GeminiOAuthService.startLogin()).rejects.toBeInstanceOf(GeminiOAuthNotConfiguredError);
+		expect(AccountLoginSessions.findPending('gemini')).toBeFalsy();
+	});
+
+	it('requests Antigravity scopes with the configured client', async () => {
+		const { authUrl } = await GeminiOAuthService.startLogin();
+		const url = new URL(authUrl);
+		expect(url.searchParams.get('client_id')).toBe('test-client.apps.googleusercontent.com');
+		for (const scope of ['aicode', 'cclog', 'experimentsandconfigs']) {
+			expect(url.searchParams.get('scope')).toContain(`https://www.googleapis.com/auth/${scope}`);
+		}
+	});
+
+	it('accepts an object-shaped project without requiring a current tier', async () => {
+		const calls = stubGoogle({ load: { cloudaicompanionProject: { id: 'agy-project' } } });
+		const response = await signIn();
+		expect(response.status).toBe(302);
+		expect(OAuthAccounts.list('gemini')[0].providerAccountId).toBe('agy-project');
+		const load = calls.find((call) => call.url.endsWith(':loadCodeAssist'))!;
+		expect(load.url).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist');
+		expect(JSON.parse(load.body)).toEqual({ metadata: { ideType: 'ANTIGRAVITY' } });
+		expect(calls.some((call) => call.url.endsWith(':onboardUser'))).toBe(false);
+	});
+
+	it('polls onboarding on the daily host with Antigravity control-plane headers', async () => {
+		vi.useFakeTimers();
+		try {
+			const fetchMock = vi
+				.fn<typeof fetch>()
+				.mockResolvedValueOnce(new Response(JSON.stringify({ currentTier: { id: 'free-tier' } })))
+				.mockResolvedValueOnce(new Response(JSON.stringify({ done: false })))
+				.mockResolvedValueOnce(new Response(JSON.stringify({ done: true, response: { cloudaicompanionProject: 'p' } })));
+			vi.stubGlobal('fetch', fetchMock);
+			const result = CodeAssistSetupClient.setup('test-token');
+			await vi.advanceTimersByTimeAsync(2_000);
+			const setup = await result;
+			expect(setup).toMatchObject({ ok: true, projectId: 'p' });
+			for (const [url, init] of fetchMock.mock.calls.slice(1)) {
+				expect(url).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:onboardUser');
+				const headers = new Headers(init?.headers);
+				expect(headers.get('User-Agent')).toContain('antigravity/hub/');
+				expect(headers.get('X-Goog-Api-Client')).toBe('gl-node/22.21.1');
+			}
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('refuses to start a login, with no session left pending, when no OAuth client is configured', async () => {
 		vi.stubEnv('UNGATE_GEMINI_OAUTH_CLIENT_SECRET', '');
 
@@ -157,7 +208,8 @@ describe('auth-gemini-oauth-lifecycle', () => {
 
 		expect(response.status).toBe(302);
 		expect(JSON.parse(calls.find((call) => call.url.endsWith(':onboardUser'))?.body ?? '{}')).toMatchObject({
-			tierId: 'free-tier'
+			tier_id: 'free-tier',
+			metadata: { ide_type: 'ANTIGRAVITY', ide_name: 'antigravity' }
 		});
 		expect(OAuthAccounts.list('gemini')[0]).toMatchObject({ providerAccountId: 'onboarded-project', planType: 'free-tier' });
 	});
@@ -174,12 +226,12 @@ describe('auth-gemini-oauth-lifecycle', () => {
 		const page = await response.text();
 
 		expect(response.status).toBe(400);
-		expect(page).toContain('2026-06-18');
+		expect(page).toContain('Antigravity');
 		const [account] = OAuthAccounts.list('gemini');
 		expect(account).toMatchObject({ providerUserId: 'google-user-1', providerAccountId: null, needsLogin: true });
 		expect(OAuthAccounts.view('gemini').accounts[0].availability).toBe('needs_login');
 		expect(GeminiOAuthService.getAuthStatus().authenticated).toBe(false);
-		expect(UNSUPPORTED_CLIENT_MESSAGE).toContain('Workspace');
+		expect(UNSUPPORTED_CLIENT_MESSAGE).toContain('Antigravity');
 	});
 
 	it('rejects a callback whose state does not match the pending session', async () => {
