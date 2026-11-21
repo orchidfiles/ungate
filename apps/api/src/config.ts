@@ -14,6 +14,11 @@ export const config = {
 	},
 	anthropic: {
 		apiUrl: 'https://api.anthropic.com',
+		/** Subscription usage (what Claude Code `/usage` shows). */
+		usageUrl: 'https://api.anthropic.com/api/oauth/usage',
+		usageBeta: 'oauth-2025-04-20',
+		/** Subscription tier (`organization.rate_limit_tier`); same token and beta as usage. */
+		profileUrl: 'https://api.anthropic.com/api/oauth/profile',
 		betas: CLAUDE_CODE_OPUS_PACKET.betas
 	},
 	minimax: {
@@ -37,7 +42,9 @@ export const config = {
 				originator: 'codex_cli_rs'
 			}
 		},
-		codexUrl: 'https://chatgpt.com/backend-api/codex'
+		codexUrl: 'https://chatgpt.com/backend-api/codex',
+		/** Subscription usage (what Codex `/status` shows). */
+		usageUrl: 'https://chatgpt.com/backend-api/wham/usage'
 	}
 } as const;
 

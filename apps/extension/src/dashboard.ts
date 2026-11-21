@@ -17,6 +17,7 @@ export type Msg =
 	| { type: 'open-external-url'; url: string }
 	| { type: 'set-key-fix-enabled'; enabled: boolean }
 	| { type: 'set-auto-tunnel-enabled'; enabled: boolean }
+	| { type: 'set-cursor-provider-enabled'; enabled: boolean }
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' }
 	| Extract<WebviewToExtension, { type: (typeof MSGS_SIMPLE)[number] }>;
 
@@ -118,6 +119,10 @@ export class Dashboard {
 		this.panel?.webview.postMessage({ type: 'auto-tunnel-state', enabled });
 	}
 
+	sendCursorProviderState(enabled: boolean): void {
+		this.panel?.webview.postMessage({ type: 'cursor-provider-state', enabled });
+	}
+
 	sendTunnelState(state: TunnelState): void {
 		this.panel?.webview.postMessage({ type: 'tunnel-status', state });
 	}
@@ -148,7 +153,7 @@ export class Dashboard {
 			return { type: 'open-external-url', url };
 		}
 
-		if (type === 'set-key-fix-enabled' || type === 'set-auto-tunnel-enabled') {
+		if (type === 'set-key-fix-enabled' || type === 'set-auto-tunnel-enabled' || type === 'set-cursor-provider-enabled') {
 			const enabled = record.enabled;
 
 			if (typeof enabled !== 'boolean') {

@@ -78,6 +78,41 @@
       "when": 1793577600000,
       "tag": "_0010",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793577600001,
+      "tag": "_0011",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793916890471,
+      "tag": "_0012",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794127798528,
+      "tag": "_0013",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794189600000,
+      "tag": "_0014",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1794290400000,
+      "tag": "_0015",
+      "breakpoints": true
     }
   ]
 }

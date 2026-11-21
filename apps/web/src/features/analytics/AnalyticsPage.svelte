@@ -6,6 +6,7 @@ import IconTrash2 from 'virtual:icons/lucide/trash-2';
 import { PERIODS } from '$shared/constants';
 import { Formatter } from '$shared/formatter';
 
+import InsightsSection from './insights/InsightsSection.svelte';
 import { getAnalyticsStore } from './analytics-store.svelte';
 import RequestList from './RequestList.svelte';
 import StatCard from './StatCard.svelte';
@@ -82,15 +83,30 @@ function handleConfirmReset() {
 				label={getProviderLabel('openai')}
 				value={Formatter.number(store.summary.openaiRequests)}
 				variant="success" />
+			{#if store.summary.cursorRequests}
+				<StatCard
+					label={getProviderLabel('cursor')}
+					value={Formatter.number(store.summary.cursorRequests)}
+					variant="success" />
+			{/if}
 			<StatCard
 				label="Errors"
 				value={Formatter.number(store.summary.errorRequests)}
 				variant="error" />
 		</div>
 
+		{#if store.summary.cursorRequests > 0}
+			<p class="text-sm text-surface-400">
+				Cursor billing is unknown, not free, for all current and historical requests. Cost subtotals exclude Cursor;
+				mixed-provider totals have incomplete pricing and do not establish subscription-only usage.
+			</p>
+		{/if}
+
 		<TokenChart
 			series={store.tokenSeries}
 			period={store.period} />
+
+		<InsightsSection />
 	{/if}
 
 	<RequestList />

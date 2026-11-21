@@ -3,6 +3,8 @@ import { logger } from 'src/utils/logger';
 import { HeadersExtractor } from '../handlers/headers-extractor';
 import { apiKeyAuth } from '../plugins/auth';
 import { proxyRequest } from '../proxy/anthropic-client';
+import { SseErrorObserver } from '../streaming/sse-error-observer';
+import { clientAbortSignal } from '../utils/request-abort';
 
 import type { AnthropicRequest, AnthropicError } from '../types';
 import type { FastifyPluginCallback } from 'fastify';
@@ -19,7 +21,7 @@ const plugin: FastifyPluginCallback = (app) => {
 
 			logger.log(`→ Model: "${body.model}" | ${body.stream ? 'stream' : 'sync'} | max_tokens=${body.max_tokens}`);
 
-			const { response } = await proxyRequest('/v1/messages', body, headers);
+			const { response, context } = await proxyRequest('/v1/messages', body, headers, clientAbortSignal(reply));
 
 			for (const [key, value] of response.headers.entries()) {
 				if (key.toLowerCase() !== 'content-encoding') {
@@ -30,7 +32,12 @@ const plugin: FastifyPluginCallback = (app) => {
 			reply.code(response.status);
 
 			if (response.body) {
-				return reply.send(response.body);
+				// Passthrough is byte-for-byte; a post-commit in-stream usage limit still cools the account down.
+				const isStream = (response.headers.get('content-type') ?? '').includes('text/event-stream');
+				const out =
+					isStream && context.onStreamError ? SseErrorObserver.observe(response.body, context.onStreamError) : response.body;
+
+				return reply.send(out);
 			}
 
 			const fallbackBody = await response.arrayBuffer();

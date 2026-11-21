@@ -1,4 +1,4 @@
-import cors from '@fastify/cors';
+import cors, { type FastifyCorsOptions } from '@fastify/cors';
 import Fastify from 'fastify';
 
 import { logger, setQuietMode } from 'src/utils/logger';
@@ -8,13 +8,32 @@ const BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 import { getConfig } from './config';
 import { getDb } from './database/index';
 import { Settings } from './database/settings';
+import { bridgeTransport } from './proxy/cursor-bridge-client';
+import { cursorBridgeSocketPath, SocketBridgeTransport } from './proxy/cursor-bridge-transport';
 import analyticsPlugin from './routes/analytics';
 import anthropicPlugin from './routes/anthropic';
 import authPlugin from './routes/auth';
+import cursorPlugin from './routes/cursor';
 import healthPlugin from './routes/health';
 import modelsPlugin from './routes/models';
 import openaiPlugin from './routes/openai';
 import settingsPlugin from './routes/settings';
+
+/** Dashboard webviews call account routes cross-origin; PATCH/DELETE must pass the preflight. */
+export const CORS_OPTIONS: FastifyCorsOptions = { origin: '*', methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'] };
+
+/**
+ * Removes the bridge socket when the API stops. A signal is re-raised after cleanup so whoever
+ * stopped the API still sees it exit by that signal.
+ */
+function removeSocketOnShutdown(transport: SocketBridgeTransport): void {
+	process.once('exit', () => transport.removeSocketFile());
+	for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+		process.once(signal, () => {
+			void transport.close().finally(() => process.kill(process.pid, signal));
+		});
+	}
+}
 
 export async function startServer(): Promise<void> {
 	globalThis.console.log('[startup] getDb...');
@@ -41,11 +60,12 @@ export async function startServer(): Promise<void> {
 	});
 
 	globalThis.console.log('[startup] register cors...');
-	await app.register(cors, { origin: '*' });
+	await app.register(cors, CORS_OPTIONS);
 
 	globalThis.console.log('[startup] register plugins...');
 	await app.register(healthPlugin);
 	await app.register(authPlugin);
+	await app.register(cursorPlugin);
 	await app.register(anthropicPlugin);
 	await app.register(openaiPlugin);
 	await app.register(modelsPlugin);
@@ -54,6 +74,15 @@ export async function startServer(): Promise<void> {
 
 	globalThis.console.log(`[startup] listen ${config.port}...`);
 	await app.listen({ port: config.port, host: '0.0.0.0' });
+
+	// After the port is ours, so a second run that fails on the port never replaces a live socket.
+	// The leader window retries the socket on every runtime sync.
+	if (bridgeTransport instanceof SocketBridgeTransport) {
+		const socketPath = cursorBridgeSocketPath(config.port);
+		await bridgeTransport.listen(socketPath);
+		globalThis.console.log(`[startup] cursor bridge socket ${socketPath}`);
+		removeSocketOnShutdown(bridgeTransport);
+	}
 
 	// Always print port to stdout — extension parses this to detect the running port.
 	// Uses globalThis.console to bypass quiet mode.
