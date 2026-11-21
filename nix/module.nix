@@ -41,7 +41,22 @@ in
     dataPath = lib.mkOption {
       type = lib.types.str;
       default = "%h/.ungate/data.db";
-      description = "SQLite database; the default is the one the Cursor extension uses.";
+      example = "%h/.ungate/headless.db";
+      description = ''
+        SQLite database the service opens (its `DB_PATH`). The default is the database the
+        Cursor extension uses, so an extension that adopts the service on its port sees the
+        same accounts and usage. Set another path to keep the service's state apart.
+      '';
+    };
+
+    stopTimeoutSec = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 60;
+      description = ''
+        How long systemd waits after SIGTERM before killing the service. On SIGTERM the API
+        stops accepting connections and lets active streams finish within its own drain
+        bound, which stays below this.
+      '';
     };
   };
 
@@ -49,16 +64,20 @@ in
     systemd.user.services.ungate = {
       description = "ungate API";
       wantedBy = [ "default.target" ];
-      after = [ "network-online.target" ];
       environment = {
         PORT = toString cfg.port;
         HOST = lib.concatStringsSep "," cfg.hosts;
         DB_PATH = cfg.dataPath;
       };
+      # Never give up restarting: a crash loop backs off instead of failing the unit for good.
+      startLimitIntervalSec = 0;
       serviceConfig = {
         ExecStart = lib.getExe cfg.package;
-        Restart = "on-failure";
+        Restart = "always";
         RestartSec = 2;
+        RestartSteps = 5;
+        RestartMaxDelaySec = 60;
+        TimeoutStopSec = cfg.stopTimeoutSec;
       };
     };
   };
