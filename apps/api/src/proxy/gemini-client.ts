@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { logger } from 'src/utils/logger';
 
@@ -29,7 +29,7 @@ interface GeminiError {
 }
 
 /**
- * Gemini Code Assist (`cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse`).
+ * Gemini through Antigravity (`daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse`).
  * Always streams upstream; non-streaming requests are buffered here. Each attempt is pinned to one
  * Google account and its managed Code Assist project (`providerAccountId`).
  */
@@ -202,10 +202,27 @@ export class GeminiClient {
 			headers: {
 				'Content-Type': 'application/json',
 				Accept: 'text/event-stream',
-				Authorization: `Bearer ${creds.accessToken}`
+				Authorization: `Bearer ${creds.accessToken}`,
+				'User-Agent': config.gemini.userAgent
 			},
-			body: JSON.stringify({ model: upstreamModel, project: creds.accountId, user_prompt_id: userPromptId, request })
+			body: JSON.stringify({
+				model: upstreamModel,
+				project: creds.accountId,
+				userAgent: 'antigravity',
+				requestType: 'agent',
+				requestId: `agent-${userPromptId}`,
+				request: { ...request, sessionId: this.sessionId(request, userPromptId) }
+			})
 		});
+	}
+
+	private static sessionId(request: GeminiGenerateRequest, fallback: string): string {
+		const firstUserText = request.contents.find((content) => content.role === 'user')?.parts.find((part) => part.text)?.text;
+		const digest = createHash('sha256')
+			.update(firstUserText ?? fallback)
+			.digest();
+
+		return `-${digest.readBigUInt64BE(0) & 0x7fffffffffffffffn}`;
 	}
 
 	/** Keeps the upstream status, the google.rpc message/status and safe retry hints. */

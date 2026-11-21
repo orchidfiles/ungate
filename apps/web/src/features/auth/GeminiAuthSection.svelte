@@ -53,8 +53,8 @@ $effect(() => {
 		{/snippet}
 	</AccountManager>
 	<p class="mt-4 text-xs text-surface-400">
-		Signs in over the Gemini CLI / Code Assist OAuth flow. Google stopped allowing this sign-in for individual, AI Pro and Ultra
-		accounts on 2026-06-18; those accounts are saved as “Needs login” with the reason. Workspace and Code Assist Standard accounts
-		keep working.
+		Signs in with Google through Antigravity, not the retired consumer Gemini CLI flow. This integration is experimental and not
+		endorsed by Google. Google's terms prohibit third-party use of Antigravity OAuth; using it may result in account suspension.
+		Existing Gemini CLI accounts must reconnect with Antigravity.
 	</p>
 </div>
