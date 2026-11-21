@@ -48,6 +48,19 @@ const serviceTierOptions: { label: string; value: ModelMappingConfig['serviceTie
 	{ label: 'Fast / Priority', value: 'priority' }
 ];
 
+const toolModeOptions: { label: string; value: ModelMappingConfig['toolMode'] }[] = [
+	{ label: 'Auto', value: null },
+	{ label: 'Structured', value: 'structured' },
+	{ label: 'Embedded', value: 'embedded' }
+];
+
+const upstreamPlaceholders: Record<ModelMappingProvider, string> = {
+	claude: 'claude-sonnet-4-6',
+	openai: 'gpt-5.6',
+	minimax: 'MiniMax-M2.7',
+	cursor: 'grok-4.7-low-fast'
+};
+
 function commit(nextModels: ModelMappingConfig[]) {
 	formStore.setModels(nextModels);
 }
@@ -117,7 +130,8 @@ function addModel() {
 			upstreamModel: '',
 			sortOrder: formStore.models.length,
 			reasoningBudget: null,
-			serviceTier: null
+			serviceTier: null,
+			toolMode: null
 		}
 	]);
 
@@ -171,6 +185,10 @@ function updateModelAtIndex(index: number, key: keyof ModelMappingConfig, value:
 				}
 
 				return { ...model, reasoningBudget: null };
+			}
+
+			if (key === 'toolMode') {
+				return { ...model, toolMode: value === 'structured' || value === 'embedded' ? value : null };
 			}
 
 			if (key === 'serviceTier') {
@@ -319,7 +337,9 @@ $effect(() => {
 					</div>
 
 					<div
-						class="grid grid-cols-1 gap-4 {selectedProvider === 'openai' ? 'xl:grid-cols-5' : 'xl:grid-cols-4'} md:grid-cols-2">
+						class="grid grid-cols-1 gap-4 {selectedProvider === 'openai' || selectedProvider === 'cursor'
+							? 'xl:grid-cols-5'
+							: 'xl:grid-cols-4'} md:grid-cols-2">
 						<label class="label">
 							<span class="label-text text-xs">Model ID</span>
 							<input
@@ -347,7 +367,7 @@ $effect(() => {
 								type="text"
 								value={model.upstreamModel}
 								oninput={(event) => updateModelAtIndex(index, 'upstreamModel', inputValue(event))}
-								placeholder={selectedProvider === 'minimax' ? 'MiniMax-M2.7' : 'claude-sonnet-4-6'} />
+								placeholder={upstreamPlaceholders[selectedProvider]} />
 						</label>
 
 						<label class="label">
@@ -369,6 +389,32 @@ $effect(() => {
 								<span class="text-xs text-surface-400 mt-1">Only supported by GPT-5.6 models.</span>
 							{/if}
 						</label>
+
+						{#if selectedProvider === 'cursor'}
+							<label class="label">
+								<span class="label-text text-xs">Tool Schema Mode</span>
+								<select
+									class="select text-sm"
+									value={model.toolMode ?? ''}
+									onchange={(event) => {
+										const value = selectValue(event);
+										updateModelAtIndex(index, 'toolMode', value ? value : null);
+									}}>
+									{#each toolModeOptions as option}
+										<option value={option.value ?? ''}>{option.label}</option>
+									{/each}
+								</select>
+								<span class="text-xs text-surface-400 mt-1">
+									{#if model.toolMode === 'embedded'}
+										JSON Schema sent in the tool description (needed by Grok).
+									{:else if model.toolMode === 'structured'}
+										JSON Schema sent as tool parameters.
+									{:else}
+										Embedded for Grok, structured for other models.
+									{/if}
+								</span>
+							</label>
+						{/if}
 
 						{#if selectedProvider === 'openai'}
 							<label class="label">

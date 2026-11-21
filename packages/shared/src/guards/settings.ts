@@ -1,9 +1,11 @@
 import {
 	CLAUDE_CLI_VERSION_MODES,
+	CURSOR_TOOL_MODES,
 	MODEL_MAPPING_PROVIDERS,
 	MODEL_SERVICE_TIERS,
 	REASONING_BUDGET_TIERS,
 	type ClaudeCliVersionMode,
+	type CursorToolMode,
 	type ModelMappingProvider,
 	type ModelServiceTier,
 	type ReasoningBudgetTier
@@ -19,6 +21,10 @@ export function isReasoningBudgetTier(value: unknown): value is ReasoningBudgetT
 
 export function isModelServiceTier(value: unknown): value is ModelServiceTier {
 	return typeof value === 'string' && MODEL_SERVICE_TIERS.includes(value as ModelServiceTier);
+}
+
+export function isCursorToolMode(value: unknown): value is CursorToolMode {
+	return typeof value === 'string' && CURSOR_TOOL_MODES.includes(value as CursorToolMode);
 }
 
 export function isClaudeCliVersionMode(value: unknown): value is ClaudeCliVersionMode {

@@ -1,6 +1,7 @@
 <script lang="ts">
 import TunnelPanel from '../tunnel/TunnelPanel.svelte';
 
+import ClientsPanel from './ClientsPanel.svelte';
 import ModelsSection from './ModelsSection.svelte';
 import ProviderPanel from './ProviderPanel.svelte';
 import { getSettingsFormStore } from './settings-form-store.svelte';
@@ -104,6 +105,8 @@ $effect(() => {
 				</label>
 			</div>
 		</div>
+
+		<ClientsPanel />
 
 		<div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
 			<div class="flex items-center justify-between gap-3">

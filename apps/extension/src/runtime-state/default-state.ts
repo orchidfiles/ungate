@@ -28,6 +28,9 @@ export class RuntimeStateDefaults {
 				enabled: DEFAULT_AUTO_TUNNEL_ENABLED,
 				lastAppliedUrl: null
 			},
+			cursorProvider: {
+				enabled: false
+			},
 			clients: {},
 			commands: []
 		};

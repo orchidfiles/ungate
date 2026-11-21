@@ -49,12 +49,18 @@ export const runtimeAutoTunnelStateSchema = z.object({
 	lastAppliedUrl: z.string().nullable()
 });
 
+export const runtimeCursorProviderStateSchema = z.object({
+	enabled: z.boolean()
+});
+
 export const runtimeStateSchema = z.object({
 	api: runtimeApiStateSchema,
 	tunnel: runtimeTunnelStateSchema,
 	keyFix: runtimeKeyFixStateSchema,
 	// State files written before auto-tunnel existed have no `autoTunnel`; the default keeps them parseable.
 	autoTunnel: runtimeAutoTunnelStateSchema.default({ enabled: false, lastAppliedUrl: null }),
+	// Opt-in for routing requests through the signed-in Cursor session; off unless the user connects.
+	cursorProvider: runtimeCursorProviderStateSchema.default({ enabled: false }),
 	clients: z.record(z.string(), runtimeClientEntrySchema),
 	commands: z.array(runtimeCommandSchema)
 });
