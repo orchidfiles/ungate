@@ -3,23 +3,6 @@ import { logger as console } from 'src/utils/logger';
 import type { IncomingHttpHeaders } from 'node:http';
 
 export class HeadersExtractor {
-	public static extractAnthropicHeaders(headers: IncomingHttpHeaders): Record<string, string> {
-		const result: Record<string, string> = {};
-		const passthrough = ['anthropic-version', 'anthropic-beta'];
-
-		for (const key of passthrough) {
-			const value = headers[key];
-
-			if (value) {
-				result[key] = Array.isArray(value) ? value.join(', ') : value;
-			}
-		}
-
-		result['anthropic-version'] ??= '2023-06-01';
-
-		return result;
-	}
-
 	public static logRequestDetails(headers: IncomingHttpHeaders, url: string, method: string, endpoint: string): void {
 		const parsedUrl = new URL(url, 'http://localhost');
 		const get = (key: string) => {

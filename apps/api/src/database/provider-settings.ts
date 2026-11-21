@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 
+import { OAuthAccounts } from './oauth-accounts';
 import { providerSettings } from './schema';
 
 import { getDb } from './index';
@@ -8,6 +9,11 @@ import type { AIProviderName, OAuthCredentials } from '../auth/base-provider';
 
 export class ProviderSettings {
 	static get(provider: AIProviderName) {
+		if (provider === 'claude' || provider === 'openai') {
+			const row = OAuthAccounts.active(provider);
+
+			return row ? { ...row, accountId: row.providerAccountId, baseUrl: null } : undefined;
+		}
 		const db = getDb();
 
 		return db.select().from(providerSettings).where(eq(providerSettings.provider, provider)).get();
@@ -34,6 +40,12 @@ export class ProviderSettings {
 	}
 
 	static upsertOAuth(provider: AIProviderName, data: OAuthCredentials): void {
+		// Claude/OpenAI OAuth credentials live in oauth_accounts; this legacy path writes the active account.
+		if (provider === 'claude' || provider === 'openai') {
+			OAuthAccounts.upsertActiveCredentials(provider, data, { email: data.email, providerAccountId: data.accountId });
+
+			return;
+		}
 		const db = getDb();
 
 		db.insert(providerSettings)
@@ -73,6 +85,12 @@ export class ProviderSettings {
 	}
 
 	static remove(provider: AIProviderName): void {
+		if (provider === 'claude' || provider === 'openai') {
+			const active = OAuthAccounts.active(provider);
+			if (active) OAuthAccounts.remove(provider, active.id);
+
+			return;
+		}
 		const db = getDb();
 
 		db.delete(providerSettings).where(eq(providerSettings.provider, provider)).run();

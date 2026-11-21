@@ -10,6 +10,9 @@ import { CLAUDE_CODE_OPUS_PACKET } from './claude-code-packet';
 
 import type { AnthropicRequest, ContentBlock, ThinkingEffort } from '../types';
 
+/** Required on every request authenticated with a claude.ai OAuth token. */
+const OAUTH_BETA = 'oauth-2025-04-20';
+
 const VALID_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 // Opus 4.7, 4.8, and 5.5 reject manual budget_tokens (400). They use adaptive thinking,
@@ -89,6 +92,27 @@ export class RequestBuilder {
 		};
 
 		return headers;
+	}
+
+	/**
+	 * Upstream headers for a Claude Code caller: its own headers, the pool account's token, and the
+	 * OAuth beta, which a CLI authenticating with an API key or auth token does not send.
+	 */
+	static claudeCodeCallerHeaders(callerHeaders: Record<string, string>, accessToken: string): Record<string, string> {
+		const betas = (callerHeaders['anthropic-beta'] ?? '')
+			.split(',')
+			.map((beta) => beta.trim())
+			.filter(Boolean);
+		if (!betas.includes(OAUTH_BETA)) betas.push(OAUTH_BETA);
+
+		return {
+			...callerHeaders,
+			'anthropic-version': callerHeaders['anthropic-version'] ?? '2023-06-01',
+			'anthropic-beta': betas.join(','),
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${accessToken}`
+		};
 	}
 
 	private static stripCacheTtl(content: ContentBlock[] | undefined): void {

@@ -239,8 +239,6 @@ export class BetterSqlite3Installer {
 	}
 
 	private static async extractArchive(archivePath: string, extractDir: string): Promise<void> {
-		// tar types are loose in CJS; runtime extract is validated by canLoad().
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
 		await pipeline(fs.createReadStream(archivePath), createGunzip(), tar.extract({ cwd: extractDir }));
 	}
 

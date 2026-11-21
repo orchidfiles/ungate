@@ -45,6 +45,13 @@ function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 			provider = 'openai';
 		}
 
+		if (model.provider === 'cursor') {
+			provider = 'cursor';
+		}
+
+		const toolMode =
+			provider === 'cursor' && (model.toolMode === 'structured' || model.toolMode === 'embedded') ? model.toolMode : null;
+
 		if (
 			reasoningBudget !== 'none' &&
 			reasoningBudget !== 'low' &&
@@ -60,7 +67,7 @@ function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 			serviceTier = null;
 		}
 
-		return { ...model, provider, reasoningBudget, serviceTier, sortOrder: index };
+		return { ...model, provider, reasoningBudget, serviceTier, toolMode, sortOrder: index };
 	});
 }
 

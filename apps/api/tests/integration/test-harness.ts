@@ -11,6 +11,7 @@ export function createTestApp(config: HarnessConfig = {}): FastifyInstance {
 		apiKey: config.apiKey,
 		quietMode: true
 	});
+	app.decorateRequest('clientId', null);
 
 	return app;
 }
