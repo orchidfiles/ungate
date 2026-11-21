@@ -111,6 +111,9 @@ const SAFE_RETRY_HEADERS = ['retry-after', 'retry-after-ms', 'x-should-retry'];
 /** Rotation reason for an account left after repeated transient upstream failures (it is not cooled down). */
 const TRANSIENT_ROTATION = 'upstream_transient';
 
+/** A pool-wide limit lifting later than this is not worth a client's automatic retries. */
+const LONG_LIMIT_MS = 60_000;
+
 /** Upstream statuses that say "try again shortly" rather than "this request is wrong". */
 const TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 529]);
 
@@ -501,10 +504,32 @@ export class AccountFallback {
 		const message = autoSwitch
 			? `All saved ${label} subscription accounts have reached their usage limit.${when ? ` Earliest retry: ${when}.` : ' Reconnect or add another account in Ungate.'}`
 			: `${label} account ${name} has reached its usage limit and automatic account switching is off.${when ? ` Retry after ${when},` : ''} or select another account in Ungate.`;
-		// Upstream hints are kept, but retry-after reflects the earliest *account-wide* retry time when known.
-		const headers: Record<string, string> = { ...last.headers };
-		if (retryAt) headers['retry-after'] = String(Math.max(1, Math.ceil((retryAt - now) / 1000)));
+		const headers = this.limitHeaders(provider, last.headers, retryAt, now);
 
 		return { kind: 'limited', message, reason: last.reason, accountId: last.accountId, attempts, retryAt, estimated, headers };
+	}
+
+	/**
+	 * Headers for a pool-wide 429. Upstream hints are kept, but `retry-after` reflects the earliest
+	 * account-wide retry time when known. Claude clients also get Anthropic's own unified-limit
+	 * signal (`rejected` with the reset in epoch seconds) so they report a usage limit, not a
+	 * transient 429; when the reset is more than `LONG_LIMIT_MS` away they are told not to retry.
+	 */
+	static limitHeaders(
+		provider: SubscriptionProvider,
+		upstream: Record<string, string>,
+		retryAt: number | null,
+		now: number
+	): Record<string, string> {
+		const headers: Record<string, string> = { ...upstream };
+		if (retryAt) headers['retry-after'] = String(Math.max(1, Math.ceil((retryAt - now) / 1000)));
+		if (provider !== 'claude') return headers;
+		headers['anthropic-ratelimit-unified-status'] = 'rejected';
+		if (retryAt) {
+			headers['anthropic-ratelimit-unified-reset'] = String(Math.ceil(retryAt / 1000));
+			if (retryAt - now > LONG_LIMIT_MS) headers['x-should-retry'] = 'false';
+		}
+
+		return headers;
 	}
 }

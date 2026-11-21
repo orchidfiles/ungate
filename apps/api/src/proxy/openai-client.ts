@@ -165,7 +165,12 @@ export class OpenAiClient {
 				model,
 				startTime,
 				429,
-				{ message: outcome.message, type: 'usage_limit_reached' },
+				// Codex reads `resets_at` (epoch seconds) to tell the user when the limit lifts.
+				{
+					message: outcome.message,
+					type: 'usage_limit_reached',
+					...(outcome.retryAt ? { resets_at: Math.ceil(outcome.retryAt / 1000) } : {})
+				},
 				outcome.headers
 			);
 			limited.context.telemetry = {
@@ -297,7 +302,7 @@ export class OpenAiClient {
 		model: string,
 		startTime: number,
 		status: number,
-		error: { message: string; type: string; code?: string },
+		error: { message: string; type: string; code?: string; resets_at?: number },
 		headers: Record<string, string> = {}
 	): ProxyOpenAiResult {
 		return {

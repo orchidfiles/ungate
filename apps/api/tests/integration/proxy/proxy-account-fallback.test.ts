@@ -140,6 +140,10 @@ describe('Claude account fallback (proxyRequest)', () => {
 		const retryAfter = Number(result.response.headers.get('retry-after'));
 		expect(retryAfter).toBeGreaterThan(1700);
 		expect(retryAfter).toBeLessThanOrEqual(1800);
+		// Claude Code reads these as a usage limit and, with a reset this far out, stops retrying.
+		expect(result.response.headers.get('anthropic-ratelimit-unified-status')).toBe('rejected');
+		expect(result.response.headers.get('anthropic-ratelimit-unified-reset')).toBe(String(resetB));
+		expect(result.response.headers.get('x-should-retry')).toBe('false');
 		const json: { type: string; error: { type: string; message: string } } = await result.response.json();
 		expect(json.type).toBe('error');
 		expect(json.error.type).toBe('rate_limit_error');
@@ -445,6 +449,10 @@ describe('ChatGPT Codex account fallback (OpenAiClient.proxy)', () => {
 		const earliest = OAuthAccounts.earliestCooldownEnd('openai')!;
 		expect(earliest).toBeGreaterThanOrEqual(before + 60_000);
 		expect(earliest).toBeLessThanOrEqual(Date.now() + 60_000);
+		// Codex shows the reset time from `resets_at` (epoch seconds).
+		const body = json as { error: { resets_at?: number } };
+		expect(body.error.resets_at).toBe(Math.ceil(earliest / 1000));
+		expect(result.response.headers.get('anthropic-ratelimit-unified-status')).toBeNull();
 		expect(Number(result.response.headers.get('retry-after'))).toBeLessThanOrEqual(60);
 	});
 
