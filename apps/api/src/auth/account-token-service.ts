@@ -10,6 +10,12 @@ export interface RefreshResult {
 }
 export class AccountRefreshRejected extends Error {}
 
+/**
+ * Upper bound on one token-refresh round trip. A hung token endpoint otherwise holds the request
+ * (and every request deduplicated onto the same refresh) for as long as the socket stays open.
+ */
+export const REFRESH_TIMEOUT_MS = 15_000;
+
 /** Refresh deduplication and credential-generation CAS shared by both OAuth providers. */
 export class AccountTokenService {
 	private static inFlight = new Map<string, Promise<OAuthCredentials | null>>();
@@ -76,7 +82,7 @@ export class AccountTokenService {
 		refresh: (token: string) => Promise<RefreshResult | null>
 	): Promise<OAuthCredentials | null> {
 		if (!row.refreshToken) {
-			OAuthAccounts.markNeedsLogin(row.id, row.credentialVersion);
+			OAuthAccounts.markNeedsLogin(row.id, row.credentialVersion, 'no_refresh_token');
 
 			return null;
 		}
@@ -92,7 +98,8 @@ export class AccountTokenService {
 
 			return current && !current.needsLogin ? this.credentials(current) : null;
 		} catch (error) {
-			if (error instanceof AccountRefreshRejected) OAuthAccounts.markNeedsLogin(row.id, row.credentialVersion);
+			if (error instanceof AccountRefreshRejected)
+				OAuthAccounts.markNeedsLogin(row.id, row.credentialVersion, 'refresh_rejected');
 
 			return null;
 		}

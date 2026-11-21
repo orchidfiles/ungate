@@ -33,7 +33,7 @@ describe('OAuth account repository', () => {
 		OAuthAccounts.select('openai', b.id);
 		expect(OAuthAccounts.compareAndSelect('openai', before.revision, a.id, c.id, 'limited')).toBe(false);
 		OAuthAccounts.markCooldown(b.id, Date.now() + 1000, 'usage_limit', true, b.credentialVersion);
-		OAuthAccounts.markNeedsLogin(c.id, c.credentialVersion);
+		OAuthAccounts.markNeedsLogin(c.id, c.credentialVersion, 'refresh_rejected');
 		expect(OAuthAccounts.eligible('openai').map((row) => row.id)).toEqual([a.id]);
 		expect(OAuthAccounts.eligible('openai', Date.now() + 2000).map((row) => row.id)).toContain(b.id);
 		OAuthAccounts.remove('openai', b.id);
@@ -188,7 +188,7 @@ describe('OAuth account repository', () => {
 		const b = add('b');
 		const c = add('c');
 		OAuthAccounts.select('openai', b.id);
-		OAuthAccounts.markNeedsLogin(c.id, c.credentialVersion);
+		OAuthAccounts.markNeedsLogin(c.id, c.credentialVersion, 'refresh_rejected');
 		OAuthAccounts.remove('openai', b.id);
 		expect(OAuthAccounts.active('openai')?.id).toBe(a.id);
 		OAuthAccounts.remove('openai', a.id);

@@ -6,7 +6,7 @@ import { config } from '../config';
 import { OAuthAccounts } from '../database/oauth-accounts';
 
 import { AccountLoginSessions } from './account-login-sessions';
-import { AccountRefreshRejected, AccountTokenService } from './account-token-service';
+import { AccountRefreshRejected, AccountTokenService, REFRESH_TIMEOUT_MS } from './account-token-service';
 
 import type { OAuthCredentials } from './base-provider';
 import type { AuthStatus, LoginStart, TokenInfo, TokenRefreshResponse } from '../types/index';
@@ -101,7 +101,8 @@ export class OAuth {
 		const response = await fetch(config.claude.oauth.tokenUrl, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: config.claude.clientId })
+			body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: config.claude.clientId }),
+			signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS)
 		});
 		if (!response.ok) {
 			const body: { error?: string } | null = await response.json().catch(() => null);

@@ -52,7 +52,7 @@ export type AccountFallbackOutcome<C> =
 			/** Limit reason of the last account rotated away from, when the request was served by a fallback. */
 			rotationReason: string | null;
 	  }
-	/** No usable credentials at all (no account, needs login, refresh failed) — callers keep their 401. */
+	/** No account in the pool had usable credentials and none was sent to — callers keep their 401. */
 	| { kind: 'no_credentials' }
 	/** Every candidate was usage-limited (or auto-switch is off): answer 429 locally. */
 	| {
@@ -80,6 +80,17 @@ interface LimitRecord {
 	headers: Record<string, string>;
 }
 
+interface AuthFailure<C> {
+	accountId: string;
+	credentials: C;
+	status: number;
+	headers: Headers;
+	body: string;
+}
+
+/** Rotation reason for an account whose credentials cannot be used (needs login, removed, rejected after refresh). */
+const AUTH_ROTATION = 'auth';
+
 const PROVIDER_LABEL: Record<SubscriptionProvider, string> = { claude: 'Claude', openai: 'ChatGPT' };
 
 /** Hop-by-hop / representation headers that are stale once a body has been read and re-wrapped. */
@@ -101,7 +112,9 @@ export class AccountFallback {
 	 * Runs one incoming request against the provider's subscription accounts. Each attempt is pinned
 	 * to one local account id; on a recognized usage limit the account is cooled down and, when
 	 * auto-switch is on, the policy is CAS-switched to the next eligible account and the request is
-	 * retried there. Each account is tried at most once; cooldowns are never waited through.
+	 * retried there. An account whose credentials cannot be used (needs login, removed, no valid
+	 * token, or a 401 that survived the refresh retry) rotates the same way with reason `auth`.
+	 * Each account is tried at most once; cooldowns are never waited through.
 	 * No database transaction spans a network call.
 	 */
 	static async run<C extends PinnedCredentials>(options: AccountFallbackOptions<C>): Promise<AccountFallbackOutcome<C>> {
@@ -109,6 +122,10 @@ export class AccountFallback {
 		const inspect = options.inspect ?? ((response: Response) => this.inspectHttp(provider, response));
 		const attempted = new Set<string>();
 		let lastLimit: LimitRecord | undefined;
+		/** Why the request last moved off an account: a limit reason, or `auth`. */
+		let lastRotation: string | null = null;
+		/** The last upstream 401, answered as-is when no account in the pool could serve the request. */
+		let lastAuthFailure: AuthFailure<C> | undefined;
 		let current = this.initialCandidate(provider);
 
 		while (current) {
@@ -118,27 +135,58 @@ export class AccountFallback {
 			const fresh = OAuthAccounts.get(account.id, provider);
 
 			if (!fresh || !OAuthAccounts.isEligible(fresh)) {
-				const coolingDown = !!fresh && !fresh.needsLogin;
-				// Only usage limits rotate accounts: an unusable (needs-login / removed) first account keeps the legacy 401.
-				if (!coolingDown && !lastLimit) return { kind: 'no_credentials' };
-				if (coolingDown) lastLimit = { accountId: fresh.id, reason: fresh.cooldownReason ?? 'cooling_down', headers: {} };
-				const reason = coolingDown ? 'cooling_down' : fresh ? 'needs_login' : 'removed';
-				logger.log(`[accounts] ${provider} account ${account.id} unavailable (${reason}), skipping`);
-				current = this.advance(provider, revision, account.id, reason, attempted);
+				const unavailable = !fresh ? 'removed' : fresh.needsLogin ? 'needs_login' : 'cooling_down';
+				if (fresh && unavailable === 'cooling_down') {
+					lastLimit = { accountId: fresh.id, reason: fresh.cooldownReason ?? 'cooling_down', headers: {} };
+					lastRotation = lastLimit.reason;
+				} else {
+					lastRotation = AUTH_ROTATION;
+				}
+				logger.log(`[accounts] ${provider} account ${account.id} unavailable (${unavailable}), skipping`);
+				current = this.advance(
+					provider,
+					revision,
+					account.id,
+					unavailable === 'cooling_down' ? 'cooling_down' : AUTH_ROTATION,
+					attempted
+				);
 				continue;
 			}
 
 			const credentials = await options.getCredentials(account.id);
 			if (!credentials || (credentials.localAccountId !== undefined && credentials.localAccountId !== account.id)) {
-				if (!lastLimit) return { kind: 'no_credentials' };
+				lastRotation = AUTH_ROTATION;
 				logger.log(`[accounts] ${provider} account ${account.id} has no usable credentials, skipping`);
-				current = this.advance(provider, revision, account.id, 'no_credentials', attempted);
+				current = this.advance(provider, revision, account.id, AUTH_ROTATION, attempted);
 				continue;
 			}
 
 			options.signal?.throwIfAborted();
 			const sent = await options.send(credentials);
 			AccountUsageStore.recordHeaders(provider, account.id, sent.response.headers);
+
+			// `send` already refreshed once and retried on 401, so a 401 here means this account's
+			// credentials are unusable for now; another account may still serve the request.
+			if (sent.response.status === 401) {
+				const refreshed = sent.credentials.credentialVersion !== credentials.credentialVersion;
+				// Rejected even with freshly refreshed credentials: the grant is dead. A refresh that
+				// failed (same generation) may be transient, so the account only rotates.
+				if (refreshed && sent.credentials.credentialVersion !== undefined) {
+					OAuthAccounts.markAuthFailed(account.id, sent.credentials.credentialVersion);
+				}
+				lastAuthFailure = {
+					accountId: account.id,
+					credentials: sent.credentials,
+					status: sent.response.status,
+					headers: this.sanitizeHeaders(sent.response.headers),
+					body: await this.readBounded(sent.response)
+				};
+				lastRotation = AUTH_ROTATION;
+				logger.log(`[accounts] ${provider} account ${account.id} rejected (401${refreshed ? ' after refresh' : ''}), skipping`);
+				current = this.advance(provider, revision, account.id, AUTH_ROTATION, attempted);
+				continue;
+			}
+
 			const inspected = await inspect(sent.response);
 
 			if (!inspected.limit) {
@@ -150,7 +198,7 @@ export class AccountFallback {
 					credentials: sent.credentials,
 					accountId: account.id,
 					attempts: attempted.size,
-					rotationReason: lastLimit?.reason ?? null
+					rotationReason: attempted.size > 1 ? lastRotation : null
 				};
 			}
 
@@ -163,13 +211,26 @@ export class AccountFallback {
 				UsageFetcher.refreshAfterCooldown(provider, account.id);
 			}
 			lastLimit = { accountId: account.id, reason: limit.reason, headers: this.safeRetryHeaders(sent.response.headers) };
+			lastRotation = limit.reason;
 			logger.log(
 				`[accounts] ${provider} account ${account.id} usage limit (${limit.reason}); cooldown until ${new Date(until).toISOString()}${limit.estimated ? ' (estimated)' : ''}`
 			);
 			current = this.advance(provider, revision, account.id, limit.reason, attempted);
 		}
 
-		return lastLimit ? this.limitedOutcome(provider, lastLimit, attempted.size) : { kind: 'no_credentials' };
+		if (lastLimit) return this.limitedOutcome(provider, lastLimit, attempted.size);
+		if (lastAuthFailure) {
+			return {
+				kind: 'response',
+				response: new Response(lastAuthFailure.body, { status: lastAuthFailure.status, headers: lastAuthFailure.headers }),
+				credentials: lastAuthFailure.credentials,
+				accountId: lastAuthFailure.accountId,
+				attempts: attempted.size,
+				rotationReason: attempted.size > 1 ? lastRotation : null
+			};
+		}
+
+		return { kind: 'no_credentials' };
 	}
 
 	/**

@@ -245,7 +245,7 @@ describe('Claude account fallback (proxyRequest)', () => {
 		const a = add('claude', 'a');
 		const b = add('claude', 'b');
 		const c = add('claude', 'c');
-		OAuthAccounts.markNeedsLogin(b.id, b.credentialVersion);
+		OAuthAccounts.markNeedsLogin(b.id, b.credentialVersion, 'refresh_rejected');
 		const seen: string[] = [];
 		vi.stubGlobal(
 			'fetch',
@@ -277,6 +277,113 @@ describe('Claude account fallback (proxyRequest)', () => {
 
 		expect(result.response.status).toBe(401);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('rotates past a needs-login active account instead of answering 401', async () => {
+		const a = add('claude', 'a');
+		const b = add('claude', 'b');
+		OAuthAccounts.markNeedsLogin(a.id, a.credentialVersion, 'refresh_rejected');
+		const seen: string[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((_url: string, init?: RequestInit) => {
+				seen.push(authOf(init));
+
+				return Promise.resolve(new Response('{"usage":{}}', { status: 200 }));
+			})
+		);
+
+		const result = await proxyRequest('/v1/messages', claudeBody);
+
+		expect(result.response.status).toBe(200);
+		expect(seen).toEqual(['Bearer token-b']);
+		const policy = OAuthAccounts.policy('claude');
+		expect(policy.activeAccountId).toBe(b.id);
+		expect(policy.lastSwitchReason).toBe('auth');
+	});
+
+	it('a 401 that survives the refresh marks the account needs-login and rotates with reason auth', async () => {
+		const a = add('claude', 'a');
+		const b = add('claude', 'b');
+		const seen: string[] = [];
+		const events: string[] = [];
+		vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
+			if (typeof line === 'string' && line.startsWith('{')) events.push(line);
+		});
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string, init?: RequestInit) => {
+				if (url.includes('/oauth/token')) {
+					expect(init?.signal).toBeInstanceOf(AbortSignal);
+
+					return Promise.resolve(
+						new Response(JSON.stringify({ access_token: 'refreshed-a', refresh_token: 'refresh-a2', expires_in: 3600 }))
+					);
+				}
+				seen.push(authOf(init));
+
+				return Promise.resolve(
+					authOf(init) === 'Bearer token-b'
+						? new Response('{"usage":{}}', { status: 200 })
+						: new Response('{"type":"error","error":{"type":"authentication_error","message":"revoked"}}', { status: 401 })
+				);
+			})
+		);
+
+		const result = await proxyRequest('/v1/messages', claudeBody);
+
+		expect(result.response.status).toBe(200);
+		expect(seen).toEqual(['Bearer token-a', 'Bearer refreshed-a', 'Bearer token-b']);
+		expect(OAuthAccounts.get(a.id)?.needsLogin).toBe(true);
+		expect(OAuthAccounts.policy('claude').activeAccountId).toBe(b.id);
+		expect(OAuthAccounts.policy('claude').lastSwitchReason).toBe('auth');
+		expect(events.map((line) => JSON.parse(line) as Record<string, unknown>)).toContainEqual({
+			event: 'account_needs_login',
+			provider: 'claude',
+			accountId: a.id,
+			cause: 'auth_rejected_after_refresh'
+		});
+	});
+
+	it('answers the upstream 401 when every account is rejected after refresh', async () => {
+		const a = add('claude', 'a');
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string) =>
+				Promise.resolve(
+					url.includes('/oauth/token')
+						? new Response(JSON.stringify({ access_token: 'refreshed-a', refresh_token: 'refresh-a2', expires_in: 3600 }))
+						: new Response('{"type":"error","error":{"type":"authentication_error","message":"revoked"}}', { status: 401 })
+				)
+			)
+		);
+
+		const result = await proxyRequest('/v1/messages', claudeBody);
+
+		expect(result.response.status).toBe(401);
+		expect(OAuthAccounts.get(a.id)?.needsLogin).toBe(true);
+	});
+
+	it('a failed refresh rotates without marking the account needs-login', async () => {
+		const a = add('claude', 'a');
+		add('claude', 'b');
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string, init?: RequestInit) => {
+				if (url.includes('/oauth/token')) return Promise.resolve(new Response('busy', { status: 503 }));
+
+				return Promise.resolve(
+					authOf(init) === 'Bearer token-b'
+						? new Response('{"usage":{}}', { status: 200 })
+						: new Response('{"type":"error","error":{"type":"authentication_error"}}', { status: 401 })
+				);
+			})
+		);
+
+		const result = await proxyRequest('/v1/messages', claudeBody);
+
+		expect(result.response.status).toBe(200);
+		expect(OAuthAccounts.get(a.id)?.needsLogin).toBe(false);
 	});
 });
 
@@ -361,5 +468,36 @@ describe('ChatGPT Codex account fallback (OpenAiClient.proxy)', () => {
 		});
 		expect(OAuthAccounts.policy('openai').activeAccountId).toBe(a.id);
 		expect(OAuthAccounts.get(a.id)?.cooldownUntil).toBeNull();
+	});
+
+	it('a Codex 401 after refresh rotates to the next account', async () => {
+		const a = add('openai', 'a');
+		const b = add('openai', 'b');
+		const seen: string[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((url: string, init?: RequestInit) => {
+				if (url.includes('/oauth/token')) {
+					expect(init?.signal).toBeInstanceOf(AbortSignal);
+
+					return Promise.resolve(
+						new Response(JSON.stringify({ access_token: 'refreshed-a', refresh_token: 'refresh-a2', expires_in: 3600 }))
+					);
+				}
+				const headers = init?.headers as Record<string, string>;
+				seen.push(headers.authorization);
+
+				return Promise.resolve(
+					headers.authorization === 'Bearer token-b' ? codexSse('hello from b') : new Response('{}', { status: 401 })
+				);
+			})
+		);
+
+		const result = await OpenAiClient.proxy(openAiBody);
+
+		expect(result.response.status).toBe(200);
+		expect(seen).toEqual(['Bearer token-a', 'Bearer refreshed-a', 'Bearer token-b']);
+		expect(OAuthAccounts.get(a.id)?.needsLogin).toBe(true);
+		expect(OAuthAccounts.policy('openai').activeAccountId).toBe(b.id);
 	});
 });

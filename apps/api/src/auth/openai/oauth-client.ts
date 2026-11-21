@@ -1,7 +1,7 @@
 import { config } from 'src/config';
 import { logger } from 'src/utils/logger';
 
-import { AccountRefreshRejected } from '../account-token-service';
+import { AccountRefreshRejected, REFRESH_TIMEOUT_MS } from '../account-token-service';
 
 export class OpenAIOAuthClient {
 	public static async exchangeCode(code: string, codeVerifier: string): Promise<Record<string, unknown>> {
@@ -47,7 +47,8 @@ export class OpenAIOAuthClient {
 					grant_type: 'refresh_token',
 					client_id: oauthConfig.clientId,
 					refresh_token: refreshTokenValue
-				})
+				}),
+				signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS)
 			});
 
 			if (!response.ok) {

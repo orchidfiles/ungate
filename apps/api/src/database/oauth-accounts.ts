@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq, sql } from 'drizzle-orm';
 
 import { AccountUsageStore } from '../usage/usage-store';
+import { logger } from '../utils/logger';
 
 import { oauthAccounts, oauthPolicies } from './schema';
 
@@ -22,6 +23,9 @@ export interface AccountIdentity {
 	email?: string | null;
 }
 export type LoginAccountSnapshot = OAuthAccountRow[];
+
+/** Why an account moved to needs-login. */
+export type NeedsLoginCause = 'no_refresh_token' | 'refresh_rejected' | 'auth_rejected_after_refresh';
 
 /** Atomic read of the provider policy plus its active account, captured once per incoming request. */
 export interface AccountSelection {
@@ -287,14 +291,31 @@ export class OAuthAccounts {
 		getDb().update(oauthAccounts).set({ planType }).where(eq(oauthAccounts.id, id)).run();
 	}
 
-	static markNeedsLogin(id: string, credentialVersion: number): boolean {
-		return (
-			getDb()
-				.update(oauthAccounts)
-				.set({ needsLogin: true, updatedAt: Date.now() })
-				.where(and(eq(oauthAccounts.id, id), eq(oauthAccounts.credentialVersion, credentialVersion)))
-				.run().changes === 1
-		);
+	/**
+	 * Marks the account as needing sign-in, CAS-guarded on the credential generation that failed so
+	 * a newer login or refresh is never overwritten. True only on the transition, which is logged.
+	 */
+	static markNeedsLogin(id: string, credentialVersion: number, cause: NeedsLoginCause): boolean {
+		const changed = getDb()
+			.update(oauthAccounts)
+			.set({ needsLogin: true, updatedAt: Date.now() })
+			.where(
+				and(eq(oauthAccounts.id, id), eq(oauthAccounts.credentialVersion, credentialVersion), eq(oauthAccounts.needsLogin, false))
+			)
+			.returning({ provider: oauthAccounts.provider })
+			.all();
+		if (changed.length === 0) return false;
+		logger.event('account_needs_login', { provider: changed[0].provider, accountId: id, cause });
+
+		return true;
+	}
+
+	/**
+	 * The provider still refused this account's credentials after they were refreshed: the grant
+	 * is dead, so the account needs sign-in. A stale generation (refreshed or re-signed since) is left alone.
+	 */
+	static markAuthFailed(id: string, credentialVersion: number): boolean {
+		return this.markNeedsLogin(id, credentialVersion, 'auth_rejected_after_refresh');
 	}
 
 	static updateCredentials(id: string, expectedVersion: number, credentials: AccountCredentials): OAuthAccountRow | undefined {
