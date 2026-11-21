@@ -1,4 +1,5 @@
 import type { RequestSource, Tool } from './index';
+import type { RequestTelemetry } from '@ungate/shared';
 
 export interface RequestContext {
 	model: string;
@@ -8,6 +9,18 @@ export interface RequestContext {
 	inputTokens?: number;
 	outputTokens?: number;
 	bodyJson?: unknown;
+	/**
+	 * Post-commit hook for an upstream error delivered inside an already-forwarded stream. Never
+	 * retries; lets the proxy client cool down the serving account when it is a usage limit.
+	 */
+	onStreamError?: (error: Record<string, unknown> | undefined) => void;
+	/** The response body records its own single analytics row at stream end (success or failure). */
+	telemetryDeferred?: boolean;
+	/**
+	 * Usage heuristics merged into the analytics row: account/attempts from the proxy client,
+	 * session/turn from the router. Mutated before the response body is consumed.
+	 */
+	telemetry?: RequestTelemetry;
 }
 
 export interface ProxyResult {

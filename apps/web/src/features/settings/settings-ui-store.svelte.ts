@@ -18,6 +18,7 @@ interface SettingsUiStore {
 	getProviderModelsCount(models: ModelMappingConfig[]): (provider: ModelMappingProvider) => number;
 	setSelectedProvider(provider: ModelMappingProvider): void;
 	refreshAuthStates(): Promise<void>;
+	setAuthorized(provider: ModelMappingProvider, authorized: boolean | null): void;
 }
 
 let selectedProvider = $state<ModelMappingProvider>(getSavedSettingsProvider());
@@ -26,7 +27,9 @@ function createAuthStates(state: ProviderAuthState): Record<ModelMappingProvider
 	return {
 		claude: state,
 		openai: state,
-		minimax: state
+		minimax: state,
+		cursor: state,
+		gemini: state
 	};
 }
 
@@ -35,7 +38,9 @@ let authStates = $state<Record<ModelMappingProvider, ProviderAuthState>>(createA
 const providerLabels: Record<ModelMappingProvider, string> = {
 	claude: getProviderLabel('claude'),
 	openai: getProviderLabel('openai'),
-	minimax: getProviderLabel('minimax')
+	minimax: getProviderLabel('minimax'),
+	cursor: getProviderLabel('cursor'),
+	gemini: getProviderLabel('gemini')
 };
 
 function setSelectedProvider(provider: ModelMappingProvider): void {
@@ -47,18 +52,57 @@ function getProviderModelsCount(models: ModelMappingConfig[]): (provider: ModelM
 	return (provider) => models.filter((model) => model.provider === provider).length;
 }
 
+function toAuthState(authorized: boolean): ProviderAuthState {
+	return authorized ? ProviderAuthState.Authorized : ProviderAuthState.NotAuthorized;
+}
+
+let refreshSeq = 0;
+
 async function refreshAuthStates(): Promise<void> {
+	const seq = ++refreshSeq;
 	authStates = createAuthStates(ProviderAuthState.Loading);
 
 	try {
-		const [claude, openai, minimax] = await Promise.all([Api.authStatus(), Api.authChatGPTStatus(), Api.authMinimaxStatus()]);
+		const [claude, openai, minimax, cursor, gemini] = await Promise.all([
+			Api.authStatus(),
+			Api.authChatGPTStatus(),
+			Api.authMinimaxStatus(),
+			Api.cursorStatus().catch(() => ({ connected: false })),
+			Api.authGeminiStatus().catch(() => ({ authenticated: false }))
+		]);
+
+		if (seq !== refreshSeq) {
+			return;
+		}
+
 		authStates = {
-			claude: claude.authenticated ? ProviderAuthState.Authorized : ProviderAuthState.NotAuthorized,
-			openai: openai.authenticated ? ProviderAuthState.Authorized : ProviderAuthState.NotAuthorized,
-			minimax: minimax.authenticated ? ProviderAuthState.Authorized : ProviderAuthState.NotAuthorized
+			claude: toAuthState(claude.authenticated),
+			openai: toAuthState(openai.authenticated),
+			minimax: toAuthState(minimax.authenticated),
+			cursor: toAuthState(cursor.connected),
+			gemini: toAuthState(gemini.authenticated)
 		};
 	} catch {
-		authStates = createAuthStates(ProviderAuthState.NotAuthorized);
+		if (seq === refreshSeq) {
+			authStates = createAuthStates(ProviderAuthState.NotAuthorized);
+		}
+	}
+}
+
+/**
+ * Pushes a provider's state from a fresher source (the polled account list). Same semantics as the
+ * legacy status endpoint: authorized when an active account exists and does not need login.
+ * `null` (not loaded yet) leaves the current state untouched.
+ */
+function setAuthorized(provider: ModelMappingProvider, authorized: boolean | null): void {
+	if (authorized === null) {
+		return;
+	}
+
+	const next = toAuthState(authorized);
+
+	if (authStates[provider] !== next) {
+		authStates = { ...authStates, [provider]: next };
 	}
 }
 
@@ -75,7 +119,8 @@ export function getSettingsUiStore(): SettingsUiStore {
 		},
 		getProviderModelsCount,
 		setSelectedProvider,
-		refreshAuthStates
+		refreshAuthStates,
+		setAuthorized
 	};
 
 	return store;

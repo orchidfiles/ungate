@@ -8,7 +8,21 @@ const resolveForChatCompletionMock = vi.fn();
 const proxyMiniMaxRequestMock = vi.fn();
 const proxyOpenAIRequestMock = vi.fn();
 const proxyRequestMock = vi.fn();
+const geminiProxyMock = vi.fn();
 const requestsRecordMock = vi.fn();
+const cursorInvokeMock = vi.fn();
+
+vi.mock('src/proxy/cursor-bridge-client', () => ({
+	cursorBridgeClient: {
+		invoke: (...args: unknown[]) => cursorInvokeMock(...args)
+	}
+}));
+
+vi.mock('src/proxy/gemini-client', () => ({
+	GeminiClient: {
+		proxy: (...args: unknown[]) => geminiProxyMock(...args)
+	}
+}));
 
 vi.mock('src/database/model-mappings', () => ({
 	ModelMappings: {
@@ -58,6 +72,37 @@ function anthropicSseResponse(lines: string[]): Response {
 describe('routes-openai', () => {
 	afterEach(() => {
 		vi.clearAllMocks();
+	});
+
+	it.each([
+		['ungate-grok-4.7-high', true],
+		['grok-4.7-high', false],
+		['my-custom-cursor-model', true],
+		['ungate-grok-4.7', false]
+	] as const)('returns terminal billing denial for %s (stream=%s) without fallback', async (model, stream) => {
+		resolveForChatCompletionMock.mockReturnValueOnce({
+			provider: 'cursor',
+			upstreamModel: 'grok-4.7-high',
+			toolMode: null
+		});
+		cursorInvokeMock.mockImplementationOnce(async function* () {
+			await Promise.resolve();
+			yield { kind: 'end', error: { kind: 'billing_blocked', message: 'Subscription-only billing cannot be guaranteed.' } };
+		});
+		const app = await withPlugin(openaiPlugin, { apiKey: 'secret' });
+		const response = await app.inject({
+			method: 'POST',
+			url: '/v1/chat/completions',
+			headers: { 'x-api-key': 'secret' },
+			payload: { model, messages: [{ role: 'user', content: 'hi' }], stream }
+		});
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({ error: { code: 'billing_blocked' } });
+		expect(cursorInvokeMock).toHaveBeenCalledTimes(1);
+		expect(proxyRequestMock).not.toHaveBeenCalled();
+		expect(proxyOpenAIRequestMock).not.toHaveBeenCalled();
+		expect(proxyMiniMaxRequestMock).not.toHaveBeenCalled();
+		await app.close();
 	});
 
 	it('routes to minimax and returns non-stream response with headers', async () => {
@@ -162,7 +207,48 @@ describe('routes-openai', () => {
 				reasoning: { effort: 'high' },
 				service_tier: 'priority'
 			}),
-			'openai'
+			'openai',
+			expect.any(AbortSignal)
+		);
+		await app.close();
+	});
+
+	it('routes a gemini mapping to the Gemini client and never falls through to Claude', async () => {
+		const mapping = {
+			id: 'ungate-gemini-4-carbon-medium',
+			provider: 'gemini',
+			upstreamModel: 'gemini-4-carbon',
+			reasoningBudget: 'medium'
+		};
+		resolveForChatCompletionMock.mockReturnValueOnce(mapping);
+		geminiProxyMock.mockResolvedValueOnce({
+			response: new Response(JSON.stringify({ id: 'chatcmpl-gemini', choices: [{ message: { content: 'hi' } }] }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			}),
+			context: { startTime: Date.now(), model: 'gemini-4-carbon', source: 'gemini', inputTokens: 5, outputTokens: 6 }
+		});
+
+		const app = await withPlugin(openaiPlugin, { apiKey: 'secret' });
+		const response = await app.inject({
+			method: 'POST',
+			url: '/v1/chat/completions',
+			headers: { 'x-api-key': 'secret' },
+			payload: { model: 'ungate-gemini-4-carbon-medium', messages: [{ role: 'user', content: 'hi' }], stream: false }
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toEqual({ id: 'chatcmpl-gemini', choices: [{ message: { content: 'hi' } }] });
+		expect(geminiProxyMock).toHaveBeenCalledWith(
+			expect.objectContaining({ model: 'ungate-gemini-4-carbon-medium' }),
+			mapping,
+			expect.any(AbortSignal)
+		);
+		expect(proxyRequestMock).not.toHaveBeenCalled();
+		expect(proxyOpenAIRequestMock).not.toHaveBeenCalled();
+		expect(proxyMiniMaxRequestMock).not.toHaveBeenCalled();
+		expect(requestsRecordMock).toHaveBeenCalledWith(
+			expect.objectContaining({ source: 'gemini', inputTokens: 5, outputTokens: 6 })
 		);
 		await app.close();
 	});
