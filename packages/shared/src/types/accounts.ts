@@ -1,6 +1,25 @@
 export type SubscriptionProvider = 'claude' | 'openai';
 export type AccountAvailability = 'available' | 'cooling_down' | 'needs_login';
 
+/** Provider names in `GET /v1/pool`; the `openai` subscription pool is reported as `chatgpt`. */
+export type PoolProviderName = 'claude' | 'chatgpt';
+
+/** One provider's account pool, counts only: no account identities. */
+export interface PoolProviderHealth {
+	provider: PoolProviderName;
+	/** Accounts a request could use now. */
+	eligible: number;
+	cooling_down: number;
+	needs_login: number;
+	/** RFC 3339 time the earliest cooling-down account lifts, or null when none is cooling down. */
+	earliest_reset: string | null;
+}
+
+/** `GET /v1/pool`; providers with no saved accounts are omitted. */
+export interface PoolHealthResponse {
+	providers: PoolProviderHealth[];
+}
+
 /** Safe for dashboards: never includes OAuth tokens. Times are Unix milliseconds. */
 export interface SubscriptionAccount {
 	id: string;

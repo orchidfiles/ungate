@@ -106,6 +106,24 @@ export class OAuthAccounts {
 		return ends.length ? Math.min(...ends) : null;
 	}
 
+	/** Account counts by availability and the earliest cooldown end; no identities. */
+	static health(
+		provider: SubscriptionProvider,
+		now = Date.now()
+	): { total: number; eligible: number; coolingDown: number; needsLogin: number; earliestReset: number | null } {
+		const rows = this.list(provider);
+		const needsLogin = rows.filter((row) => row.needsLogin).length;
+		const eligible = rows.filter((row) => this.isEligible(row, now)).length;
+
+		return {
+			total: rows.length,
+			eligible,
+			coolingDown: rows.length - needsLogin - eligible,
+			needsLogin,
+			earliestReset: this.earliestCooldownEnd(provider, now)
+		};
+	}
+
 	static dto(account: OAuthAccountRow, activeId: string | null, now = Date.now()): SubscriptionAccount {
 		return {
 			id: account.id,

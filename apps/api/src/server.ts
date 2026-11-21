@@ -20,23 +20,61 @@ import cursorPlugin from './routes/cursor';
 import healthPlugin from './routes/health';
 import modelsPlugin from './routes/models';
 import openaiPlugin from './routes/openai';
+import poolPlugin from './routes/pool';
 import responsesPlugin from './routes/responses';
 import settingsPlugin from './routes/settings';
+import { cutOpenStreams, openStreamCount } from './streaming/sse-tap';
 
 /** Dashboard webviews call account routes cross-origin; PATCH/DELETE must pass the preflight. */
 export const CORS_OPTIONS: FastifyCorsOptions = { origin: '*', methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'] };
 
+/** How long a stopping API lets open requests and streams finish before cutting them. */
+export const DRAIN_TIMEOUT_MS = 30_000;
+/** After the cut, how long clients get to read their terminal event before connections close. */
+const CUT_GRACE_MS = 2_000;
+
+function delay(ms: number): Promise<'timeout'> {
+	return new Promise((resolve) => setTimeout(() => resolve('timeout'), ms).unref());
+}
+
 /**
- * Removes the bridge socket when the API stops. A signal is re-raised after cleanup so whoever
- * stopped the API still sees it exit by that signal.
+ * Stops the API without dropping work mid-answer: stop accepting connections, let open requests
+ * and streams finish for up to `drainMs`, then end the streams still open with their provider's
+ * terminal error event (so the client retries instead of hanging), and close what remains.
  */
-function removeSocketOnShutdown(transport: SocketBridgeTransport): void {
-	process.once('exit', () => transport.removeSocketFile());
-	for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
-		process.once(signal, () => {
-			void transport.close().finally(() => process.kill(process.pid, signal));
-		});
-	}
+export async function drainServer(app: FastifyInstance, drainMs = DRAIN_TIMEOUT_MS): Promise<void> {
+	const closed = app.close();
+	const first = await Promise.race([closed.then(() => 'closed' as const), delay(drainMs)]);
+	if (first === 'closed') return;
+	const cut = cutOpenStreams();
+	logger.log(`[shutdown] drain window over; ended ${cut} open stream(s)`);
+	// Connections that went idle after close() started are not reaped by it; reap them as they finish.
+	const reap = setInterval(() => app.server.closeIdleConnections(), 50);
+	const second = await Promise.race([closed.then(() => 'closed' as const), delay(CUT_GRACE_MS)]).finally(() =>
+		clearInterval(reap)
+	);
+	if (second === 'closed') return;
+	app.server.closeAllConnections();
+	await closed;
+}
+
+/**
+ * On SIGTERM/SIGINT/SIGHUP: drain the server, remove the bridge socket, then re-raise the signal
+ * so whoever stopped the API still sees it exit by that signal. One handler owns the exit, so no
+ * cleanup step can end the process before the drain finishes.
+ */
+function shutdownOnSignal(app: FastifyInstance, transport: SocketBridgeTransport | undefined): void {
+	if (transport) process.once('exit', () => transport.removeSocketFile());
+	const signals = ['SIGTERM', 'SIGINT', 'SIGHUP'] as const;
+	const onSignal = (signal: (typeof signals)[number]) => {
+		for (const other of signals) process.removeListener(other, onSignal);
+		globalThis.console.log(`[shutdown] ${signal}: draining (open streams: ${openStreamCount()})`);
+		void drainServer(app)
+			.catch((error: unknown) => logger.error('[shutdown] drain failed:', error))
+			.then(() => transport?.close())
+			.finally(() => process.kill(process.pid, signal));
+	};
+	for (const signal of signals) process.once(signal, onSignal);
 }
 
 /**
@@ -53,6 +91,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 	await app.register(openaiPlugin);
 	await app.register(responsesPlugin);
 	await app.register(clientPlugin);
+	await app.register(poolPlugin);
 	await app.register(modelsPlugin);
 
 	await app.register(async (admin) => {
@@ -100,12 +139,14 @@ export async function startServer(): Promise<void> {
 
 	// After the port is ours, so a second run that fails on the port never replaces a live socket.
 	// The leader window retries the socket on every runtime sync.
+	let socketTransport: SocketBridgeTransport | undefined;
 	if (bridgeTransport instanceof SocketBridgeTransport) {
 		const socketPath = cursorBridgeSocketPath(config.port);
 		await bridgeTransport.listen(socketPath);
 		globalThis.console.log(`[startup] cursor bridge socket ${socketPath}`);
-		removeSocketOnShutdown(bridgeTransport);
+		socketTransport = bridgeTransport;
 	}
+	shutdownOnSignal(app, socketTransport);
 
 	// Always print port to stdout — extension parses this to detect the running port.
 	// Uses globalThis.console to bypass quiet mode.

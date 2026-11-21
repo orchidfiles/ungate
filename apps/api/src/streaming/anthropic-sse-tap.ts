@@ -1,6 +1,6 @@
 import { RequestHeuristics } from '../metrics/request-heuristics';
 
-import { tapSse, UPSTREAM_IDLE_TIMEOUT_MS, type SseTapEnd, type SseTapReader, type UpstreamIdle } from './sse-tap';
+import { cutMessage, tapSse, UPSTREAM_IDLE_TIMEOUT_MS, type SseTapEnd, type SseTapReader, type StreamCut } from './sse-tap';
 
 import type { AnthropicStreamEvent } from '../types/anthropic-stream';
 import type { StopReason } from '@ungate/shared';
@@ -139,8 +139,8 @@ class AnthropicStreamReader implements SseTapReader<AnthropicStreamSummary> {
 }
 
 /** Anthropic's own stream failure frame, which Claude Code reports (and retries) as an API error. */
-function idleErrorEvent(idle: UpstreamIdle): string {
-	const data = { type: 'error', error: { type: 'api_error', message: `Upstream stream stalled: ${idle.message}` } };
+function cutErrorEvent(cut: StreamCut): string {
+	const data = { type: 'error', error: { type: 'api_error', message: cutMessage(cut) } };
 
 	return `event: error\ndata: ${JSON.stringify(data)}\n\n`;
 }
@@ -158,7 +158,7 @@ export class AnthropicSseTap {
 	): ReadableStream<Uint8Array> {
 		return tapSse(body, new AnthropicStreamReader(hooks.onError), hooks.onEnd, {
 			idleTimeoutMs,
-			terminalEvent: idleErrorEvent
+			terminalEvent: cutErrorEvent
 		});
 	}
 }
