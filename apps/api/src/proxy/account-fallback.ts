@@ -4,6 +4,7 @@ import { OAuthAccounts, type OAuthAccountRow } from '../database/oauth-accounts'
 import { UsageFetcher } from '../usage/usage-fetcher';
 import { AccountUsageStore } from '../usage/usage-store';
 
+import { UpstreamHeadersTimeout } from './upstream-fetch';
 import { UsageLimitClassifier, type UsageLimitClassification } from './usage-limit-classifier';
 
 import type { SubscriptionProvider } from '@ungate/shared';
@@ -21,6 +22,11 @@ export interface PinnedCredentials {
 export interface InspectedAttempt {
 	response: Response;
 	limit?: UsageLimitClassification;
+	/**
+	 * Set when the attempt failed transiently before anything reached the client (e.g. an early
+	 * SSE `overloaded_error`); names the failure for logs. The coordinator retries it like a 5xx.
+	 */
+	transient?: string;
 }
 
 export interface AccountFallbackOptions<C extends PinnedCredentials> {
@@ -102,6 +108,59 @@ const ERROR_BODY_LIMIT = 64 * 1024;
 /** Upstream retry hints that are safe to forward to the client. */
 const SAFE_RETRY_HEADERS = ['retry-after', 'retry-after-ms', 'x-should-retry'];
 
+/** Rotation reason for an account left after repeated transient upstream failures (it is not cooled down). */
+const TRANSIENT_ROTATION = 'upstream_transient';
+
+/** Upstream statuses that say "try again shortly" rather than "this request is wrong". */
+const TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 529]);
+
+/**
+ * Pre-commit retry budget for transient failures: at most `maxRetries` extra attempts per request,
+ * jittered exponential backoff from `baseDelayMs`, and no waits longer than `maxDelayMs` (a longer
+ * `retry-after` is answered to the client instead of held open).
+ */
+export const UPSTREAM_RETRY = { maxRetries: 2, baseDelayMs: 500, maxDelayMs: 10_000 };
+
+interface RetryBudget {
+	spent: number;
+	/** Transient failures seen per account in this request. */
+	failures: Map<string, number>;
+}
+
+/** Delay the upstream asked for via `retry-after-ms` or `retry-after` (seconds or HTTP date), if any. */
+function retryAfterMs(headers: Headers): number | undefined {
+	const ms = Number(headers.get('retry-after-ms'));
+	if (headers.has('retry-after-ms') && Number.isFinite(ms) && ms >= 0) return ms;
+	const value = headers.get('retry-after');
+	if (value === null) return undefined;
+	const seconds = Number(value);
+	if (value.trim() !== '' && Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+	const date = Date.parse(value);
+
+	return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
+/** Network-level failure of the upstream call (fetch rejects with TypeError) or a time-to-headers timeout. */
+function isTransportFailure(error: unknown): boolean {
+	return error instanceof TypeError || error instanceof UpstreamHeadersTimeout;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const aborted = () => (signal?.reason instanceof Error ? signal.reason : new Error('aborted'));
+		if (signal?.aborted) return reject(aborted());
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(aborted());
+		};
+		const timer = setTimeout(() => {
+			signal?.removeEventListener('abort', onAbort);
+			resolve();
+		}, ms);
+		signal?.addEventListener('abort', onAbort, { once: true });
+	});
+}
+
 async function release(response: Response): Promise<void> {
 	if (response.bodyUsed || !response.body) return;
 	await response.body.cancel().catch(() => undefined);
@@ -126,6 +185,7 @@ export class AccountFallback {
 		let lastRotation: string | null = null;
 		/** The last upstream 401, answered as-is when no account in the pool could serve the request. */
 		let lastAuthFailure: AuthFailure<C> | undefined;
+		const budget: RetryBudget = { spent: 0, failures: new Map() };
 		let current = this.initialCandidate(provider);
 
 		while (current) {
@@ -162,7 +222,18 @@ export class AccountFallback {
 			}
 
 			options.signal?.throwIfAborted();
-			const sent = await options.send(credentials);
+			let sent: { response: Response; credentials: C };
+			try {
+				sent = await options.send(credentials);
+			} catch (error) {
+				if (options.signal?.aborted || !isTransportFailure(error)) throw error;
+				const retry = this.planRetry(provider, current, `transport: ${String(error)}`, undefined, budget, attempted);
+				if (!retry) throw error;
+				if (retry.next.account.id !== account.id) lastRotation = TRANSIENT_ROTATION;
+				await sleep(retry.delayMs, options.signal);
+				current = retry.next;
+				continue;
+			}
 			AccountUsageStore.recordHeaders(provider, account.id, sent.response.headers);
 
 			// `send` already refreshed once and retried on 401, so a 401 here means this account's
@@ -188,6 +259,21 @@ export class AccountFallback {
 			}
 
 			const inspected = await inspect(sent.response);
+
+			const transient = inspected.limit
+				? undefined
+				: (inspected.transient ?? (TRANSIENT_STATUSES.has(sent.response.status) ? `http_${sent.response.status}` : undefined));
+			if (transient) {
+				const retry = this.planRetry(provider, current, transient, sent.response.headers, budget, attempted);
+				if (retry) {
+					await release(sent.response);
+					await release(inspected.response);
+					if (retry.next.account.id !== account.id) lastRotation = TRANSIENT_ROTATION;
+					await sleep(retry.delayMs, options.signal);
+					current = retry.next;
+					continue;
+				}
+			}
 
 			if (!inspected.limit) {
 				if (attempted.size > 1) logger.log(`[accounts] ${provider} request served by fallback account ${account.id}`);
@@ -302,6 +388,49 @@ export class AccountFallback {
 		}
 
 		return result;
+	}
+
+	/**
+	 * Where to retry a transient upstream failure before anything was committed, after waiting
+	 * `delayMs` (the upstream's `retry-after`, else jittered exponential backoff). The first failure
+	 * on an account retries that account; a second one moves the request to the next eligible
+	 * account through the usual CAS switch, without cooling the failing account down. Undefined
+	 * when the budget is spent, no account is left, or the upstream asks for a longer wait than a
+	 * request should hold.
+	 */
+	private static planRetry(
+		provider: SubscriptionProvider,
+		current: Candidate,
+		why: string,
+		headers: Headers | undefined,
+		budget: RetryBudget,
+		attempted: Set<string>
+	): { next: Candidate; delayMs: number } | undefined {
+		if (budget.spent >= UPSTREAM_RETRY.maxRetries) return undefined;
+		const hinted = headers ? retryAfterMs(headers) : undefined;
+		if (hinted !== undefined && hinted > UPSTREAM_RETRY.maxDelayMs) {
+			logger.log(`[accounts] ${provider} transient failure (${why}); retry-after ${hinted}ms is too long, not retrying`);
+
+			return undefined;
+		}
+		const { account, revision } = current;
+		const failures = (budget.failures.get(account.id) ?? 0) + 1;
+		budget.failures.set(account.id, failures);
+		// Another account may sit on a healthier path; with none left, the same account is retried.
+		let next = failures >= 2 ? this.advance(provider, revision, account.id, TRANSIENT_ROTATION, attempted) : undefined;
+		if (!next) {
+			const fresh = OAuthAccounts.get(account.id, provider);
+			next = fresh && OAuthAccounts.isEligible(fresh) ? { account: fresh, revision } : undefined;
+		}
+		if (!next) return undefined;
+		budget.spent++;
+		const backoff = UPSTREAM_RETRY.baseDelayMs * 2 ** (budget.spent - 1);
+		const delayMs = hinted ?? Math.round(backoff / 2 + Math.random() * (backoff / 2));
+		logger.log(
+			`[accounts] ${provider} transient failure on ${account.id} (${why}); retrying on ${next.account.id} in ${delayMs}ms`
+		);
+
+		return { next, delayMs };
 	}
 
 	private static initialCandidate(provider: SubscriptionProvider): Candidate | undefined {

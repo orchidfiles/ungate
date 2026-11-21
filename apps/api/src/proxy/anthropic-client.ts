@@ -9,6 +9,7 @@ import { type AnthropicCaller, TRANSLATED_CALLER } from './anthropic-caller';
 import { RequestBuilder } from './request-builder';
 import { SsePrecommitGate } from './sse-precommit-gate';
 import { ToolMapper } from './tool-mapper';
+import { fetchWithHeadersTimeout, HEADERS_TIMEOUT_MS } from './upstream-fetch';
 
 import type { RequestSource, AnthropicRequest, AnthropicError, ContentBlock, Tool } from '../types';
 import type { ProxyResult, ToolUseBlock } from '../types/proxy';
@@ -97,14 +98,12 @@ async function sendPinned(
 	payload: string,
 	token: AccountTokenInfo,
 	headersFor: (accessToken: string) => Record<string, string>,
+	headersTimeoutMs: number,
 	signal?: AbortSignal
 ): Promise<{ response: Response; credentials: AccountTokenInfo }> {
-	const response = await fetch(url, {
-		signal,
-		method: 'POST',
-		headers: headersFor(token.accessToken),
-		body: payload
-	});
+	const send = (accessToken: string) =>
+		fetchWithHeadersTimeout(url, { method: 'POST', headers: headersFor(accessToken), body: payload }, headersTimeoutMs, signal);
+	const response = await send(token.accessToken);
 
 	if (response.status !== 401 || !token.localAccountId) return { response, credentials: token };
 
@@ -121,12 +120,7 @@ async function sendPinned(
 		};
 	}
 
-	const retryResponse = await fetch(url, {
-		signal,
-		method: 'POST',
-		headers: headersFor(refreshed.accessToken),
-		body: payload
-	});
+	const retryResponse = await send(refreshed.accessToken);
 	logger.log(`Retry after refresh: ${retryResponse.status}`);
 
 	return { response: retryResponse, credentials: refreshed };
@@ -170,11 +164,12 @@ async function makeClaudeCodeRequest(
 
 		const url = `${config.anthropic.apiUrl}${endpoint}?beta=true`;
 		const payload = JSON.stringify(preparedBody);
+		const headersTimeoutMs = preparedBody.stream ? HEADERS_TIMEOUT_MS.stream : HEADERS_TIMEOUT_MS.buffered;
 
 		const outcome = await AccountFallback.run<AccountTokenInfo>({
 			provider: 'claude',
 			getCredentials: (accountId) => OAuth.getValidToken(accountId),
-			send: (token) => sendPinned(url, payload, token, headersFor, signal),
+			send: (token) => sendPinned(url, payload, token, headersFor, headersTimeoutMs, signal),
 			// Streams: explicit early SSE usage-limit errors rotate before anything is committed.
 			inspect: SsePrecommitGate.inspector('claude', { signal }),
 			signal

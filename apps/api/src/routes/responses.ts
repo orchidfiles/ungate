@@ -7,7 +7,7 @@ import {
 	StreamStateFactory,
 	type StreamState
 } from 'src/proxy/responses-stream-mapper';
-import { tapSse, type SseTapEnd, type SseTapReader } from 'src/streaming/sse-tap';
+import { tapSse, UPSTREAM_IDLE_TIMEOUT_MS, type SseTapEnd, type SseTapReader, type UpstreamIdle } from 'src/streaming/sse-tap';
 import { logger } from 'src/utils/logger';
 import { clientAbortSignal } from 'src/utils/request-abort';
 
@@ -57,6 +57,16 @@ class ResponsesStreamReader implements SseTapReader<ResponsesStreamSummary> {
 	finish(end: SseTapEnd): ResponsesStreamSummary {
 		return { state: this.state, end };
 	}
+}
+
+/** Codex's own failure frame for a stream the upstream stopped feeding; Codex retries the turn. */
+function idleFailedEvent(idle: UpstreamIdle): string {
+	const data = {
+		type: 'response.failed',
+		response: { status: 'failed', error: { code: 'server_error', message: `Upstream stream stalled: ${idle.message}` } }
+	};
+
+	return `event: response.failed\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
 function streamError({ state, end }: ResponsesStreamSummary): string | null {
@@ -155,7 +165,12 @@ const plugin: FastifyPluginCallback = (app) => {
 
 		const reader = new ResponsesStreamReader(context.model, onStreamError);
 
-		return reply.send(tapSse(response.body, reader, (summary) => recordStream(context, summary)));
+		return reply.send(
+			tapSse(response.body, reader, (summary) => recordStream(context, summary), {
+				idleTimeoutMs: UPSTREAM_IDLE_TIMEOUT_MS,
+				terminalEvent: idleFailedEvent
+			})
+		);
 	});
 };
 

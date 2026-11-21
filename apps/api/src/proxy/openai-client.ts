@@ -11,6 +11,7 @@ import { ResponsesModelResolver } from './responses-input-normalizer/resolve-mod
 import { ResponsesSseProcessor, StreamDiagnostics, StreamStateFactory, type StreamState } from './responses-stream-mapper';
 import { StreamChunkMapper } from './responses-stream-mapper/stream-openai-chunks';
 import { SsePrecommitGate } from './sse-precommit-gate';
+import { fetchWithHeadersTimeout, HEADERS_TIMEOUT_MS } from './upstream-fetch';
 import { UsageLimitClassifier } from './usage-limit-classifier';
 
 import type { OAuthCredentials } from '../auth/base-provider';
@@ -272,19 +273,24 @@ export class OpenAiClient {
 		callerHeaders: Record<string, string>,
 		signal?: AbortSignal
 	): Promise<Response> {
-		return fetch(`${config.openai.codexUrl}/responses`, {
-			signal,
-			method: 'POST',
-			headers: {
-				originator: 'codex_cli_rs',
-				...callerHeaders,
-				'content-type': 'application/json',
-				authorization: `Bearer ${accessToken}`,
-				'chatgpt-account-id': accountId,
-				accept: 'text/event-stream'
+		// Codex always streams, so headers come before the model starts work.
+		return fetchWithHeadersTimeout(
+			`${config.openai.codexUrl}/responses`,
+			{
+				method: 'POST',
+				headers: {
+					originator: 'codex_cli_rs',
+					...callerHeaders,
+					'content-type': 'application/json',
+					authorization: `Bearer ${accessToken}`,
+					'chatgpt-account-id': accountId,
+					accept: 'text/event-stream'
+				},
+				body: requestBody
 			},
-			body: requestBody
-		});
+			HEADERS_TIMEOUT_MS.stream,
+			signal
+		);
 	}
 
 	private static errorResult(

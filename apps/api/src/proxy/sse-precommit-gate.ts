@@ -17,8 +17,9 @@ import type { SubscriptionProvider } from '@ungate/shared';
  * bound, then "commits": it returns a replacement response that replays the exact bytes it read
  * followed by the rest of the upstream body. After commit the request is never replayed.
  *
- * Only recognized usage-limit errors rotate. Any other early error is committed unchanged so the
- * downstream stream handler reports it.
+ * Recognized usage-limit errors rotate. Early transient errors (overloaded / server error) are
+ * reported as `transient` so the coordinator can retry before commit. Any other early error is
+ * committed unchanged so the downstream stream handler reports it.
  */
 export interface SseGateOptions {
 	/** Stop inspecting after this many bytes (default 64 KiB). */
@@ -111,6 +112,17 @@ class SseEventParser {
 	}
 }
 
+/** Early stream errors that mean "the upstream is struggling, try again": Anthropic `overloaded_error` / `api_error`, Codex `server_error`. */
+const TRANSIENT_STREAM_ERRORS = new Set(['overloaded_error', 'api_error', 'server_error']);
+
+function transientStreamError(error: Record<string, unknown> | undefined): string | undefined {
+	for (const value of [error?.type, error?.code]) {
+		if (typeof value === 'string' && TRANSIENT_STREAM_ERRORS.has(value)) return value;
+	}
+
+	return undefined;
+}
+
 function isEventStream(response: Response): boolean {
 	return (response.headers.get('content-type') ?? '').toLowerCase().includes('text/event-stream');
 }
@@ -190,6 +202,14 @@ export class SsePrecommitGate {
 						await reader.cancel().catch(() => undefined);
 
 						return { response, limit };
+					}
+					const transient = transientStreamError(decision.error);
+					if (transient) {
+						logger.log(`[accounts] ${provider} early SSE transient error before output (${transient})`);
+						await reader.cancel().catch(() => undefined);
+
+						// If no retry is left, the client still sees the upstream's error event.
+						return { response: this.replay(response, reader, buffered, undefined, true), transient: `sse_${transient}` };
 					}
 					// Unknown early error: never rotates; the downstream handler reports it.
 					why = `error:${limit.reason}`;

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { OAuthAccounts, type OAuthAccountRow } from 'src/database/oauth-accounts';
+import { UPSTREAM_RETRY } from 'src/proxy/account-fallback';
 import { proxyRequest } from 'src/proxy/anthropic-client';
 import { OpenAiClient } from 'src/proxy/openai-client';
 
@@ -198,10 +199,17 @@ describe('Claude account fallback (proxyRequest)', () => {
 		const throttledJson: { error: { message: string } } = await throttled.response.json();
 		expect(throttledJson.error.message).toBe('Slow down');
 
-		const overloaded = await proxyRequest('/v1/messages', claudeBody);
-		expect(overloaded.response.status).toBe(529);
-		const unavailable = await proxyRequest('/v1/messages', claudeBody);
-		expect(unavailable.response.status).toBe(503);
+		// With the transient retry budget off, a 5xx is answered as-is (retries: proxy-upstream-retry.test.ts).
+		const savedRetries = UPSTREAM_RETRY.maxRetries;
+		UPSTREAM_RETRY.maxRetries = 0;
+		try {
+			const overloaded = await proxyRequest('/v1/messages', claudeBody);
+			expect(overloaded.response.status).toBe(529);
+			const unavailable = await proxyRequest('/v1/messages', claudeBody);
+			expect(unavailable.response.status).toBe(503);
+		} finally {
+			UPSTREAM_RETRY.maxRetries = savedRetries;
+		}
 
 		expect(fetchMock).toHaveBeenCalledTimes(3);
 		expect(OAuthAccounts.policy('claude').activeAccountId).toBe(a.id);

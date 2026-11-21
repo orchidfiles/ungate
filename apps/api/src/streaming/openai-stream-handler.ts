@@ -6,6 +6,8 @@ import { RequestHeuristics } from '../metrics/request-heuristics';
 import { ToolNormalizer } from '../tools/normalizer';
 import { type ToolUseBlock, type StreamResult, type RequestContext } from '../types/proxy';
 
+import { readWithin, UPSTREAM_IDLE_TIMEOUT_MS, UpstreamIdle } from './sse-tap';
+
 import type { AnthropicStopReason, AnthropicStreamEvent } from '../types/anthropic-stream';
 import type { RequestRecord, StopReason } from '@ungate/shared';
 
@@ -26,7 +28,7 @@ interface StreamHandlerOptions extends StreamTimingOptions {
 // Abort only when the upstream sends no bytes at all; there is no total-duration cap.
 export const DEFAULT_STREAM_TIMING: StreamTimingOptions = {
 	keepaliveIntervalMs: 15_000,
-	upstreamIdleTimeoutMs: 180_000
+	upstreamIdleTimeoutMs: UPSTREAM_IDLE_TIMEOUT_MS
 };
 
 interface ActiveToolCall {
@@ -169,15 +171,7 @@ export class OpenAIStreamHandler {
 							return;
 						}
 
-						const now = Date.now();
-
-						if (upstreamIdleTimeoutMs > 0 && now - lastUpstreamAt >= upstreamIdleTimeoutMs) {
-							abortUpstream(`upstream idle for ${Math.round((now - lastUpstreamAt) / 1000)}s`);
-
-							return;
-						}
-
-						if (now - lastEmitAt < keepaliveIntervalMs) {
+						if (Date.now() - lastEmitAt < keepaliveIntervalMs) {
 							return;
 						}
 
@@ -331,7 +325,17 @@ export class OpenAIStreamHandler {
 					while (true) {
 						if (cancelled) break;
 
-						const { done, value } = await reader.read();
+						let chunk: ReadableStreamReadResult<Uint8Array>;
+						try {
+							chunk = await readWithin(reader, upstreamIdleTimeoutMs);
+						} catch (readError) {
+							if (!(readError instanceof UpstreamIdle)) throw readError;
+							// Silent upstream: cut it and end the stream as incomplete.
+							abortUpstream(readError.message);
+							finalizeStream(true);
+							break;
+						}
+						const { done, value } = chunk;
 
 						if (cancelled) break;
 						if (done) {

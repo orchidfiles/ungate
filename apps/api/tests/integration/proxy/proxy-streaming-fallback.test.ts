@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDb, schema } from 'src/database';
 import { ClientKeys } from 'src/database/client-keys';
 import { OAuthAccounts, type OAuthAccountRow } from 'src/database/oauth-accounts';
+import { UPSTREAM_RETRY } from 'src/proxy/account-fallback';
 import { proxyRequest } from 'src/proxy/anthropic-client';
 import { OpenAiClient } from 'src/proxy/openai-client';
 import { SsePrecommitGate } from 'src/proxy/sse-precommit-gate';
@@ -162,18 +163,37 @@ describe('Claude SSE pre-commit gate', () => {
 		expect(body).toBe(full);
 	});
 
-	it('unknown early error (overloaded) never rotates; the error bytes are passed through', async () => {
+	it('early overloaded error is retried, never cools down, and its bytes pass through once retries are spent', async () => {
 		const a = add('claude', 'a');
 		add('claude', 'b');
 		const overloaded = anthropicEvent('error', { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } });
 		const fetchMock = vi.fn(() => Promise.resolve(sseResponse([overloaded]).response));
+		vi.stubGlobal('fetch', fetchMock);
+		const saved = UPSTREAM_RETRY.baseDelayMs;
+		UPSTREAM_RETRY.baseDelayMs = 1;
+
+		const result = await proxyRequest('/v1/messages', claudeStreamBody).finally(() => {
+			UPSTREAM_RETRY.baseDelayMs = saved;
+		});
+
+		expect(fetchMock).toHaveBeenCalledTimes(1 + UPSTREAM_RETRY.maxRetries);
+		const body = await readAll(result.response.body);
+		expect(body).toBe(overloaded);
+		expect(OAuthAccounts.get(a.id)?.cooldownUntil).toBeNull();
+	});
+
+	it('unknown early error (invalid_request) never rotates; the error bytes are passed through', async () => {
+		const a = add('claude', 'a');
+		add('claude', 'b');
+		const invalid = anthropicEvent('error', { type: 'error', error: { type: 'invalid_request_error', message: 'bad' } });
+		const fetchMock = vi.fn(() => Promise.resolve(sseResponse([invalid]).response));
 		vi.stubGlobal('fetch', fetchMock);
 
 		const result = await proxyRequest('/v1/messages', claudeStreamBody);
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		const body = await readAll(result.response.body);
-		expect(body).toBe(overloaded);
+		expect(body).toBe(invalid);
 		expect(OAuthAccounts.policy('claude').activeAccountId).toBe(a.id);
 		expect(OAuthAccounts.get(a.id)?.cooldownUntil).toBeNull();
 	});
@@ -256,8 +276,9 @@ describe('Claude SSE pre-commit gate', () => {
 			{},
 			{ hang: true }
 		);
+		let upstreamSignal: AbortSignal | null | undefined;
 		const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
-			expect(init?.signal).toBe(controller.signal);
+			upstreamSignal = init?.signal;
 			setTimeout(() => controller.abort(new Error('client gone')), 5);
 
 			return Promise.resolve(hanging.response);
@@ -267,6 +288,8 @@ describe('Claude SSE pre-commit gate', () => {
 		const result = await proxyRequest('/v1/messages', claudeStreamBody, undefined, controller.signal);
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
+		// The client's cancellation reaches the upstream request (combined with the headers timeout).
+		expect(upstreamSignal?.aborted).toBe(true);
 		expect(result.response.status).toBe(499);
 		expect(hanging.cancelled()).toBe(true);
 		expect(OAuthAccounts.policy('claude').activeAccountId).toBe(a.id);
