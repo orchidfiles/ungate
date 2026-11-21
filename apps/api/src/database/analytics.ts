@@ -2,11 +2,13 @@ import { sql } from 'drizzle-orm';
 
 import { logger } from 'src/utils/logger';
 
+import { UsageInsightsQuery } from './insights';
+import { unknownCostCondition } from './request-cost';
 import { requests } from './schema';
 
-import { getDb } from './index';
+import { getDb, getSqlite } from './index';
 
-import type { AnalyticsSummary, Period, TokenSeriesPoint } from '@ungate/shared';
+import type { AnalyticsSummary, Period, TokenSeriesPoint, UsageInsights } from '@ungate/shared';
 
 export class Analytics {
 	static getSummary(since: number, until: number = Date.now()): AnalyticsSummary {
@@ -18,6 +20,7 @@ export class Analytics {
 				claudeRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'claude' THEN 1 ELSE 0 END)`,
 				minimaxRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'minimax' THEN 1 ELSE 0 END)`,
 				openaiRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'openai' THEN 1 ELSE 0 END)`,
+				cursorRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'cursor' THEN 1 ELSE 0 END)`,
 				errorRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'error' THEN 1 ELSE 0 END)`,
 				totalInputTokens: sql<number>`SUM(${requests.inputTokens})`,
 				totalOutputTokens: sql<number>`SUM(${requests.outputTokens})`
@@ -31,6 +34,7 @@ export class Analytics {
 			claudeRequests: totals?.claudeRequests ?? 0,
 			minimaxRequests: totals?.minimaxRequests ?? 0,
 			openaiRequests: totals?.openaiRequests ?? 0,
+			cursorRequests: totals?.cursorRequests ?? 0,
 			errorRequests: totals?.errorRequests ?? 0,
 			totalInputTokens: totals?.totalInputTokens ?? 0,
 			totalOutputTokens: totals?.totalOutputTokens ?? 0,
@@ -43,22 +47,24 @@ export class Analytics {
 		const db = getDb();
 
 		return db
-			.select()
+			.select({ row: requests, unknownCost: sql<number>`${sql.raw(unknownCostCondition())}` })
 			.from(requests)
 			.orderBy(sql`${requests.timestamp} DESC`)
 			.limit(limit)
 			.all()
-			.map((row) => ({
+			.map(({ row, unknownCost }) => ({
 				id: row.id,
 				timestamp: row.timestamp,
 				model: row.model,
 				source: row.source,
 				inputTokens: row.inputTokens,
 				outputTokens: row.outputTokens,
-				estimatedCost: row.estimatedCost,
+				// Computed per read, so historical rows stored with a zero placeholder stay unknown.
+				estimatedCost: unknownCost ? null : row.estimatedCost,
 				stream: row.stream,
 				latencyMs: row.latencyMs,
-				error: row.error
+				error: row.error,
+				clientId: row.clientId
 			}));
 	}
 
@@ -83,6 +89,11 @@ export class Analytics {
 			inputTokens: row.inputTokens ?? 0,
 			outputTokens: row.outputTokens ?? 0
 		}));
+	}
+
+	/** Usage heuristics over the period; see `UsageInsightsQuery` for each aggregate. */
+	static getInsights(period: Period, since: number, until: number = Date.now()): UsageInsights {
+		return new UsageInsightsQuery(getSqlite(), period, { since, until }).run();
 	}
 
 	private static bucketExpression(period: Period) {

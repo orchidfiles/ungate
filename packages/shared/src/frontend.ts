@@ -14,6 +14,7 @@ export type ExtensionToWebview =
 	| { type: 'tunnel-status'; state: TunnelState }
 	| { type: 'key-fix-state'; enabled: boolean }
 	| { type: 'auto-tunnel-state'; enabled: boolean }
+	| { type: 'cursor-provider-state'; enabled: boolean }
 	| { type: 'log'; source: 'api' | 'tunnel'; entry: LogEntry }
 	| { type: 'log-bulk'; source: 'api' | 'tunnel'; entries: LogEntry[] }
 	| { type: 'logs-cleared'; source: 'api' | 'tunnel' };
@@ -26,4 +27,5 @@ export type WebviewToExtension =
 	| { type: 'restart-tunnel' }
 	| { type: 'set-key-fix-enabled'; enabled: boolean }
 	| { type: 'set-auto-tunnel-enabled'; enabled: boolean }
+	| { type: 'set-cursor-provider-enabled'; enabled: boolean }
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' };
