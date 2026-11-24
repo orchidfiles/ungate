@@ -1,0 +1,32 @@
+name: SkillSpector
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: skillspector-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  static-scan:
+    name: Static agent-instruction scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          submodules: false
+      - name: Test scanner runner
+        run: bash .github/skillspector/test.sh
+      - name: Scan skills and agent instructions offline
+        shell: bash
+        run: |
+          code=0
+          bash .github/skillspector/skillscan.sh || code=$?
+          if [ "$code" = 3 ]; then
+            printf '### SkillSpector: not applicable\nNo agent instruction or skill targets. This is not a security pass.\n' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$code"
