@@ -82,7 +82,8 @@ vi.mock('vscode', () => {
 	return {
 		window: {
 			createOutputChannel: createOutputChannelMock,
-			createStatusBarItem: createStatusBarItemMock
+			createStatusBarItem: createStatusBarItemMock,
+			registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() }))
 		},
 		workspace: {
 			createFileSystemWatcher: vi.fn(() => ({
