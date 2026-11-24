@@ -131,7 +131,7 @@ export class Sqlite3CliResolver {
 			onLog?.('Downloading SQLite CLI...');
 			fs.mkdirSync(extractDir, { recursive: true });
 
-			// Verified before extraction: a tampered archive never reaches unzip.
+			// Verified before extraction: a tampered archive is never unpacked.
 			await VerifiedArtifact.download(artifact, zipPath);
 			await ZipExtractor.extract(zipPath, extractDir);
 
