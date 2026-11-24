@@ -1,5 +1,5 @@
 <script lang="ts">
-import { sleep, type TunnelProvider } from '@ungate/shared/frontend';
+import { NgrokAuthToken, sleep, type TunnelProvider } from '@ungate/shared/frontend';
 import IconCopy from 'virtual:icons/lucide/copy';
 import IconPlay from 'virtual:icons/lucide/play';
 import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
@@ -29,6 +29,7 @@ let copied = $state(false);
 let tokenDraft = $state('');
 
 const ngrok = $derived(store.provider === 'ngrok');
+const tokenInvalid = $derived(tokenDraft.trim().length > 0 && NgrokAuthToken.normalize(tokenDraft) === null);
 
 function handleCopy() {
 	if (!store.tunnel.url) return;
@@ -56,7 +57,7 @@ function handleProviderChange(event: Event): void {
 }
 
 function saveToken(): void {
-	const token = tokenDraft.trim();
+	const token = NgrokAuthToken.normalize(tokenDraft);
 
 	if (!token) {
 		return;
@@ -171,11 +172,16 @@ function saveToken(): void {
 					bind:value={tokenDraft} />
 				<button
 					class="btn btn-sm preset-tonal-surface"
-					disabled={!tokenDraft.trim()}
+					disabled={!tokenDraft.trim() || tokenInvalid}
 					onclick={saveToken}>
 					Save
 				</button>
 			</div>
+			{#if tokenInvalid}
+				<p class="text-xs text-error-500">
+					That is not an ngrok authtoken. Copy the authtoken from dashboard.ngrok.com; a tunnel URL does not go here.
+				</p>
+			{/if}
 		{:else}
 			<p class="text-xs text-surface-400">Nothing to configure. The public URL is new every time the tunnel starts.</p>
 		{/if}

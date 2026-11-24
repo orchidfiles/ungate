@@ -6,8 +6,9 @@ import * as path from 'node:path';
 import { localApiBaseUrl } from '@ungate/shared';
 import { bin, use, Tunnel } from 'cloudflared';
 
+import { NgrokLogLine, type NgrokFailure } from './ngrok-log-line';
+import { NgrokOutputLines } from './ngrok-output-lines';
 import { NgrokTokenStore, UnavailableNgrokSecrets } from './ngrok-token-store';
-import { NgrokUrl } from './ngrok-url';
 import { CloudflaredProcess, RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
@@ -28,6 +29,7 @@ interface NgrokProcess {
 export class TunnelManager {
 	private tunnel: Tunnel | null = null;
 	private ngrok: NgrokProcess | null = null;
+	private ngrokFailure: NgrokFailure | null = null;
 	private adoptedPid: number | null = null;
 	private state: TunnelState = { status: 'stopped', url: null, error: null };
 	private readonly windowId: string;
@@ -253,19 +255,23 @@ export class TunnelManager {
 			return;
 		}
 
-		const child = cp.spawn(binaryPath, ['http', String(port), '--authtoken', token, '--log', 'stdout', '--log-format', 'json'], {
-			stdio: ['ignore', 'pipe', 'pipe']
+		const child = cp.spawn(binaryPath, ['http', String(port), '--log', 'stdout', '--log-format', 'json'], {
+			stdio: ['ignore', 'pipe', 'pipe'],
+			env: { ...process.env, NGROK_AUTHTOKEN: token }
 		});
+		const stdoutLines = new NgrokOutputLines();
+		const stderrLines = new NgrokOutputLines();
 		this.ngrok = child;
+		this.ngrokFailure = null;
 		this.scheduleAutoStop();
 
 		child.stdout?.on('data', (chunk: Buffer) => {
 			if (this.ngrok !== child) return;
-			this.consumeNgrokOutput(chunk.toString('utf8'));
+			this.consumeNgrokLines(stdoutLines.push(chunk.toString('utf8')));
 		});
 		child.stderr?.on('data', (chunk: Buffer) => {
 			if (this.ngrok !== child) return;
-			this.consumeNgrokOutput(chunk.toString('utf8'));
+			this.consumeNgrokLines(stderrLines.push(chunk.toString('utf8')));
 		});
 		child.on('error', (err) => {
 			if (this.ngrok !== child) return;
@@ -274,31 +280,65 @@ export class TunnelManager {
 		});
 		child.on('exit', (code, signal) => {
 			if (this.ngrok !== child) return;
+			this.consumeNgrokLines([...stdoutLines.flush(), ...stderrLines.flush()]);
 			this.onLog({ timestamp: Date.now(), level: 'warn', message: `Tunnel exited code=${code} signal=${signal}` });
 
 			if (this.state.status !== 'stopped') {
-				const failed = this.state.status === 'starting';
-				this.setState(
-					failed
-						? { status: 'error', url: null, error: `Process exited before tunnel was ready (code=${code})` }
-						: { status: 'stopped', url: null, error: null }
-				);
+				this.setState(this.ngrokExitState(code));
 			}
 
 			this.ngrok = null;
 		});
 	}
 
-	private consumeNgrokOutput(output: string): void {
-		for (const line of output.split('\n').filter((entry) => entry.trim())) {
-			this.onLog({ timestamp: Date.now(), level: 'info', message: line });
+	/** ngrok explains a failed exit in its own output; that reason is what the user needs to see. */
+	private ngrokExitState(code: number | null): TunnelState {
+		const failure = this.ngrokFailure;
 
-			const url = NgrokUrl.read(line);
+		if (failure && code !== 0) {
+			const reason = failure.message ?? `ngrok exited (code=${code})`;
+			const described = failure.code ? `${reason} (${failure.code})` : reason;
+			const error = `ngrok: ${described}`;
 
-			if (url && this.state.url !== url) {
-				this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${url}` });
-				this.setState({ status: 'running', url, error: null });
+			return { status: 'error', url: null, error };
+		}
+
+		if (this.state.status === 'starting') {
+			return { status: 'error', url: null, error: `Process exited before tunnel was ready (code=${code})` };
+		}
+
+		return { status: 'stopped', url: null, error: null };
+	}
+
+	private rememberNgrokFailure(next: NgrokFailure): void {
+		const current = this.ngrokFailure;
+
+		if (!current || (next.code && next.message)) {
+			this.ngrokFailure = next;
+
+			return;
+		}
+
+		this.ngrokFailure = { code: current.code ?? next.code, message: current.message ?? next.message };
+	}
+
+	private consumeNgrokLines(lines: string[]): void {
+		for (const line of lines) {
+			const parsed = new NgrokLogLine(line);
+			this.onLog({ timestamp: Date.now(), level: parsed.level, message: line });
+
+			if (parsed.failure) {
+				this.rememberNgrokFailure(parsed.failure);
 			}
+
+			const url = parsed.tunnelUrl;
+
+			if (!url || this.state.url === url) {
+				continue;
+			}
+
+			this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${url}` });
+			this.setState({ status: 'running', url, error: null });
 		}
 	}
 
