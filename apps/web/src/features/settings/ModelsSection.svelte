@@ -82,6 +82,16 @@ function modelTitle(item: VisibleModelItem): string {
 	return `Model ${item.index + 1}`;
 }
 
+function modelSlug(item: VisibleModelItem): string {
+	const slug = item.model.id.trim();
+
+	if (!slug || slug === modelTitle(item)) {
+		return '';
+	}
+
+	return slug;
+}
+
 function modelSelectionId(item: VisibleModelItem): string {
 	return item.model.id.trim() || `#row-${item.index}`;
 }
@@ -286,7 +296,12 @@ $effect(() => {
 								? 'preset-filled-primary-500 border-primary-500/50'
 								: 'preset-tonal-surface border-surface-600 hover:border-surface-400 hover:preset-filled-surface-500'}"
 							onclick={() => setActiveModel(item.index)}>
-							{modelTitle(item)}
+							<span class="flex min-w-0 flex-col items-start text-left leading-tight">
+								<span>{modelTitle(item)}</span>
+								{#if modelSlug(item)}
+									<span class="font-mono text-[10px] opacity-80">{modelSlug(item)}</span>
+								{/if}
+							</span>
 						</button>
 					{/each}
 				</div>
@@ -298,7 +313,12 @@ $effect(() => {
 				{@const index = activeItem.index}
 				<div class="card preset-tonal-surface border border-surface-700/30 p-4 space-y-3">
 					<div class="flex items-center justify-between gap-3">
-						<p class="text-sm font-medium">{modelTitle(activeItem)}</p>
+						<div class="min-w-0">
+							<p class="text-sm font-medium">{modelTitle(activeItem)}</p>
+							{#if modelSlug(activeItem)}
+								<p class="truncate font-mono text-xs text-surface-400">{modelSlug(activeItem)}</p>
+							{/if}
+						</div>
 						<div class="flex items-center gap-2">
 							<button
 								class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"

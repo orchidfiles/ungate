@@ -131,7 +131,12 @@ let tools = $derived([...insights.tools.top].reverse());
 							<td
 								class="py-2 pr-3 font-mono text-xs"
 								title={new Date(session.firstSeen).toLocaleString()}>{session.sessionKey.slice(0, 8)}</td>
-							<td class="py-2 pr-3">{formatModelName(session.model)}</td>
+							<td class="py-2 pr-3">
+								<div>{formatModelName(session.model)}</div>
+								{#if session.model && formatModelName(session.model) !== session.model}
+									<div class="font-mono text-[10px] text-surface-400">{session.model}</div>
+								{/if}
+							</td>
 							<td class="py-2 pr-3 text-right">{session.turns}</td>
 							<td class="py-2 pr-3 text-right">{compact(session.totalTokens)}</td>
 							<td class="py-2 pr-3 text-right">{compact(session.maxInputTokens)}</td>
