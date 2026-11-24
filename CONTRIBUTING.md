@@ -65,7 +65,7 @@ Data flow: Cursor sends a request from its backend, the request is forwarded thr
 
 ## Things the linter can't catch
 
-ESLint and Prettier configs live in `packages/dev-kit`. The pre-commit hook runs `lint:fix`, but hooks can be skipped and CI does not currently enforce these checks. A few things the linter will not catch that we care about:
+ESLint and Prettier configs live in `packages/dev-kit`. The pre-commit hook runs `lint:fix`, and CI (`.github/workflows/ci.yml`) runs lint, the type checks, the tests and the VSIX packaging on every push and pull request. A few things the linter will not catch that we care about:
 
 - **Don't bypass `VerifiedArtifact`** when adding or updating a downloaded binary. Pin the URL and add the SHA-256 to the allowlist. Do not introduce fallbacks to `latest` releases.
 - **Don't write to `state.vscdb` directly** for the OpenAI Key Fix. Cursor ignores reactive storage writes; use `aiSettings.usingOpenAIKey.toggle`.
@@ -75,7 +75,7 @@ ESLint and Prettier configs live in `packages/dev-kit`. The pre-commit hook runs
 ## Testing
 
 - API and extension tests live in `apps/api/tests/` and `apps/extension/tests/`. API tests are split into `unit/` and `integration/`; extension tests are in `unit/`.
-- Run them with `pnpm test`. The API server is testable in isolation via `apps/api/dist/main.js` on a custom `PORT` and `DB_PATH`.
+- Run them with `pnpm test`. CI runs the same command on Node 22 and 24, and runs on pushes to your fork too, so you can see the result before opening a pull request. The API server is testable in isolation via `apps/api/dist/main.js` on a custom `PORT` and `DB_PATH`.
 - Changes in streaming code (`src/streaming/`, `src/proxy/responses-stream-mapper/`) should include tests for both `function_call` and `custom_tool_call` Codex variants.
 - Automated tests cover OAuth lifecycle and tunnel-manager behavior with mocks. End-to-end checks against real provider accounts and Cloudflare tunnels are performed manually.
 
