@@ -127,6 +127,20 @@
       "when": 1796663200000,
       "tag": "_0017",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1797557200000,
+      "tag": "_0018",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1797643600000,
+      "tag": "_0019",
+      "breakpoints": true
     }
   ]
 }
