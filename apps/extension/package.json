@@ -70,7 +70,8 @@
 		"publish": "ovsx publish out/ungate.vsix",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix",
-		"test": "vitest run"
+		"test": "vitest run",
+		"test:live": "vitest run --config tests/live/vitest.config.ts"
 	},
 	"dependencies": {
 		"@ungate/shared": "workspace:*",

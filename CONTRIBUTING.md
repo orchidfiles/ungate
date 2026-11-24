@@ -77,7 +77,7 @@ ESLint and Prettier configs live in `packages/dev-kit`. The pre-commit hook runs
 - API and extension tests live in `apps/api/tests/` and `apps/extension/tests/`. API tests are split into `unit/` and `integration/`; extension tests are in `unit/`.
 - Run them with `pnpm test`. CI runs the same command on Node 22 and 24, and runs on pushes to your fork too, so you can see the result before opening a pull request. The API server is testable in isolation via `apps/api/dist/main.js` on a custom `PORT` and `DB_PATH`.
 - Changes in streaming code (`src/streaming/`, `src/proxy/responses-stream-mapper/`) should include tests for both `function_call` and `custom_tool_call` Codex variants.
-- Automated tests cover OAuth lifecycle and tunnel-manager behavior with mocks. End-to-end checks against real provider accounts and Cloudflare tunnels are performed manually.
+- Automated tests cover OAuth lifecycle and tunnel-manager behavior with mocks. `pnpm --filter ungate test:live` (`apps/extension/tests/live/`) starts a real Cloudflare quick tunnel with the real `TunnelManager` and the pinned `cloudflared`, calls it from the internet and stops it. It needs network access and no account, runs in a throwaway home directory, and runs in CI (`.github/workflows/live-tunnel.yml`) when the extension or shared package changes, and weekly. End-to-end checks against real provider accounts are performed manually.
 
 ## Pull requests
 
