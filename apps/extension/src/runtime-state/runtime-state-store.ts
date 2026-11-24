@@ -1,5 +1,7 @@
 import { localApiHealthUrl } from '@ungate/shared';
 
+import { TunnelHostnameScreen } from '../tunnel-hostname-screen';
+
 import { CloudflaredProcess } from './cloudflared-process';
 import { config } from './config';
 import { RuntimeStateFileStore } from './file-store';
@@ -140,7 +142,7 @@ export class RuntimeStateStore {
 
 		// The owner window is gone, but cloudflared may still be proxying the API.
 		// Dropping the URL here is what mints a new quick-tunnel name on the next start.
-		if (state.tunnel.url && CloudflaredProcess.findServing(state.api.port)) {
+		if (this.keepsOrphanedTunnelUrl(state)) {
 			return state;
 		}
 
@@ -149,7 +151,7 @@ export class RuntimeStateStore {
 				return current;
 			}
 
-			if (current.tunnel.url && CloudflaredProcess.findServing(current.api.port)) {
+			if (this.keepsOrphanedTunnelUrl(current)) {
 				return current;
 			}
 
@@ -157,6 +159,7 @@ export class RuntimeStateStore {
 
 			current.tunnel.status = 'stopped';
 			current.tunnel.url = null;
+			current.tunnel.warning = null;
 			current.tunnel.lastError = null;
 			current.tunnel.ownerWindowId = null;
 			current.tunnel.lastSeenAt = now;
@@ -269,6 +272,30 @@ export class RuntimeStateStore {
 		} catch {
 			return false;
 		}
+	}
+
+	/**
+	 * An orphaned quick tunnel keeps its URL only while cloudflared still serves it and the
+	 * hostname passes the word filter. A rejected one is retired so it is never shown again.
+	 */
+	private static keepsOrphanedTunnelUrl(state: RuntimeState): boolean {
+		if (!state.tunnel.url) {
+			return false;
+		}
+
+		const serving = CloudflaredProcess.findServing(state.api.port);
+
+		if (!serving) {
+			return false;
+		}
+
+		if (TunnelHostnameScreen.isAcceptable(state.tunnel.url)) {
+			return true;
+		}
+
+		CloudflaredProcess.terminate(serving.pid);
+
+		return false;
 	}
 
 	private static isActiveTunnel(state: RuntimeState): boolean {

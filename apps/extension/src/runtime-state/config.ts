@@ -37,7 +37,11 @@ export const config = {
 	},
 	tunnelManager: {
 		// Interval for checking if tunnel should auto-stop without live windows.
-		autoStopCheckIntervalMs: 1500
+		autoStopCheckIntervalMs: 1500,
+		// Quick tunnels requested in one start before giving up on a hostname that passes the word filter.
+		hostnameMaxAttempts: 5,
+		// Pause before asking Cloudflare for another quick tunnel; creation is rate-limited with HTTP 429.
+		hostnameRerollDelayMs: 2000
 	},
 	extensionController: {
 		// Interval between heartbeat updates from the current window.

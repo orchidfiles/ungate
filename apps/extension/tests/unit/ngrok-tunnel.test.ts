@@ -154,6 +154,47 @@ describe('ngrok tunnel', () => {
 		expect(second.killed).toEqual(['kill']);
 	});
 
+	it('flags a rejected dev domain, keeps the tunnel running and keeps the name out of the log', async () => {
+		const child = new FakeProcess();
+
+		mocks.spawnMock.mockReturnValue(child);
+		vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(true);
+
+		const { manager, logs, states } = createManager(TOKEN);
+
+		await manager.start(47821);
+		child.stdout.emit('data', Buffer.from('{"msg":"started tunnel","url":"https://acre-idiot-case.ngrok-free.dev"}\n'));
+		child.stdout.emit('data', Buffer.from('{"msg":"started tunnel","url":"https://acre-idiot-case.ngrok-free.dev"}\n'));
+
+		expect(manager.getState()).toEqual({
+			status: 'running',
+			url: null,
+			error: null,
+			warning: 'offensive-hostname'
+		});
+		expect(child.killed).toEqual([]);
+		expect(JSON.stringify([logs, states])).not.toContain('idiot');
+		expect(logs.filter((entry) => entry.level === 'warn')).toHaveLength(1);
+		expect(logs.map((entry) => entry.message)).toContain(
+			'{"msg":"started tunnel","url":"https://hidden-hostname.ngrok-free.dev"}'
+		);
+	});
+
+	it('does not flag an ordinary dev domain', async () => {
+		const child = new FakeProcess();
+
+		mocks.spawnMock.mockReturnValue(child);
+		vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(true);
+
+		const { manager, logs } = createManager(TOKEN);
+
+		await manager.start(47821);
+		child.stdout.emit('data', Buffer.from('{"msg":"started tunnel","url":"https://acre-case-gibberish.ngrok-free.dev"}\n'));
+
+		expect(manager.getState()).toEqual({ status: 'running', url: 'https://acre-case-gibberish.ngrok-free.dev', error: null });
+		expect(logs.map((entry) => entry.message)).toContain('Tunnel URL: https://acre-case-gibberish.ngrok-free.dev');
+	});
+
 	it('reports a rejected authtoken as an error and never publishes the dashboard link as the tunnel url', async () => {
 		const child = new FakeProcess();
 

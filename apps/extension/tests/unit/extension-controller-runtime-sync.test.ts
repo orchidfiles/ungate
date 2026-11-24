@@ -654,10 +654,37 @@ describe('ExtensionController', () => {
 		expect(dashboard.sendTunnelState).toHaveBeenCalledWith({
 			status: 'stopped',
 			url: null,
-			error: null
+			error: null,
+			warning: null
 		});
 		expect(tunnelManager.start).not.toHaveBeenCalled();
 		expect(tunnelManager.restart).not.toHaveBeenCalled();
+	});
+
+	it('shows a flagged tunnel as running with a hidden hostname', async () => {
+		const { controller, dashboard, statusBar } = createController('window-a');
+		const internals = getInternals(controller);
+		const runtimeState = createRuntimeState(['window-a']);
+		runtimeState.tunnelProvider = 'ngrok';
+		runtimeState.tunnel.status = 'running';
+		runtimeState.tunnel.ownerWindowId = 'window-a';
+		runtimeState.tunnel.warning = 'offensive-hostname';
+
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a']);
+		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
+
+		await internals.syncFromRuntimeState();
+		await Promise.resolve();
+
+		expect(dashboard.sendTunnelState).toHaveBeenCalledWith({
+			status: 'running',
+			url: null,
+			error: null,
+			warning: 'offensive-hostname'
+		});
+		expect((statusBar.tooltip as unknown as { value: string }).value).toContain('hostname hidden by the word filter');
+		expect((statusBar.tooltip as unknown as { value: string }).value).not.toContain('Copy URL');
 	});
 
 	it.each([

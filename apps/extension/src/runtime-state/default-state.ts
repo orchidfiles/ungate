@@ -19,7 +19,8 @@ export class RuntimeStateDefaults {
 				url: null,
 				lastSeenAt: now,
 				lastError: null,
-				ownerWindowId: null
+				ownerWindowId: null,
+				warning: null
 			},
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED

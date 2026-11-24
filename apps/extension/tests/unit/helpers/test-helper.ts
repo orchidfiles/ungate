@@ -23,7 +23,8 @@ export class TestHelper {
 				url: null,
 				lastError: null,
 				ownerWindowId: null,
-				lastSeenAt: 0
+				lastSeenAt: 0,
+				warning: null
 			},
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED

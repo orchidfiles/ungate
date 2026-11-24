@@ -158,6 +158,80 @@ describe('AutoTunnel.reconcile', () => {
 	});
 });
 
+describe('AutoTunnel with a flagged tunnel hostname', () => {
+	const flaggedUrl = 'https://acre-idiot-case.ngrok-free.dev';
+
+	function flaggedState(): RuntimeState {
+		const state = enabledState();
+		state.tunnelProvider = 'ngrok';
+		state.tunnel.status = 'running';
+		state.tunnel.url = flaggedUrl;
+		state.tunnel.warning = 'offensive-hostname';
+
+		return state;
+	}
+
+	beforeEach(() => {
+		mocks.state = flaggedState();
+		mocks.clipboardWriteMock.mockClear();
+		mocks.showInfoMock.mockClear();
+	});
+
+	it('does not copy or announce it on reconcile', async () => {
+		const { autoTunnel, deps } = createAutoTunnel();
+
+		await autoTunnel.reconcile(flaggedState(), { port: 4783, ownsTunnel: true });
+
+		expect(mocks.clipboardWriteMock).not.toHaveBeenCalled();
+		expect(mocks.showInfoMock).not.toHaveBeenCalled();
+		expect(deps.ensureKeyEnabled).not.toHaveBeenCalled();
+		expect(deps.startTunnel).not.toHaveBeenCalled();
+		expect(JSON.stringify(deps.log.mock.calls)).not.toContain('idiot');
+		expect(mocks.state?.autoTunnel.lastAppliedUrl).toBeNull();
+	});
+
+	it('does nothing for a flagged tunnel that carries no URL', async () => {
+		const { autoTunnel, deps } = createAutoTunnel();
+		const state = flaggedState();
+		state.tunnel.url = null;
+
+		await autoTunnel.reconcile(state, { port: 4783, ownsTunnel: true });
+
+		expect(mocks.clipboardWriteMock).not.toHaveBeenCalled();
+		expect(mocks.showInfoMock).not.toHaveBeenCalled();
+		expect(deps.startTunnel).not.toHaveBeenCalled();
+	});
+
+	it('announces again once the tunnel has an unflagged URL', async () => {
+		const { autoTunnel } = createAutoTunnel();
+		const state = flaggedState();
+		await autoTunnel.reconcile(state, { port: 4783, ownsTunnel: true });
+
+		state.tunnel.url = 'https://api.example.com';
+		state.tunnel.warning = null;
+		mocks.state = structuredClone(state);
+		await autoTunnel.reconcile(state, { port: 4783, ownsTunnel: true });
+
+		expect(mocks.clipboardWriteMock).toHaveBeenCalledWith('https://api.example.com/v1');
+	});
+});
+
+describe('RuntimeStateNormalizer tunnel warning', () => {
+	it('defaults the warning when an older state file has none', () => {
+		const legacy = TestHelper.createRuntimeState(['window-a']);
+		delete (legacy.tunnel as Partial<RuntimeState['tunnel']>).warning;
+
+		expect(RuntimeStateNormalizer.normalize(legacy).tunnel.warning).toBeNull();
+	});
+
+	it('keeps a stored warning', () => {
+		const stored = TestHelper.createRuntimeState(['window-a']);
+		stored.tunnel.warning = 'offensive-hostname';
+
+		expect(RuntimeStateNormalizer.normalize(stored).tunnel.warning).toBe('offensive-hostname');
+	});
+});
+
 describe('AutoTunnel.onTunnelUrl', () => {
 	beforeEach(() => {
 		mocks.state = enabledState();
