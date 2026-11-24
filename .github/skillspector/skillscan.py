@@ -81,8 +81,21 @@ class SkillScan:
                     code = 2
                 try:
                     parsed = json.loads(report.read_text())
-                    if not isinstance(parsed, dict) or not parsed:
+                    if not isinstance(parsed, dict):
                         code = 2
+                    else:
+                        metadata = parsed.get('metadata', {})
+                        completeness = parsed.get('analysis_completeness', {})
+                        if (not isinstance(metadata, dict) or not isinstance(completeness, dict)
+                                or metadata.get('skillspector_version') != '2.13.7'
+                                or metadata.get('llm_requested') is not False
+                                or not isinstance(parsed.get('issues'), list)
+                                or type(completeness.get('is_complete')) is not bool
+                                or parsed.get('execution_successful') is not True
+                                or completeness.get('execution_successful') is not True):
+                            code = 2
+                        elif parsed['issues'] or not completeness['is_complete']:
+                            code = max(code, 1)
                 except (ValueError, UnicodeError):
                     code = 2
                 result = max(result, code)

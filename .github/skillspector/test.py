@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import unittest
@@ -53,10 +54,27 @@ class SkillScanTest(unittest.TestCase):
         with patch.object(module.subprocess, 'run', side_effect=subprocess.TimeoutExpired([], 180)):
             self.assertEqual(self.scanner(['GEMINI.md']).run(), 2)
 
+    def test_zero_exit_requires_valid_complete_report(self):
+        Path('/scan/GEMINI.md').write_text('Run tests.\n')
+        clean = {'metadata': {'skillspector_version': '2.13.7', 'llm_requested': False},
+                 'issues': [], 'execution_successful': True,
+                 'analysis_completeness': {'is_complete': True, 'execution_successful': True}}
+        cases = [({'unexpected': True}, 2),
+                 ({**clean, 'execution_successful': False}, 2),
+                 ({**clean, 'analysis_completeness': {'is_complete': False, 'execution_successful': True}}, 1),
+                 ({**clean, 'issues': [{'id': 'test'}]}, 1), (clean, 0)]
+        for report, expected in cases:
+            with self.subTest(report=report):
+                def emit(*args, **kwargs):
+                    kwargs['stdout'].write(json.dumps(report).encode())
+                    return subprocess.CompletedProcess([], 0)
+                with patch.object(module.subprocess, 'run', side_effect=emit):
+                    self.assertEqual(self.scanner(['GEMINI.md']).run(), expected)
+
     def test_incomplete_scan_is_failure(self):
         Path('/scan/GEMINI.md').write_text('Run tests.\n')
         def incomplete(*args, **kwargs):
-            kwargs['stdout'].write(b'{"analysis_completeness":{"is_complete":false}}')
+            kwargs['stdout'].write(b'{"metadata":{"skillspector_version":"2.13.7","llm_requested":false},"issues":[],"execution_successful":true,"analysis_completeness":{"is_complete":false,"execution_successful":true}}')
             return subprocess.CompletedProcess([], 1)
         with patch.object(module.subprocess, 'run', side_effect=incomplete):
             self.assertEqual(self.scanner(['GEMINI.md']).run(), 1)
