@@ -172,6 +172,16 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 			</div>
 		</div>
 
+		{#if status?.reason === 'token_encrypted'}
+			<div
+				class="card preset-tonal-warning p-3 text-sm"
+				role="status">
+				This Cursor session is encrypted and no usable session API is available to Ungate. Retrying, signing in again, or
+				restarting the tunnel will not make this session readable. Use another configured provider in Ungate or Cursor’s native
+				models instead. Do not disable encryption or copy session tokens into Ungate.
+			</div>
+		{/if}
+
 		{#if connected}
 			<div class="space-y-2">
 				<div class="flex items-center justify-between gap-2">

@@ -5,11 +5,11 @@ vi.mock('src/database/requests', () => ({ Requests: { record: (...args: unknown[
 
 const { CursorResponseAccumulator, CursorStreamHandler } = await import('src/streaming/cursor-stream-handler');
 const { CompletionErrorMapper, CompletionModelRouting } = await import('src/orchestration/openai');
-const { CursorBridgeClient } = await import('src/proxy/cursor-bridge-client');
 const { buildRepairRequest, CursorChatHandler } = await import('src/orchestration/openai/provider-handlers/cursor-chat-handler');
 
 import type { CursorBridgeEventBody, CursorInferenceRequest, ModelMappingConfig, RequestTelemetry } from '@ungate/shared';
 import type { FastifyReply } from 'fastify';
+import type { CursorBridgeClient } from 'src/proxy/cursor-bridge-client';
 import type { RepairRound } from 'src/streaming/cursor-stream-handler';
 import type { OpenAITool } from 'src/types/openai';
 
@@ -353,7 +353,7 @@ describe('Cursor handler conversation context', () => {
 
 				return from([{ kind: 'end', error: { kind: 'billing_blocked', message: 'blocked' } }]);
 			}
-		} as InstanceType<typeof CursorBridgeClient>;
+		} as CursorBridgeClient;
 		const reply = {
 			raw: { once: vi.fn() },
 			request: { headers: { 'x-conversation-id': 'untrusted', 'x-previous-request-id': 'untrusted' } },
@@ -415,12 +415,52 @@ describe('Cursor handler conversation context', () => {
 });
 
 describe('Cursor error mapping', () => {
+	it.each([false, true])('returns encrypted-session failure before output with stream=%s', async (stream) => {
+		const message = 'Encrypted Cursor session cannot be read. Use another provider.';
+		const invoke = vi.fn(() => from([{ kind: 'end', error: { kind: 'token_encrypted', message } }]));
+		const client = { invoke } as unknown as CursorBridgeClient;
+		const header = vi.fn().mockReturnThis();
+		const code = vi.fn().mockReturnThis();
+		const send = vi.fn().mockReturnThis();
+		const reply = {
+			raw: { once: vi.fn() },
+			request: { headers: {} },
+			header,
+			code,
+			send
+		} as unknown as FastifyReply;
+		await CursorChatHandler.handle(
+			{ model: 'cursor-grok', messages: [{ role: 'user', content: 'hello' }], stream },
+			{
+				id: 'cursor-grok',
+				upstreamModel: 'grok-4.7-low-fast',
+				provider: 'cursor',
+				label: 'Grok',
+				sortOrder: 0,
+				reasoningBudget: null,
+				serviceTier: null,
+				toolMode: null
+			},
+			reply,
+			{},
+			client
+		);
+		expect(invoke).toHaveBeenCalledTimes(1);
+		expect(code).toHaveBeenCalledExactlyOnceWith(403);
+		expect(header).toHaveBeenCalledWith('x-should-retry', 'false');
+		expect(send).toHaveBeenCalledExactlyOnceWith({
+			error: { message, type: 'permission_error', code: 'cursor_session_encrypted' }
+		});
+		expect(header).not.toHaveBeenCalledWith('content-type', 'text/event-stream');
+	});
+
 	it.each([
 		['tool_schema', 502, 'upstream_tool_schema_rejected'],
 		['auth', 401, 'cursor_not_signed_in'],
 		['rate_limit', 429, 'rate_limit_exceeded'],
 		['bad_model', 404, 'model_not_found'],
 		['disabled', 403, 'cursor_provider_disabled'],
+		['token_encrypted', 403, 'cursor_session_encrypted'],
 		['billing_blocked', 403, 'billing_blocked'],
 		['unavailable', 503, 'cursor_provider_unavailable']
 	] as const)('%s -> %d %s', (kind, status, code) => {

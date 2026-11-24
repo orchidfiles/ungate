@@ -85,6 +85,8 @@ export class CompletionErrorMapper {
 				return build(401, 'authentication_error', 'cursor_not_signed_in', 'Sign in to Cursor to use Cursor models.');
 			case 'disabled':
 				return build(403, 'permission_error', 'cursor_provider_disabled');
+			case 'token_encrypted':
+				return build(403, 'permission_error', 'cursor_session_encrypted');
 			case 'unavailable':
 				return build(503, 'api_error', 'cursor_provider_unavailable');
 			case 'permission':

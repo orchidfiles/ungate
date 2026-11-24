@@ -151,6 +151,33 @@ describe('CursorSession with a blocked vscode.cursor API', () => {
 		expect(bridge.status()).toMatchObject({ connected: false, reason: 'token_encrypted' });
 	});
 
+	it.each([
+		{ token: 'cursor-safe-storage:djEwAAAA', enabled: true, reason: 'token_encrypted', kind: 'token_encrypted' },
+		{ token: '', enabled: true, reason: 'not_signed_in', kind: 'auth' },
+		{ token: 'cursor-safe-storage:djEwAAAA', enabled: false, reason: 'disabled', kind: 'disabled' }
+	])('fails model discovery locally for $reason without transport or credentials', async ({ token, enabled, reason, kind }) => {
+		const { session: diskSession, readItem } = disk({ 'cursorAuth/accessToken': token });
+		const session = new CursorSession(
+			{ getCursorAuthToken: blocked, getAllRequestHeadersExceptAccessToken: blocked },
+			diskSession
+		);
+		const credentials = vi.spyOn(session, 'credentials');
+		const connect = vi.fn();
+		const send = vi.fn(() => true);
+		const bridge = new CursorBridge({ session, isEnabled: () => enabled, connect, retryDelaysMs: [0, 0] });
+		bridge.attach(Object.assign(new EventEmitter(), { send, connected: true }) as never);
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'listModels', id: 'discovery' });
+		await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+		expect(send).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: 'models', models: [], error: expect.objectContaining({ kind }) })
+		);
+		expect(bridge.status()).toMatchObject({ connected: false, reason });
+		expect(connect).not.toHaveBeenCalled();
+		expect(credentials).not.toHaveBeenCalled();
+		expect(JSON.stringify(send.mock.calls)).not.toContain('cursor-safe-storage:');
+		expect(readItem.mock.calls.length > 0).toBe(enabled);
+	});
+
 	it('reports signed out when neither source has a token', async () => {
 		const { session: diskSession } = disk({});
 		const session = new CursorSession(

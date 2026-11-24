@@ -166,6 +166,7 @@ export class CursorChatHandler {
 		if (startError) {
 			await iterator.return?.(undefined);
 			const mapped = CompletionErrorMapper.cursorError(startError);
+			if (startError.kind === 'token_encrypted') reply.header('x-should-retry', 'false');
 			const aborted = startError.kind === 'cancelled';
 			if (!aborted)
 				logger.warn(`[cursor] ${resolvedModel.upstreamModel} failed before output: ${startError.kind} ${startError.message}`);

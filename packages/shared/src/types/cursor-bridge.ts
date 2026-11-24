@@ -93,6 +93,7 @@ export type CursorBridgeErrorKind =
 	| 'billing_blocked'
 	| 'disabled'
 	| 'unavailable'
+	| 'token_encrypted'
 	| 'auth'
 	| 'rate_limit'
 	| 'tool_schema'

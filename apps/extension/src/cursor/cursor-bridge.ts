@@ -165,8 +165,9 @@ export class CursorBridge {
 		if (status.reason === 'not_signed_in') return { kind: 'auth', message: 'Sign in to Cursor to use Cursor models' };
 		if (status.reason === 'token_encrypted')
 			return {
-				kind: 'unavailable',
-				message: 'This Cursor version encrypts its session token at rest, so Ungate cannot use the Cursor provider'
+				kind: 'token_encrypted',
+				message:
+					'This Cursor session is encrypted and no usable session API is available to Ungate. Retrying or reconnecting the tunnel will not unlock it. Use another configured provider or Cursor’s native models.'
 			};
 
 		return { kind: 'unavailable', message: 'Cursor provider is unavailable in this window' };
