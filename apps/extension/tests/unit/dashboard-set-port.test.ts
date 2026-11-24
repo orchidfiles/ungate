@@ -229,6 +229,46 @@ describe('Dashboard.setPort', () => {
 		expect(panel.webview.postMessage).not.toHaveBeenCalled();
 	});
 
+	it('accepts ngrok domain messages and treats an empty value as clearing the domain', () => {
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const received: unknown[] = [];
+		const dashboard = new Dashboard(createExtensionContext() as never, (message) => {
+			received.push(message);
+		});
+		dashboard.show();
+		const deliver = panel.webview.onDidReceiveMessage.mock.calls[0][0] as (message: unknown) => void;
+
+		deliver({ type: 'set-ngrok-domain', domain: 'api.example.com' });
+		deliver({ type: 'set-ngrok-domain', domain: '   ' });
+		deliver({ type: 'set-ngrok-domain', domain: null });
+		deliver({ type: 'set-ngrok-domain', domain: 42 });
+		deliver({ type: 'set-ngrok-domain' });
+
+		expect(received).toEqual([
+			{ type: 'set-ngrok-domain', domain: 'api.example.com' },
+			{ type: 'set-ngrok-domain', domain: null },
+			{ type: 'set-ngrok-domain', domain: null }
+		]);
+	});
+
+	it('sends the ngrok domain with the tunnel config', () => {
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = new Dashboard(createExtensionContext() as never, () => {});
+		dashboard.show();
+		panel.webview.postMessage.mockClear();
+
+		dashboard.sendTunnelConfig('ngrok', true, 'api.example.com');
+
+		expect(panel.webview.postMessage).toHaveBeenCalledWith({
+			type: 'tunnel-config',
+			provider: 'ngrok',
+			tokenSet: true,
+			domain: 'api.example.com'
+		});
+	});
+
 	it('sends the current port to the webview during initial state sync', () => {
 		const panel = createPanel();
 		createWebviewPanelMock.mockReturnValue(panel);

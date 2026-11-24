@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { localApiBaseUrl } from '@ungate/shared';
+import { localApiBaseUrl, NgrokDomain } from '@ungate/shared';
 import { bin, use, Tunnel } from 'cloudflared';
 
 import { NgrokLogLine, type NgrokFailure } from './ngrok-log-line';
@@ -275,7 +275,10 @@ export class TunnelManager {
 			return;
 		}
 
-		const child = cp.spawn(binaryPath, ['http', String(port), '--log', 'stdout', '--log-format', 'json'], {
+		const domain = NgrokDomain.normalize(RuntimeStateStore.read().ngrokDomain);
+		const domainArgs = domain ? ['--url', `https://${domain}`] : [];
+		const hostnameIsAssigned = domain === null;
+		const child = cp.spawn(binaryPath, ['http', String(port), ...domainArgs, '--log', 'stdout', '--log-format', 'json'], {
 			stdio: ['ignore', 'pipe', 'pipe'],
 			env: { ...process.env, NGROK_AUTHTOKEN: token }
 		});
@@ -287,11 +290,11 @@ export class TunnelManager {
 
 		child.stdout?.on('data', (chunk: Buffer) => {
 			if (this.ngrok !== child) return;
-			this.consumeNgrokLines(stdoutLines.push(chunk.toString('utf8')));
+			this.consumeNgrokLines(stdoutLines.push(chunk.toString('utf8')), hostnameIsAssigned);
 		});
 		child.stderr?.on('data', (chunk: Buffer) => {
 			if (this.ngrok !== child) return;
-			this.consumeNgrokLines(stderrLines.push(chunk.toString('utf8')));
+			this.consumeNgrokLines(stderrLines.push(chunk.toString('utf8')), hostnameIsAssigned);
 		});
 		child.on('error', (err) => {
 			if (this.ngrok !== child) return;
@@ -300,11 +303,11 @@ export class TunnelManager {
 		});
 		child.on('exit', (code, signal) => {
 			if (this.ngrok !== child) return;
-			this.consumeNgrokLines([...stdoutLines.flush(), ...stderrLines.flush()]);
+			this.consumeNgrokLines([...stdoutLines.flush(), ...stderrLines.flush()], hostnameIsAssigned);
 			this.onLog({ timestamp: Date.now(), level: 'warn', message: `Tunnel exited code=${code} signal=${signal}` });
 
 			if (this.state.status !== 'stopped') {
-				this.setState(this.ngrokExitState(code));
+				this.setState(this.ngrokExitState(code, hostnameIsAssigned));
 			}
 
 			this.ngrok = null;
@@ -312,13 +315,13 @@ export class TunnelManager {
 	}
 
 	/** ngrok explains a failed exit in its own output; that reason is what the user needs to see. */
-	private ngrokExitState(code: number | null): TunnelState {
+	private ngrokExitState(code: number | null, hostnameIsAssigned: boolean): TunnelState {
 		const failure = this.ngrokFailure;
 
 		if (failure && code !== 0) {
 			const reason = failure.message ?? `ngrok exited (code=${code})`;
 			const described = failure.code ? `${reason} (${failure.code})` : reason;
-			const error = `ngrok: ${TunnelHostnameScreen.redact(described)}`;
+			const error = `ngrok: ${hostnameIsAssigned ? TunnelHostnameScreen.redact(described) : described}`;
 
 			return { status: 'error', url: null, error };
 		}
@@ -345,12 +348,12 @@ export class TunnelManager {
 	/**
 	 * An ngrok dev domain is fixed per account and cannot be rerolled, so a rejected one keeps
 	 * serving, but its URL is withheld: the state carries a warning instead of the URL and the
-	 * log shows it redacted.
+	 * log shows it redacted. A domain the user typed in is theirs to choose and is not screened.
 	 */
-	private consumeNgrokLines(lines: string[]): void {
+	private consumeNgrokLines(lines: string[], hostnameIsAssigned: boolean): void {
 		for (const line of lines) {
 			const parsed = new NgrokLogLine(line);
-			const message = TunnelHostnameScreen.redact(line);
+			const message = hostnameIsAssigned ? TunnelHostnameScreen.redact(line) : line;
 			this.onLog({ timestamp: Date.now(), level: parsed.level, message });
 
 			if (parsed.failure) {
@@ -363,7 +366,7 @@ export class TunnelManager {
 				continue;
 			}
 
-			if (!TunnelHostnameScreen.isAcceptable(url)) {
+			if (hostnameIsAssigned && !TunnelHostnameScreen.isAcceptable(url)) {
 				if (this.state.warning === 'offensive-hostname') {
 					continue;
 				}
@@ -372,7 +375,7 @@ export class TunnelManager {
 					timestamp: Date.now(),
 					level: 'warn',
 					message:
-						'Tunnel is running, but the hostname ngrok assigned was rejected by the word filter. It is hidden and will not be stored, copied or announced. Switch to the Quick tunnel for a different address.'
+						'Tunnel is running, but the hostname ngrok assigned was rejected by the word filter. It is hidden and will not be stored, copied or announced. Switch to the Quick tunnel or set your own ngrok domain.'
 				});
 				this.setState({ status: 'running', url: null, error: null, warning: 'offensive-hostname' });
 

@@ -12,8 +12,9 @@ const TOKEN = 'ungateUnitTestToken_0123456789';
 
 const mocks = vi.hoisted(() => {
 	return {
-		runtimeReadMock: vi.fn(() => ({
+		runtimeReadMock: vi.fn<() => { tunnelProvider: string; ngrokDomain: string | null; tunnel: { url: string | null } }>(() => ({
 			tunnelProvider: 'ngrok',
+			ngrokDomain: null,
 			tunnel: { url: null }
 		})),
 		spawnMock: vi.fn()
@@ -78,6 +79,7 @@ describe('ngrok tunnel', () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		mocks.spawnMock.mockReset();
+		mocks.runtimeReadMock.mockReturnValue({ tunnelProvider: 'ngrok', ngrokDomain: null, tunnel: { url: null } });
 	});
 
 	it('fails closed when the authtoken is missing', async () => {
@@ -193,6 +195,50 @@ describe('ngrok tunnel', () => {
 
 		expect(manager.getState()).toEqual({ status: 'running', url: 'https://acre-case-gibberish.ngrok-free.dev', error: null });
 		expect(logs.map((entry) => entry.message)).toContain('Tunnel URL: https://acre-case-gibberish.ngrok-free.dev');
+	});
+
+	it('passes a configured domain as --url and does not screen the name the user chose', async () => {
+		const child = new FakeProcess();
+
+		mocks.spawnMock.mockReturnValue(child);
+		mocks.runtimeReadMock.mockReturnValue({
+			tunnelProvider: 'ngrok',
+			ngrokDomain: 'Stupid-Api.Example.com',
+			tunnel: { url: null }
+		});
+		vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(true);
+
+		const { manager } = createManager(TOKEN);
+
+		await manager.start(47821);
+
+		expect(mocks.spawnMock).toHaveBeenCalledWith(
+			expect.stringMatching(/ngrok$/),
+			['http', '47821', '--url', 'https://stupid-api.example.com', '--log', 'stdout', '--log-format', 'json'],
+			expect.any(Object)
+		);
+
+		child.stdout.emit('data', Buffer.from('{"msg":"started tunnel","url":"https://stupid-api.ngrok.app"}\n'));
+
+		expect(manager.getState()).toEqual({ status: 'running', url: 'https://stupid-api.ngrok.app', error: null });
+	});
+
+	it('ignores a stored domain that is not a plain hostname', async () => {
+		const child = new FakeProcess();
+
+		mocks.spawnMock.mockReturnValue(child);
+		mocks.runtimeReadMock.mockReturnValue({
+			tunnelProvider: 'ngrok',
+			ngrokDomain: 'example.com --config /tmp/x',
+			tunnel: { url: null }
+		});
+		vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(true);
+
+		const { manager } = createManager(TOKEN);
+
+		await manager.start(47821);
+
+		expect(mocks.spawnMock.mock.calls[0][1]).toEqual(['http', '47821', '--log', 'stdout', '--log-format', 'json']);
 	});
 
 	it('reports a rejected authtoken as an error and never publishes the dashboard link as the tunnel url', async () => {

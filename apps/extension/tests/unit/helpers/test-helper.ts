@@ -34,6 +34,7 @@ export class TestHelper {
 				lastAppliedUrl: null
 			},
 			tunnelProvider: 'quick',
+			ngrokDomain: null,
 			clients,
 			commands: []
 		};

@@ -69,6 +69,8 @@ export const runtimeStateSchema = z.object({
 	autoTunnel: runtimeAutoTunnelStateSchema.default({ enabled: false, lastAppliedUrl: null }),
 	// State files written before ngrok existed have no `tunnelProvider`; quick keeps their rotating URL.
 	tunnelProvider: runtimeTunnelProviderSchema.default('quick'),
+	// Optional domain the user owns at ngrok, passed as `--url`. Null keeps the account's dev domain.
+	ngrokDomain: z.string().nullable().default(null),
 	clients: z.record(z.string(), runtimeClientEntrySchema),
 	commands: z.array(runtimeCommandSchema)
 });
