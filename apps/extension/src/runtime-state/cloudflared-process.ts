@@ -46,6 +46,26 @@ export class CloudflaredProcess {
 		}
 	}
 
+	/** Command line of one pid, or null when it has gone or the pid cannot be read. */
+	public static commandOf(pid: number): string | null {
+		if (!Number.isInteger(pid) || pid <= 0) {
+			return null;
+		}
+
+		return this.readCommand(pid);
+	}
+
+	/** True when `pid` is still cloudflared aimed at `port` (any IPv4 origin when `port` is null). */
+	public static isRunningCommand(pid: number, port: number | null): boolean {
+		const command = this.commandOf(pid);
+
+		if (!command) {
+			return false;
+		}
+
+		return this.servesApiPort(command, port);
+	}
+
 	private static listCommands(): ServingCloudflared[] {
 		if (process.platform === 'linux') {
 			return this.listLinuxCommands();
@@ -70,15 +90,11 @@ export class CloudflaredProcess {
 				continue;
 			}
 
-			try {
-				const command = fs.readFileSync(`/proc/${entry}/cmdline`).toString('utf8').replaceAll('\0', ' ').trim();
+			const command = this.readCommand(Number(entry));
 
-				if (command) {
-					const serving: ServingCloudflared = { pid: Number(entry), command };
-					commands.push(serving);
-				}
-			} catch {
-				// The process exited between readdir and read.
+			if (command) {
+				const serving: ServingCloudflared = { pid: Number(entry), command };
+				commands.push(serving);
 			}
 		}
 
@@ -106,5 +122,19 @@ export class CloudflaredProcess {
 		}
 
 		return commands;
+	}
+
+	private static readCommand(pid: number): string | null {
+		if (process.platform === 'linux') {
+			try {
+				const command = fs.readFileSync(`/proc/${pid}/cmdline`).toString('utf8').replaceAll('\0', ' ').trim();
+
+				return command || null;
+			} catch {
+				return null;
+			}
+		}
+
+		return this.listPsCommands().find((entry) => entry.pid === pid)?.command ?? null;
 	}
 }

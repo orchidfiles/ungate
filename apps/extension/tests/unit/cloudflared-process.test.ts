@@ -25,4 +25,12 @@ describe('CloudflaredProcess', () => {
 	it('ignores a tunnel still aimed at localhost', () => {
 		expect(CloudflaredProcess.servesApiPort('cloudflared tunnel --url http://localhost:47821', 47821)).toBe(false);
 	});
+
+	it('reads a live process command line and rejects a pid that is not cloudflared', () => {
+		const command = CloudflaredProcess.commandOf(process.pid);
+
+		expect(command && command.length > 0).toBe(true);
+		expect(CloudflaredProcess.isRunningCommand(process.pid, 47821)).toBe(false);
+		expect(CloudflaredProcess.commandOf(0)).toBeNull();
+	});
 });

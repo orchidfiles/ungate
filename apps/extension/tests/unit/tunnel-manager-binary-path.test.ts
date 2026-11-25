@@ -8,28 +8,33 @@ const mocks = vi.hoisted(() => {
 		existsSyncMock: vi.fn(),
 		renameSyncMock: vi.fn(),
 		useMock: vi.fn(),
-		quickMock: vi.fn(() => ({
-			on: vi.fn(),
-			stop: vi.fn()
-		})),
 		binExport: '/dev/cloudflared-package/bin/cloudflared',
-		runtimeReadMock: vi.fn<() => { clients: object; tunnelProvider: string; tunnel: { url: string | null } }>(() => ({
+		runtimeReadMock: vi.fn<
+			() => {
+				clients: object;
+				tunnelProvider: string;
+				tunnel: { url: string | null; pid: number | null; metricsPort: number | null };
+			}
+		>(() => ({
 			clients: {},
 			tunnelProvider: 'quick',
-			tunnel: { url: null }
+			tunnel: { url: null, pid: null, metricsPort: null }
 		})),
-		findServingCloudflaredMock: vi.fn<(port: number) => { pid: number; command: string } | null>(() => null)
+		isRunningCommandMock: vi.fn<(pid: number, port: number | null) => boolean>(() => false)
 	};
 });
 
 vi.mock('cloudflared', () => {
 	return {
 		bin: mocks.binExport,
-		use: mocks.useMock,
-		Tunnel: {
-			quick: mocks.quickMock
-		}
+		use: mocks.useMock
 	};
+});
+
+vi.mock('../../src/detached-cloudflared', async () => {
+	const { FakeDetachedCloudflared } = await import('./helpers/fake-detached-cloudflared');
+
+	return { DetachedCloudflared: FakeDetachedCloudflared };
 });
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -45,7 +50,7 @@ vi.mock('node:fs', async (importOriginal) => {
 vi.mock('../../src/runtime-state', () => {
 	return {
 		CloudflaredProcess: {
-			findServing: (port: number) => mocks.findServingCloudflaredMock(port)
+			isRunningCommand: (pid: number, port: number | null) => mocks.isRunningCommandMock(pid, port)
 		},
 		RuntimeStateStore: {
 			mutate: vi.fn((mutator: (state: unknown) => unknown) => Promise.resolve(mutator({ tunnel: {} }))),
@@ -57,6 +62,8 @@ vi.mock('../../src/runtime-state', () => {
 
 import { TunnelManager } from '../../src/tunnel-manager';
 import { CloudflaredInstaller } from '../../src/utils/cloudflared-installer';
+
+import { FakeDetachedCloudflared } from './helpers/fake-detached-cloudflared';
 
 function createManager(): TunnelManager {
 	return new TunnelManager(
@@ -73,10 +80,15 @@ describe('TunnelManager cloudflared binary path', () => {
 
 	afterEach(() => {
 		Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
-		mocks.findServingCloudflaredMock.mockReset();
-		mocks.findServingCloudflaredMock.mockReturnValue(null);
+		mocks.isRunningCommandMock.mockReset();
+		mocks.isRunningCommandMock.mockReturnValue(false);
+		FakeDetachedCloudflared.reset();
 		mocks.runtimeReadMock.mockReset();
-		mocks.runtimeReadMock.mockReturnValue({ clients: {}, tunnelProvider: 'quick', tunnel: { url: null } });
+		mocks.runtimeReadMock.mockReturnValue({
+			clients: {},
+			tunnelProvider: 'quick',
+			tunnel: { url: null, pid: null, metricsPort: null }
+		});
 		vi.clearAllMocks();
 		vi.restoreAllMocks();
 	});
@@ -154,14 +166,12 @@ describe('TunnelManager cloudflared binary path', () => {
 		Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
 		mocks.existsSyncMock.mockReturnValue(true);
-		mocks.findServingCloudflaredMock.mockReturnValue({
-			pid: 42,
-			command: 'cloudflared tunnel --url http://127.0.0.1:47821'
-		});
+		mocks.isRunningCommandMock.mockReturnValue(true);
+		FakeDetachedCloudflared.reportedHostname = 'kept.trycloudflare.com';
 		mocks.runtimeReadMock.mockReturnValue({
 			clients: {},
 			tunnelProvider: 'quick',
-			tunnel: { url: 'https://kept.trycloudflare.com' }
+			tunnel: { url: 'https://kept.trycloudflare.com', pid: 42, metricsPort: 45000 }
 		});
 
 		const manager = createManager();
@@ -173,10 +183,13 @@ describe('TunnelManager cloudflared binary path', () => {
 			url: 'https://kept.trycloudflare.com',
 			error: null
 		});
-		expect(mocks.quickMock).not.toHaveBeenCalled();
+		expect(FakeDetachedCloudflared.starts).toHaveLength(0);
+		expect(FakeDetachedCloudflared.attachments).toEqual([
+			expect.objectContaining({ pid: 42, metricsPort: 45000, originPort: 47821 })
+		]);
 	});
 
-	it('points the tunnel at IPv4 loopback', async () => {
+	it('points the tunnel at IPv4 loopback with an empty cloudflared config', async () => {
 		Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
 		mocks.existsSyncMock.mockReturnValue(true);
@@ -184,6 +197,25 @@ describe('TunnelManager cloudflared binary path', () => {
 
 		await createManager().start(47821);
 
-		expect(mocks.quickMock).toHaveBeenCalledWith('http://127.0.0.1:47821', expect.objectContaining({ '--edge-ip-version': '4' }));
+		expect(FakeDetachedCloudflared.starts[0]).toEqual(
+			expect.objectContaining({
+				binaryPath: mocks.binExport,
+				origin: 'http://127.0.0.1:47821',
+				originPort: 47821,
+				configArg: '/dev/null',
+				logPath: expect.stringMatching(/cloudflared\.log$/)
+			})
+		);
+	});
+
+	it('passes NUL as the cloudflared config on win32', async () => {
+		Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+		mocks.existsSyncMock.mockReturnValue(true);
+		vi.spyOn(CloudflaredInstaller, 'isPinnedInstall').mockReturnValue(true);
+
+		await createManager().start(47821);
+
+		expect(FakeDetachedCloudflared.starts[0]?.configArg).toBe('NUL');
 	});
 });

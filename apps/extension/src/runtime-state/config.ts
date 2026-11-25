@@ -8,7 +8,8 @@ export const config = {
 	paths: {
 		stateFilePath: path.join(baseDir, 'runtime-state.json'),
 		lockPath: path.join(baseDir, 'runtime-state.lock'),
-		sharedLogPath: path.join(baseDir, 'extension.log')
+		sharedLogPath: path.join(baseDir, 'extension.log'),
+		cloudflaredLogPath: path.join(baseDir, 'cloudflared.log')
 	},
 	runtimeState: {
 		// Max age for a client heartbeat before the window is considered stale.
@@ -41,7 +42,17 @@ export const config = {
 		// Quick tunnels requested in one start before giving up on a hostname that passes the word filter.
 		hostnameMaxAttempts: 5,
 		// Pause before asking Cloudflare for another quick tunnel; creation is rate-limited with HTTP 429.
-		hostnameRerollDelayMs: 2000
+		hostnameRerollDelayMs: 2000,
+		// Backoff after cloudflared exits before a URL, or after a running tunnel exits outside stop().
+		startRetryDelaysMs: [5000, 15000, 30000, 60000],
+		// Used once the sequence above is exhausted, and for any attempt whose log contains `status 429`.
+		startRetryLongDelayMs: 120000,
+		quickTunnelPollIntervalMs: 250,
+		logFollowIntervalMs: 250,
+		livenessIntervalMs: 1000,
+		quickTunnelReadyTimeoutMs: 30000,
+		quickTunnelProbeTimeoutMs: 1000,
+		quickTunnelAdoptAttempts: 5
 	},
 	extensionController: {
 		// Interval between heartbeat updates from the current window.

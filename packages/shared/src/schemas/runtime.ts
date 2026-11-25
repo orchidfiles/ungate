@@ -44,7 +44,10 @@ export const runtimeTunnelStateSchema = z.object({
 	lastError: z.string().nullable(),
 	ownerWindowId: z.string().nullable(),
 	// State files written before hostname screening have no `warning`.
-	warning: runtimeTunnelWarningSchema.nullable().default(null)
+	warning: runtimeTunnelWarningSchema.nullable().default(null),
+	// Detached cloudflared. Absent on state files written before the process was split from the extension host.
+	pid: z.number().nullable().default(null),
+	metricsPort: z.number().nullable().default(null)
 });
 
 export const runtimeKeyFixStateSchema = z.object({
