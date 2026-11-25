@@ -13,7 +13,8 @@ import {
 
 import { ProcessBridgeTransport, SocketBridgeTransport, type BridgeTransport } from './cursor-bridge-transport';
 
-const STATUS_TIMEOUT_MS = 3_000;
+// Session recovery can include three bounded, two-second desktop keyring calls.
+const STATUS_TIMEOUT_MS = 10_000;
 const MODELS_TIMEOUT_MS = 20_000;
 /** No event at all (not even `ready`) for this long ends the invocation. */
 const IDLE_TIMEOUT_MS = 120_000;

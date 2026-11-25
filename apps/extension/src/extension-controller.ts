@@ -21,6 +21,7 @@ import { BridgeSocket } from './cursor/bridge-socket';
 import { CursorBridge } from './cursor/cursor-bridge';
 import { CursorDiskSession } from './cursor/cursor-disk-session';
 import { CursorSession } from './cursor/cursor-session';
+import { CursorTokenDecryptor } from './cursor/cursor-token-decryptor';
 import { createStateDbItemReader } from './cursor/state-db-item-reader';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
@@ -254,11 +255,13 @@ export class ExtensionController {
 			return null;
 		}
 		const globalStorageDir = path.dirname(storageUri.fsPath);
+		const decryptor = new CursorTokenDecryptor();
 
 		return new CursorDiskSession({
 			stateDbPath: path.join(globalStorageDir, 'state.vscdb'),
 			storageJsonPath: path.join(globalStorageDir, 'storage.json'),
 			cursorVersion: this.cursorVersion(),
+			decryptToken: (value) => decryptor.decrypt(value),
 			readItem
 		});
 	}

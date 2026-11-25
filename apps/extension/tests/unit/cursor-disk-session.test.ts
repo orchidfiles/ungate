@@ -29,13 +29,14 @@ function jwt(expSeconds: number): string {
 const NOW = 1_794_300_000_000;
 const STORAGE = JSON.stringify({ 'telemetry.machineId': 'mid', 'telemetry.macMachineId': 'mac' });
 
-function disk(items: Record<string, string>, storage = STORAGE) {
+function disk(items: Record<string, string>, storage = STORAGE, decryptToken?: (value: string) => Promise<string | null>) {
 	const readItem = vi.fn((_db: string, key: string) => Promise.resolve(items[key] ?? null));
 	const session = new CursorDiskSession({
 		stateDbPath: '/db',
 		storageJsonPath: '/storage.json',
 		cursorVersion: '3.29.9',
 		readItem,
+		decryptToken,
 		now: () => NOW,
 		readFile: () => storage
 	});
@@ -61,6 +62,43 @@ describe('jwtExpiryMs', () => {
 });
 
 describe('CursorDiskSession', () => {
+	it('uses decrypted tokens in memory and clears them on sign-out', async () => {
+		const token = jwt(NOW / 1000 + 3600);
+		const items: Record<string, string> = { 'cursorAuth/accessToken': 'cursor-safe-storage:v1:encrypted' };
+		const decryptToken = vi.fn(() => Promise.resolve(token));
+		const { session } = disk(items, STORAGE, decryptToken);
+		await session.refresh();
+		expect(session.current()?.token).toBe(token);
+		expect(session.tokenEncrypted()).toBe(false);
+		delete items['cursorAuth/accessToken'];
+		await session.refresh(true);
+		expect(session.current()).toBeNull();
+		expect(decryptToken).toHaveBeenCalledOnce();
+	});
+
+	it('throttles unavailable keyring reads, deduplicates loads, and permits forced recovery', async () => {
+		const token = jwt(NOW / 1000 + 3600);
+		const decryptToken = vi.fn<() => Promise<string | null>>().mockResolvedValue(null);
+		const { session } = disk({ 'cursorAuth/accessToken': 'cursor-safe-storage:v1:encrypted' }, STORAGE, decryptToken);
+		await Promise.all([session.refresh(), session.refresh()]);
+		await session.refresh();
+		expect(decryptToken).toHaveBeenCalledOnce();
+		expect(session.tokenEncrypted()).toBe(true);
+		decryptToken.mockResolvedValue(token);
+		await session.refresh(true);
+		expect(session.current()?.token).toBe(token);
+		expect(session.tokenEncrypted()).toBe(false);
+	});
+
+	it('keeps the encrypted status when the decryptor rejects', async () => {
+		const { session } = disk({ 'cursorAuth/accessToken': 'cursor-safe-storage:v1:encrypted' }, STORAGE, () =>
+			Promise.reject(new Error('keyring'))
+		);
+		await session.refresh();
+		expect(session.current()).toBeNull();
+		expect(session.tokenEncrypted()).toBe(true);
+	});
+
 	it('loads a snapshot and builds IDE-shaped headers', async () => {
 		const token = jwt(NOW / 1000 + 3600);
 		const { session } = disk({

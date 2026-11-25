@@ -35,7 +35,8 @@ const reasonText: Record<CursorSessionStatus['reason'], string> = {
 	no_bridge: 'Unavailable: the API was not started by this Cursor window',
 	no_cursor_api: 'Unavailable: this editor does not expose a Cursor session',
 	not_signed_in: 'Not signed in to Cursor — inference remains blocked',
-	token_encrypted: 'Unavailable: this Cursor version encrypts its session token, which Ungate cannot read',
+	token_encrypted:
+		'Cannot unlock the encrypted Cursor session. On Linux, unlock your desktop keyring and install secret-tool (Secret Service) or busctl and kwallet-query (KWallet 6). Other backends are not supported yet.',
 	error: 'Could not read the Cursor session'
 };
 
@@ -176,9 +177,10 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 			<div
 				class="card preset-tonal-warning p-3 text-sm"
 				role="status">
-				This Cursor session is encrypted and no usable session API is available to Ungate. Retrying, signing in again, or
-				restarting the tunnel will not make this session readable. Use another configured provider in Ungate or Cursor’s native
-				models instead. Do not disable encryption or copy session tokens into Ungate.
+				This Cursor session is encrypted and Ungate could not unlock it. On Linux, unlock your desktop keyring and install
+				secret-tool (Secret Service) or busctl and kwallet-query (KWallet 6), then reconnect. Other platforms and keyring backends
+				are not supported yet; use another configured provider or Cursor’s native models. Do not disable encryption or copy
+				session tokens into Ungate.
 			</div>
 		{/if}
 

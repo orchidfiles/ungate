@@ -5,7 +5,7 @@ import { createConnection, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CursorBridgeClient } from 'src/proxy/cursor-bridge-client';
 import { SocketBridgeTransport, type BridgeTransport } from 'src/proxy/cursor-bridge-transport';
@@ -48,6 +48,34 @@ async function collect(stream: AsyncGenerator<CursorBridgeEventBody>, onEvent?: 
 const REQUEST = { modelId: 'grok', messages: [], tools: [] };
 
 describe('CursorBridgeClient', () => {
+	it('allows bounded keyring recovery before reporting bridge unavailability', async () => {
+		vi.useFakeTimers();
+		try {
+			const transport = new FakeTransport(({ id }, emit) => {
+				setTimeout(
+					() => emit({ id, kind: 'status', status: { available: true, connected: true, reason: 'ok', membershipType: null } }),
+					6_100
+				);
+			});
+			const status = new CursorBridgeClient(transport).status();
+			await vi.advanceTimersByTimeAsync(6_100);
+			await expect(status).resolves.toMatchObject({ connected: true, reason: 'ok' });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('still times out an unresponsive connected bridge', async () => {
+		vi.useFakeTimers();
+		try {
+			const status = new CursorBridgeClient(new FakeTransport()).status();
+			await vi.advanceTimersByTimeAsync(10_000);
+			await expect(status).resolves.toMatchObject({ available: false, reason: 'no_bridge' });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('reports unavailable while no extension is connected', async () => {
 		const transport = new FakeTransport();
 		transport.connected = false;

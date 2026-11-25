@@ -167,7 +167,7 @@ export class CursorBridge {
 			return {
 				kind: 'token_encrypted',
 				message:
-					'This Cursor session is encrypted and no usable session API is available to Ungate. Retrying or reconnecting the tunnel will not unlock it. Use another configured provider or Cursor’s native models.'
+					'The encrypted Cursor session could not be unlocked. On Linux, unlock your keyring and install secret-tool (Secret Service) or busctl and kwallet-query (KWallet 6). Other backends are not supported yet.'
 			};
 
 		return { kind: 'unavailable', message: 'Cursor provider is unavailable in this window' };

@@ -15,10 +15,7 @@ const KEYS = {
 	privacy: 'cursorai/donotchange/privacyMode'
 } as const;
 
-/**
- * Cursor 3.29+ wraps persisted tokens in Electron `safeStorage`. The key lives in the OS keychain,
- * reachable only from Cursor's main process, so such a value is never usable as a bearer token.
- */
+/** Cursor 3.29+ wraps persisted tokens in Electron safeStorage; ciphertext is never a bearer token. */
 const ENCRYPTED_PREFIX = 'cursor-safe-storage:';
 const SNAPSHOT_TTL_MS = 30_000;
 const EXPIRY_SKEW_MS = 60_000;
@@ -37,6 +34,7 @@ export interface CursorDiskSessionOptions {
 	storageJsonPath: string;
 	cursorVersion: string;
 	readItem: (dbPath: string, key: string) => Promise<string | null>;
+	decryptToken?: (value: string) => Promise<string | null>;
 	now?: () => number;
 	readFile?: (filePath: string) => string;
 }
@@ -90,7 +88,7 @@ function timezone(): string | undefined {
 
 export class CursorDiskSession {
 	private snapshot: CursorDiskSnapshot | null = null;
-	private readAt = 0;
+	private readAt: number | null = null;
 	private inFlight: Promise<void> | null = null;
 	private encrypted = false;
 	private readonly sessionId = createHash('sha256').update(randomUUID()).digest('hex').slice(0, 32);
@@ -119,7 +117,7 @@ export class CursorDiskSession {
 
 	/** Re-reads the files when the snapshot is stale (or always when `force`). Never throws. */
 	async refresh(force = false): Promise<void> {
-		if (!force && this.snapshot && this.now() - this.readAt < SNAPSHOT_TTL_MS) return;
+		if (!force && this.readAt !== null && this.now() - this.readAt < SNAPSHOT_TTL_MS) return;
 		this.inFlight ??= this.load().finally(() => {
 			this.inFlight = null;
 		});
@@ -150,15 +148,21 @@ export class CursorDiskSession {
 	private async load(): Promise<void> {
 		try {
 			const read = (key: string) => this.options.readItem(this.options.stateDbPath, key).catch(() => null);
-			const [token, membership, backendUrl, privacy] = await Promise.all([
+			const [storedToken, membership, backendUrl, privacy] = await Promise.all([
 				read(KEYS.token),
 				read(KEYS.membership),
 				read(KEYS.backendUrl),
 				read(KEYS.privacy)
 			]);
 			const ids = this.machineIds();
+			this.encrypted = storedToken?.startsWith(ENCRYPTED_PREFIX) ?? false;
+			let token = storedToken;
+			if (this.encrypted && storedToken) {
+				const decrypted = await this.options.decryptToken?.(storedToken).catch(() => null);
+				token = decrypted ?? null;
+			}
 			this.readAt = this.now();
-			this.encrypted = token?.startsWith(ENCRYPTED_PREFIX) ?? false;
+			this.encrypted = this.encrypted && (!token || token.startsWith(ENCRYPTED_PREFIX));
 			if (!token || this.encrypted || !ids) {
 				this.snapshot = null;
 

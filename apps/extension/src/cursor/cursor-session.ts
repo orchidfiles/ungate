@@ -82,8 +82,10 @@ export class CursorSession {
 	 * The disk snapshot is refreshed here too (it self-throttles).
 	 */
 	async ensureSignedIn(): Promise<boolean> {
+		if (this.apiToken()) return true;
 		await this.disk?.refresh();
 		if (this.isSignedIn()) return true;
+		if (this.disk?.tokenEncrypted()) return false;
 		const now = Date.now();
 		if (now - this.lastRecoveryAt < TOKEN_RECOVERY_INTERVAL_MS) return false;
 		this.lastRecoveryAt = now;
