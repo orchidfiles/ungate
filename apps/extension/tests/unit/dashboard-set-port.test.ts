@@ -4,7 +4,13 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TestHelper } from './helpers/test-helper';
 
+const createWebviewPanelMock = vi.fn();
 const executeCommandMock = vi.fn();
+const getConfigurationMock = vi.fn();
+const configurationUpdateMock = vi.fn();
+const configurationGetMock = vi.fn(() => undefined as string | undefined);
+const globalStateGetMock = vi.fn(() => undefined as string | undefined);
+const globalStateUpdateMock = vi.fn();
 const fileUriMock = vi.fn((value: string) => {
 	return { fsPath: value, toString: () => value };
 });
@@ -49,12 +55,20 @@ vi.mock('vscode', () => {
 	}
 
 	return {
-		window: {},
+		window: {
+			createWebviewPanel: createWebviewPanelMock
+		},
+		workspace: {
+			getConfiguration: getConfigurationMock
+		},
 		commands: {
 			executeCommand: executeCommandMock
 		},
 		ViewColumn: {
 			One: 1
+		},
+		ConfigurationTarget: {
+			Global: 1
 		},
 		Uri: {
 			file: fileUriMock
@@ -69,6 +83,10 @@ vi.mock('vscode', () => {
 });
 
 let Dashboard: typeof import('../../src/dashboard').Dashboard;
+
+function createPanel() {
+	return TestHelper.createDashboardPanel();
+}
 
 function createView() {
 	return {
@@ -86,6 +104,21 @@ function createView() {
 	};
 }
 
+function createExtensionContext(extensionMode = 1) {
+	return {
+		extensionMode,
+		extensionPath: '/tmp/ungate-extension',
+		globalState: {
+			get: globalStateGetMock,
+			update: globalStateUpdateMock
+		}
+	};
+}
+
+function createDashboard() {
+	return new Dashboard(createExtensionContext() as never, () => {});
+}
+
 describe('Dashboard.setPort', () => {
 	beforeAll(async () => {
 		const module = await import('../../src/dashboard');
@@ -93,7 +126,21 @@ describe('Dashboard.setPort', () => {
 	});
 
 	beforeEach(() => {
+		createWebviewPanelMock.mockReset();
 		executeCommandMock.mockReset();
+		getConfigurationMock.mockReset();
+		configurationUpdateMock.mockReset();
+		configurationUpdateMock.mockResolvedValue(undefined);
+		configurationGetMock.mockReset();
+		configurationGetMock.mockReturnValue(undefined);
+		globalStateGetMock.mockReset();
+		globalStateGetMock.mockReturnValue(undefined);
+		globalStateUpdateMock.mockReset();
+		globalStateUpdateMock.mockResolvedValue(undefined);
+		getConfigurationMock.mockReturnValue({
+			get: configurationGetMock,
+			update: configurationUpdateMock
+		});
 		fileUriMock.mockClear();
 		sharedLogs.api.length = 0;
 		sharedLogs.tunnel.length = 0;
@@ -103,45 +150,72 @@ describe('Dashboard.setPort', () => {
 		vi.mocked(fs.readFileSync).mockReturnValueOnce(
 			'<html><head><script type="module" crossorigin src="/assets/index.js"></script><link rel="stylesheet" crossorigin href="/assets/index.css"></head><body></body></html>'
 		);
-		const panel = createView();
-		const dashboard = new Dashboard(
-			{
-				extensionMode: 2,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
+		const view = createView();
+		const dashboard = new Dashboard(createExtensionContext(2) as never, () => {});
 
-		dashboard.resolveWebviewView(panel as never);
+		dashboard.resolveWebviewView(view as never);
 
-		expect(panel.webview.html).not.toContain('crossorigin');
-		expect(panel.webview.html).toContain('src="/tmp/ungate-extension/bundled/web/dist/assets/index.js"');
+		expect(view.webview.html).not.toContain('crossorigin');
+		expect(view.webview.html).toContain('src="/tmp/ungate-extension/bundled/web/dist/assets/index.js"');
 	});
 
-	it('focuses the panel view instead of an editor tab', () => {
-		const dashboard = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
+	it('opens an editor tab by default', () => {
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = createDashboard();
+
+		dashboard.show();
+
+		expect(createWebviewPanelMock).toHaveBeenCalledWith(
+			'ungate',
+			'Ungate',
+			1,
+			expect.objectContaining({
+				enableScripts: true,
+				portMapping: []
+			})
 		);
+		expect(executeCommandMock).not.toHaveBeenCalled();
+	});
+
+	it('focuses the panel view when dashboardPlacement is panel', () => {
+		globalStateGetMock.mockReturnValue('panel');
+		const dashboard = createDashboard();
+
+		dashboard.show();
+
+		expect(executeCommandMock).toHaveBeenCalledWith('ungate.dashboard.focus');
+		expect(createWebviewPanelMock).not.toHaveBeenCalled();
+	});
+
+	it('reads a legacy Cursor setting when globalState is empty', () => {
+		configurationGetMock.mockReturnValue('panel');
+		const dashboard = createDashboard();
 
 		dashboard.show();
 
 		expect(executeCommandMock).toHaveBeenCalledWith('ungate.dashboard.focus');
 	});
 
+	it('persists dashboard placement in globalState', async () => {
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = createDashboard();
+		dashboard.show();
+		panel.webview.postMessage.mockClear();
+
+		await dashboard.setPlacement('panel');
+
+		expect(globalStateUpdateMock).toHaveBeenCalledWith('dashboardPlacement', 'panel');
+		expect(configurationUpdateMock).toHaveBeenCalledWith('dashboardPlacement', undefined, 1);
+		expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: 'dashboard-placement-state', placement: 'panel' });
+	});
+
 	it('does not rebuild the webview when the port did not change', () => {
-		const panel = createView();
-		const dashboard = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
-		dashboard.resolveWebviewView(panel as never);
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = createDashboard();
+		dashboard.show();
 
 		const rebuildSpy = vi.spyOn(dashboard as unknown as { rebuildHtml(): void }, 'rebuildHtml');
 
@@ -156,15 +230,10 @@ describe('Dashboard.setPort', () => {
 	});
 
 	it('sends the current port to the webview during initial state sync', () => {
-		const panel = createView();
-		const dashboard = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
-		dashboard.resolveWebviewView(panel as never);
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = createDashboard();
+		dashboard.show();
 		dashboard.setPort(4783);
 		panel.webview.postMessage.mockClear();
 
@@ -173,20 +242,18 @@ describe('Dashboard.setPort', () => {
 		expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: 'port', port: 4783 });
 	});
 
-	it('maps the api port into the webview when the panel opens', () => {
-		const panel = createView();
-		const dashboard = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
+	it('maps the api port into the webview when the editor tab opens', () => {
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = createDashboard();
 		dashboard.setPort(4783);
 
-		dashboard.resolveWebviewView(panel as never);
+		dashboard.show();
 
-		expect(panel.webview.options).toEqual(
+		expect(createWebviewPanelMock).toHaveBeenCalledWith(
+			'ungate',
+			'Ungate',
+			1,
 			expect.objectContaining({
 				enableScripts: true,
 				portMapping: [{ webviewPort: 4783, extensionHostPort: 4783 }]
@@ -194,32 +261,22 @@ describe('Dashboard.setPort', () => {
 		);
 	});
 
-	it('opens the panel without a port mapping while the api port is unknown', () => {
-		const panel = createView();
-		const dashboard = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
+	it('opens the editor tab without a port mapping while the api port is unknown', () => {
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = createDashboard();
 
-		dashboard.resolveWebviewView(panel as never);
+		dashboard.show();
 
-		expect(panel.webview.options).toEqual(expect.objectContaining({ portMapping: [] }));
+		expect(createWebviewPanelMock).toHaveBeenCalledWith('ungate', 'Ungate', 1, expect.objectContaining({ portMapping: [] }));
 	});
 
-	it('updates the port mapping of an open panel when the api port changes', () => {
-		const panel = createView();
-		const dashboard = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
+	it('updates the port mapping of an open editor tab when the api port changes', () => {
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = createDashboard();
 		dashboard.setPort(4783);
-		dashboard.resolveWebviewView(panel as never);
+		dashboard.show();
 
 		dashboard.setPort(4790);
 
@@ -232,24 +289,30 @@ describe('Dashboard.setPort', () => {
 		expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: 'port', port: 4790 });
 	});
 
+	it('updates the port mapping of an open panel view when the api port changes', () => {
+		const view = createView();
+		const dashboard = createDashboard();
+		dashboard.setPort(4783);
+		dashboard.resolveWebviewView(view as never);
+
+		dashboard.setPort(4790);
+
+		expect(view.webview.options).toEqual(
+			expect.objectContaining({
+				enableScripts: true,
+				portMapping: [{ webviewPort: 4790, extensionHostPort: 4790 }]
+			})
+		);
+		expect(view.webview.postMessage).toHaveBeenCalledWith({ type: 'port', port: 4790 });
+	});
+
 	it('reads shared api logs during initial state sync', () => {
-		const panel = createView();
-		const dashboardA = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
-		const dashboardB = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboardA = createDashboard();
+		const dashboardB = createDashboard();
 		dashboardA.pushLog('api', { timestamp: 1, level: 'info', message: 'started elsewhere' });
-		dashboardB.resolveWebviewView(panel as never);
+		dashboardB.show();
 		panel.webview.postMessage.mockClear();
 
 		dashboardB.sendInitialState({ status: 'stopped', url: null, error: null });

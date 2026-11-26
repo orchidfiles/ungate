@@ -5,6 +5,7 @@ import {
 	DEFAULT_KEY_FIX_ENABLED,
 	sleep,
 	type ApiStatus as ApiLifecycleStatus,
+	type DashboardPlacement,
 	type RuntimeCommandAction,
 	type RuntimeState,
 	type TunnelState
@@ -367,6 +368,7 @@ export class ExtensionController {
 			this.dashboard.sendInitialState(this.tunnelManager.getState());
 			this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
 			this.dashboard.sendAutoTunnelState(this.autoTunnel.isEnabled());
+			this.dashboard.sendPlacementState();
 
 			return;
 		}
@@ -407,9 +409,24 @@ export class ExtensionController {
 			return;
 		}
 
+		if (message.type === 'set-dashboard-placement') {
+			void this.setDashboardPlacementByUser(message.placement);
+
+			return;
+		}
+
 		if (message.type === 'clear-logs') {
 			this.dashboard.clearLogs(message.source);
 			this.enqueueCommand('clear-logs', { logSource: message.source });
+		}
+	}
+
+	private async setDashboardPlacementByUser(placement: DashboardPlacement): Promise<void> {
+		try {
+			await this.dashboard.setPlacement(placement);
+		} catch (error: unknown) {
+			void vscode.window.showErrorMessage(`Could not change dashboard placement: ${this.formatError(error)}`);
+			this.dashboard.sendPlacementState();
 		}
 	}
 
