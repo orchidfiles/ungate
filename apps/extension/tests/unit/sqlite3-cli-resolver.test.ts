@@ -29,6 +29,7 @@ vi.mock('node:fs', async (importOriginal) => {
 
 import { Sqlite3CliResolver } from '../../src/utils/sqlite3-cli-resolver';
 import { InstallStamp, VerifiedArtifact, type PinnedArtifact } from '../../src/utils/verified-artifact';
+import { ZipExtractor } from '../../src/utils/zip-extractor';
 
 const LINUX_X64_SHA256 = '9043648ac1186308c212c82d32327f0f1351fdf9dfb56a2a58bcf9bc947e3f90';
 const LINUX_X64_URL = 'https://www.sqlite.org/2024/sqlite-tools-linux-x64-3470200.zip';
@@ -149,21 +150,13 @@ describe('Sqlite3CliResolver', () => {
 
 			return value.startsWith(os.tmpdir()) && value.endsWith(`${path.sep}sqlite3`);
 		});
-		mocks.execFileMock.mockImplementation(
-			(command: string, args: string[], callback: (error: Error | null, result?: { stdout: string }) => void) => {
-				if (command === 'unzip') {
-					const destDir = args[args.indexOf('-d') + 1];
+		mockEmptyPath();
+		vi.spyOn(ZipExtractor, 'extract').mockImplementation((_zipPath, destDir) => {
+			fs.mkdirSync(destDir, { recursive: true });
+			fs.writeFileSync(path.join(destDir, 'sqlite3'), '');
 
-					fs.mkdirSync(destDir, { recursive: true });
-					fs.writeFileSync(path.join(destDir, 'sqlite3'), '');
-					callback(null);
-
-					return;
-				}
-
-				callback(new Error(`not found: ${command}`));
-			}
-		);
+			return Promise.resolve();
+		});
 
 		const downloadSpy = vi
 			.spyOn(VerifiedArtifact, 'download')
