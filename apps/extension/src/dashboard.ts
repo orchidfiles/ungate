@@ -17,6 +17,8 @@ export type Msg =
 	| { type: 'open-external-url'; url: string }
 	| { type: 'set-key-fix-enabled'; enabled: boolean }
 	| { type: 'set-auto-tunnel-enabled'; enabled: boolean }
+	| { type: 'set-tunnel-provider'; provider: 'quick' | 'ngrok' }
+	| { type: 'set-ngrok-auth-token'; token: string }
 	| { type: 'set-dashboard-placement'; placement: DashboardPlacement }
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' }
 	| Extract<WebviewToExtension, { type: (typeof MSGS_SIMPLE)[number] }>;
@@ -159,6 +161,10 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		this.postToWebviews({ type: 'tunnel-status', state });
 	}
 
+	sendTunnelConfig(provider: 'quick' | 'ngrok', tokenSet: boolean): void {
+		this.postToWebviews({ type: 'tunnel-config', provider, tokenSet });
+	}
+
 	isOpen(): boolean {
 		return this.panel !== null || this.view !== null;
 	}
@@ -232,6 +238,26 @@ export class Dashboard implements vscode.WebviewViewProvider {
 			}
 
 			return { type, enabled };
+		}
+
+		if (type === 'set-tunnel-provider') {
+			const provider = record.provider;
+
+			if (provider !== 'quick' && provider !== 'ngrok') {
+				return null;
+			}
+
+			return { type: 'set-tunnel-provider', provider };
+		}
+
+		if (type === 'set-ngrok-auth-token') {
+			const token = record.token;
+
+			if (typeof token !== 'string' || token.trim().length === 0) {
+				return null;
+			}
+
+			return { type: 'set-ngrok-auth-token', token: token.trim() };
 		}
 
 		if (type === 'set-dashboard-placement') {

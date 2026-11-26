@@ -13,8 +13,9 @@ const mocks = vi.hoisted(() => {
 			stop: vi.fn()
 		})),
 		binExport: '/dev/cloudflared-package/bin/cloudflared',
-		runtimeReadMock: vi.fn<() => { clients: object; tunnel: { url: string | null } }>(() => ({
+		runtimeReadMock: vi.fn<() => { clients: object; tunnelProvider: string; tunnel: { url: string | null } }>(() => ({
 			clients: {},
+			tunnelProvider: 'quick',
 			tunnel: { url: null }
 		})),
 		findServingCloudflaredMock: vi.fn<(port: number) => { pid: number; command: string } | null>(() => null)
@@ -75,7 +76,7 @@ describe('TunnelManager cloudflared binary path', () => {
 		mocks.findServingCloudflaredMock.mockReset();
 		mocks.findServingCloudflaredMock.mockReturnValue(null);
 		mocks.runtimeReadMock.mockReset();
-		mocks.runtimeReadMock.mockReturnValue({ clients: {}, tunnel: { url: null } });
+		mocks.runtimeReadMock.mockReturnValue({ clients: {}, tunnelProvider: 'quick', tunnel: { url: null } });
 		vi.clearAllMocks();
 		vi.restoreAllMocks();
 	});
@@ -159,6 +160,7 @@ describe('TunnelManager cloudflared binary path', () => {
 		});
 		mocks.runtimeReadMock.mockReturnValue({
 			clients: {},
+			tunnelProvider: 'quick',
 			tunnel: { url: 'https://kept.trycloudflare.com' }
 		});
 

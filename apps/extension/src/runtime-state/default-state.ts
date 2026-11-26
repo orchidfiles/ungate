@@ -28,6 +28,7 @@ export class RuntimeStateDefaults {
 				enabled: DEFAULT_AUTO_TUNNEL_ENABLED,
 				lastAppliedUrl: null
 			},
+			tunnelProvider: 'quick',
 			clients: {},
 			commands: []
 		};

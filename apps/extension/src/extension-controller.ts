@@ -17,6 +17,7 @@ import { AutoTunnel } from './auto-tunnel';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar } from './extension-status-bar';
+import { NgrokTokenStore } from './ngrok-token-store';
 import { OpenAiKeyFix } from './openai-key-fix';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
@@ -32,6 +33,7 @@ export class ExtensionController {
 	private apiServer!: ApiServer;
 	private keyFix!: OpenAiKeyFix;
 	private autoTunnel!: AutoTunnel;
+	private ngrokToken!: NgrokTokenStore;
 	private currentPort: number | null = null;
 	private lastApiStatus: ApiLifecycleStatus | null = null;
 	private currentTunnelState: TunnelState = { status: 'stopped', url: null, error: null };
@@ -54,6 +56,7 @@ export class ExtensionController {
 		this.statusBar.command = extensionCommands.openDashboard;
 		this.context.subscriptions.push(this.statusBar);
 
+		this.ngrokToken = new NgrokTokenStore(this.context.secrets);
 		this.dashboard = new Dashboard(this.context, (message) => {
 			this.handleDashboardMessage(message);
 		});
@@ -110,7 +113,8 @@ export class ExtensionController {
 			(entry) => {
 				this.log(`[tunnel] ${entry.message}`);
 				this.dashboard.pushLog('tunnel', entry);
-			}
+			},
+			this.ngrokToken
 		);
 
 		this.apiServer = new ApiServer(this.context, {
@@ -368,7 +372,20 @@ export class ExtensionController {
 			this.dashboard.sendInitialState(this.tunnelManager.getState());
 			this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
 			this.dashboard.sendAutoTunnelState(this.autoTunnel.isEnabled());
+			void this.sendTunnelConfig();
 			this.dashboard.sendPlacementState();
+
+			return;
+		}
+
+		if (message.type === 'set-tunnel-provider') {
+			void this.setTunnelProviderByUser(message.provider);
+
+			return;
+		}
+
+		if (message.type === 'set-ngrok-auth-token') {
+			void this.setNgrokAuthTokenByUser(message.token);
 
 			return;
 		}
@@ -486,6 +503,34 @@ export class ExtensionController {
 		});
 	}
 
+	private async sendTunnelConfig(runtimeState: RuntimeState = RuntimeStateStore.read()): Promise<void> {
+		this.dashboard.sendTunnelConfig(runtimeState.tunnelProvider, await this.ngrokToken.isSet());
+	}
+
+	private async setTunnelProviderByUser(provider: RuntimeState['tunnelProvider']): Promise<void> {
+		try {
+			await RuntimeStateStore.mutate((current) => {
+				current.tunnelProvider = provider;
+
+				return current;
+			});
+		} catch (error: unknown) {
+			void vscode.window.showErrorMessage(`Could not change the tunnel provider: ${this.formatError(error)}`);
+		}
+
+		await this.sendTunnelConfig();
+	}
+
+	private async setNgrokAuthTokenByUser(token: string): Promise<void> {
+		try {
+			await this.ngrokToken.save(token);
+		} catch (error: unknown) {
+			void vscode.window.showErrorMessage(`Could not save the ngrok authtoken: ${this.formatError(error)}`);
+		}
+
+		await this.sendTunnelConfig();
+	}
+
 	private handleDashboardRestartTunnel(): void {
 		if (!this.currentPort) {
 			return;
@@ -571,6 +616,7 @@ export class ExtensionController {
 		this.dashboard.sendTunnelState(this.currentTunnelState);
 		this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
 		this.dashboard.sendAutoTunnelState(runtimeState.autoTunnel.enabled);
+		void this.sendTunnelConfig(runtimeState);
 		this.updateStatusBar();
 	}
 
