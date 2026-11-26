@@ -131,7 +131,7 @@ User entry point. Manages the API server and tunnel lifecycle.
 - `extension-controller.ts` — main controller: manages API server, tunnel, WebView dashboard, OpenAI Key Fix, heartbeat, runtime state sync
 - `api-server.ts` — start/stop Node.js API as child process. Production: `cp.spawn(runtime, ['bundle/main.cjs'])`. Dev: `cp.spawn('node', ['-r', 'source-map-support/register', 'dist/main.js'])`. Port detected from stdout via `localhost:(\d+)` regex
 - `tunnel-manager.ts` — Cloudflare tunnel (cloudflared) management. Quick tunnel only, no named tunnel config (avoids 404 conflicts). Not auto-started, only on explicit user action. Auto-restarts on port change if already running
-- `dashboard.ts` — WebView dashboard (Svelte UI). Opens as an editor tab by default; placement (`editor` | `panel`) is chosen in the dashboard tunnel panel and stored in `ExtensionContext.globalState`. Also registers a bottom-panel webview view. Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__`. Handshake: frontend sends `webview-ready` before extension sends initial state
+- `dashboard.ts` — WebView dashboard (Svelte UI). Opens as an editor tab by default; placement (`editor` | `panel`) is chosen on the dashboard Settings page and stored in `ExtensionContext.globalState`. Also registers a bottom-panel webview view. Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__`. Handshake: frontend sends `webview-ready` before extension sends initial state
 - `extension-status-bar.ts` — status bar (API + tunnel state)
 - `extension-commands.ts` — command registration (openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix)
 - `auto-tunnel.ts` — opt-in auto-start of the tunnel and per-URL "paste this base URL" assist (see Auto tunnel below)
@@ -159,7 +159,7 @@ Dashboard for managing providers, tunnel, and all user-facing Ungate settings. T
 - `src/shared/api.ts` — HTTP client to API
 - `src/shared/vscode.ts` — `acquireVsCodeApi()` singleton
 - `src/features/settings/` — settings and providers (settings-store, settings-ui-store, provider-store)
-- `src/features/tunnel/` — tunnel management and extension-hosted toggles (auto tunnel, key fix, dashboard placement) via `tunnel-store`
+- `src/features/tunnel/` — tunnel management and extension-hosted toggles (auto tunnel, key fix) via `tunnel-store`; dashboard placement lives on the Settings page and uses the same store
 - `src/features/analytics/` — request statistics (analytics-store)
 - `src/features/logs/` — log viewer (logs-store)
 

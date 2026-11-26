@@ -46,17 +46,6 @@ function handleAutoTunnelChange(event: Event): void {
 	const target = event.currentTarget as HTMLInputElement;
 	store.setAutoTunnelEnabled(target.checked);
 }
-
-function handleDashboardPlacementChange(event: Event): void {
-	const target = event.currentTarget as HTMLSelectElement;
-	const value = target.value;
-
-	if (value !== 'editor' && value !== 'panel') {
-		return;
-	}
-
-	store.setDashboardPlacement(value);
-}
 </script>
 
 <div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
@@ -159,22 +148,6 @@ function handleDashboardPlacementChange(event: Event): void {
 		<p class="text-xs text-surface-400">
 			If Cursor turns off OpenAI API Key on its own, Ungate will turn it back on automatically. When you turn this off, Ungate
 			stops watching this setting and also turns OpenAI API Key off in Cursor.
-		</p>
-	</div>
-
-	<div class="card preset-tonal-surface border border-surface-700/30 p-3 space-y-2">
-		<div class="flex items-center gap-3">
-			<span class="text-sm leading-5">Open dashboard as</span>
-			<select
-				class="select w-fit text-sm border border-surface-700/30"
-				value={store.dashboardPlacement}
-				onchange={handleDashboardPlacementChange}>
-				<option value="editor">Editor tab</option>
-				<option value="panel">Bottom panel</option>
-			</select>
-		</div>
-		<p class="text-xs text-surface-400">
-			Bottom panel stays available in Agent layout when the editor is hidden. Takes effect the next time you open the dashboard.
 		</p>
 	</div>
 </div>
