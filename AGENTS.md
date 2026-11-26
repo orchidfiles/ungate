@@ -15,6 +15,15 @@ Prefer OOP with classes over standalone pure functions.
 - Do not add module-level helper functions (`function foo`, `export function bar`). Exceptions: VS Code `activate` / `deactivate` entrypoints.
 - Prefer self-documenting names and structure over comments.
 
+## User settings
+
+All user-facing Ungate settings belong in the dashboard UI (`apps/web`), not in VS Code / Cursor Settings.
+
+- Add or change a setting only when it is controllable from the dashboard (Settings page / tunnel panel / related webview controls).
+- Do not introduce settings that exist only under `contributes.configuration` or that users must find in Cursor/VS Code Settings.
+- Storage may use `ExtensionContext.globalState`, the runtime state file, or the API SQLite settings — that is an implementation detail. Do not add `contributes.configuration` entries for Ungate prefs. The control surface for the user is the dashboard.
+- Commands and the status bar may mirror toggles that already exist in the dashboard; they are shortcuts, not a separate settings home.
+
 ## Monorepo (pnpm workspace)
 
 ```
@@ -114,6 +123,10 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 **Auth (`src/auth/`):**
 - OAuth PKCE flow for Anthropic: `startLogin()` generates verifier/challenge, `completeLogin()` exchanges code for tokens. Manual `CODE#STATE` entry required (Anthropic rejects localhost redirect_uri for claude.ai OAuth).
 
+## Packaging copies
+
+`scripts/build-package/run.sh` overwrites `apps/extension/CHANGELOG.md`, `apps/extension/README.md`, and `apps/extension/LICENSE` from the repo root. Edit only the root files (`CHANGELOG.md`, `README.md`, `LICENSE`); do not change the copies under `apps/extension/`.
+
 ## apps/extension — VS Code extension
 
 User entry point. Manages the API server and tunnel lifecycle.
@@ -122,7 +135,7 @@ User entry point. Manages the API server and tunnel lifecycle.
 - `extension-controller.ts` — main controller: manages API server, tunnel, WebView dashboard, OpenAI Key Fix, heartbeat, runtime state sync
 - `api-server.ts` — start/stop Node.js API as child process. Production: `cp.spawn(runtime, ['bundle/main.cjs'])`. Dev: `cp.spawn('node', ['-r', 'source-map-support/register', 'dist/main.js'])`. Port detected from stdout via `localhost:(\d+)` regex
 - `tunnel-manager.ts` — tunnel management. Default is a Cloudflare quick tunnel, no named tunnel config (avoids 404 conflicts). Optional `ngrok` mode runs the pinned ngrok binary with an authtoken from VS Code Secret Storage and keeps the account's dev-domain URL across restarts and port changes. Not auto-started, only on explicit user action. Auto-restarts on port change if already running
-- `dashboard.ts` — WebView dashboard (Svelte UI). Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__`. Handshake: frontend sends `webview-ready` before extension sends initial state
+- `dashboard.ts` — WebView dashboard (Svelte UI). Opens as an editor tab by default; placement (`editor` | `panel`) is chosen on the dashboard Settings page and stored in `ExtensionContext.globalState`. Also registers a bottom-panel webview view. Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__`. Handshake: frontend sends `webview-ready` before extension sends initial state
 - `ngrok-log-line.ts` — `NgrokLogLine`, one line of real ngrok output: tunnel URL, log level, failure code and reason (see ngrok output below); `ngrok-output-lines.ts` — `NgrokOutputLines`, reassembles lines split across stream chunks
 - `ngrok-token-store.ts` — `NgrokTokenStore` over VS Code Secret Storage; a stored value that `NgrokAuthToken.normalize` rejects reads as not set
 - `extension-status-bar.ts` — status bar (API + tunnel state)
@@ -146,13 +159,13 @@ User entry point. Manages the API server and tunnel lifecycle.
 
 ## apps/web — Svelte Web UI
 
-Dashboard for managing providers, tunnel, settings.
+Dashboard for managing providers, tunnel, and all user-facing Ungate settings. This is the settings UI; do not rely on Cursor/VS Code Settings for Ungate options.
 
 - Svelte 5 (runes), SvelteKit-like structure
 - `src/shared/api.ts` — HTTP client to API
 - `src/shared/vscode.ts` — `acquireVsCodeApi()` singleton
 - `src/features/settings/` — settings and providers (settings-store, settings-ui-store, provider-store)
-- `src/features/tunnel/` — tunnel management (tunnel-store)
+- `src/features/tunnel/` — tunnel management and extension-hosted toggles (auto tunnel, key fix) via `tunnel-store`; dashboard placement lives on the Settings page and uses the same store
 - `src/features/analytics/` — request statistics (analytics-store)
 - `src/features/logs/` — log viewer (logs-store)
 

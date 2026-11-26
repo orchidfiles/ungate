@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.16 - 2026-11-26
+
+- Open the dashboard as a panel view so it stays visible when Cursor's chat is maximized
+- Add dashboard placement setting: editor tab (default) or bottom panel
+- Add an opt-in auto tunnel toggle that starts the quick tunnel with the API and helps paste the Base URL into Cursor
+- Advertise Claude Code 2.1.322 as the latest version and send Opus 5.5 requests the way Claude Code does
+- Pass Cursor's dynamic tools (`CallDynamicTool` / `GetDynamicTools`) through to Claude instead of dropping them
+- Restart the API after a crash and keep a still-running tunnel's URL instead of starting a second one
+- Fix cloudflared port matching so a nearby port no longer steals an existing tunnel
+- Fix the local API connection over IPv4 when `localhost` resolves to `::1`
+- Reject duplicate model IDs with a 400 instead of a 500
+
 ## 1.7.15 - 2026-11-13
 
 - Show Claude thinking summaries in Cursor while the model works

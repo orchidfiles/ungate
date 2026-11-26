@@ -1,6 +1,8 @@
 import {
 	DEFAULT_AUTO_TUNNEL_ENABLED,
+	DEFAULT_DASHBOARD_PLACEMENT,
 	DEFAULT_KEY_FIX_ENABLED,
+	type DashboardPlacement,
 	type ExtensionToWebview,
 	type TunnelProvider,
 	type TunnelState
@@ -14,6 +16,7 @@ interface TunnelStore {
 	readonly autoTunnelEnabled: boolean;
 	readonly provider: TunnelProvider;
 	readonly tokenSet: boolean;
+	readonly dashboardPlacement: DashboardPlacement;
 	startTunnel(): void;
 	stopTunnel(): void;
 	restartTunnel(): void;
@@ -21,6 +24,7 @@ interface TunnelStore {
 	setAutoTunnelEnabled(enabled: boolean): void;
 	setProvider(provider: TunnelProvider): void;
 	setNgrokAuthToken(token: string): void;
+	setDashboardPlacement(placement: DashboardPlacement): void;
 }
 
 const defaultState: TunnelState = { status: 'stopped', url: null, error: null };
@@ -30,6 +34,7 @@ let keyFixEnabled = $state(DEFAULT_KEY_FIX_ENABLED);
 let autoTunnelEnabled = $state(DEFAULT_AUTO_TUNNEL_ENABLED);
 let provider = $state<TunnelProvider>('quick');
 let tokenSet = $state(false);
+let dashboardPlacement = $state<DashboardPlacement>(DEFAULT_DASHBOARD_PLACEMENT);
 
 function handleMessage(event: MessageEvent): void {
 	const message = event.data as ExtensionToWebview;
@@ -49,6 +54,10 @@ function handleMessage(event: MessageEvent): void {
 	if (message.type === 'tunnel-config') {
 		provider = message.provider;
 		tokenSet = message.tokenSet;
+	}
+
+	if (message.type === 'dashboard-placement-state') {
+		dashboardPlacement = message.placement;
 	}
 }
 
@@ -83,6 +92,11 @@ function setNgrokAuthToken(token: string): void {
 	postExtensionMessage({ type: 'set-ngrok-auth-token', token });
 }
 
+function setDashboardPlacement(placement: DashboardPlacement): void {
+	dashboardPlacement = placement;
+	postExtensionMessage({ type: 'set-dashboard-placement', placement });
+}
+
 export function getTunnelStore(): TunnelStore {
 	const store: TunnelStore = {
 		get tunnel() {
@@ -100,13 +114,17 @@ export function getTunnelStore(): TunnelStore {
 		get tokenSet() {
 			return tokenSet;
 		},
+		get dashboardPlacement() {
+			return dashboardPlacement;
+		},
 		startTunnel,
 		stopTunnel,
 		restartTunnel,
 		setKeyFixEnabled,
 		setAutoTunnelEnabled,
 		setProvider,
-		setNgrokAuthToken
+		setNgrokAuthToken,
+		setDashboardPlacement
 	};
 
 	return store;
