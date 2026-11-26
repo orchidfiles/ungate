@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import { SharedLogStore } from './runtime-state/shared-log-store';
 import { LogRingBuffer } from './utils/log-ring-buffer';
 
-import type { LogEntry, TunnelState, WebviewToExtension } from '@ungate/shared/frontend';
+import type { DashboardPlacement, LogEntry, TunnelState, WebviewToExtension } from '@ungate/shared/frontend';
 
 const LOG_BUFFER_SIZE = 500;
 const LOG_POLL_INTERVAL_MS = 500;
@@ -17,12 +17,17 @@ export type Msg =
 	| { type: 'open-external-url'; url: string }
 	| { type: 'set-key-fix-enabled'; enabled: boolean }
 	| { type: 'set-auto-tunnel-enabled'; enabled: boolean }
+	| { type: 'set-dashboard-placement'; placement: DashboardPlacement }
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' }
 	| Extract<WebviewToExtension, { type: (typeof MSGS_SIMPLE)[number] }>;
 
 const DASHBOARD_VIEW_ID = 'ungate.dashboard';
+const DASHBOARD_PLACEMENT_STATE_KEY = 'dashboardPlacement';
+const LEGACY_DASHBOARD_PLACEMENT_SECTION = 'ungate';
+const LEGACY_DASHBOARD_PLACEMENT_SETTING = 'dashboardPlacement';
 
 export class Dashboard implements vscode.WebviewViewProvider {
+	private panel: vscode.WebviewPanel | null = null;
 	private view: vscode.WebviewView | null = null;
 	private readonly apiLogBuffer = new LogRingBuffer(LOG_BUFFER_SIZE);
 	private readonly tunnelLogBuffer = new LogRingBuffer(LOG_BUFFER_SIZE);
@@ -37,21 +42,10 @@ export class Dashboard implements vscode.WebviewViewProvider {
 	) {}
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
-		this.stopLogPoll();
 		this.view = webviewView;
 		webviewView.webview.options = this.getWebviewOptions();
-
-		webviewView.webview.onDidReceiveMessage((message: unknown) => {
-			const parsed = Dashboard.parseIncomingMessage(message);
-
-			if (!parsed) {
-				return;
-			}
-
-			this.onMessage(parsed);
-		});
-
-		webviewView.webview.html = this.buildHtml();
+		this.bindWebview(webviewView.webview);
+		webviewView.webview.html = this.buildHtml(webviewView.webview);
 
 		webviewView.onDidChangeVisibility(() => {
 			if (webviewView.visible) {
@@ -61,17 +55,49 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		});
 
 		webviewView.onDidDispose(() => {
-			this.stopLogPoll();
 			this.view = null;
+			this.maybeStopLogPoll();
 		});
 
-		this.startLogPoll();
+		this.ensureLogPoll();
 	}
 
 	show(): void {
-		// The agent layout hides the editor while chat is maximized, so an editor tab never appears.
-		// Focusing the panel view opens the panel even when that editor area is hidden.
-		void vscode.commands.executeCommand(`${DASHBOARD_VIEW_ID}.focus`);
+		if (this.getPlacement() === 'panel') {
+			// The agent layout hides the editor while chat is maximized, so an editor tab never appears.
+			// Focusing the panel view opens the panel even when that editor area is hidden.
+			void vscode.commands.executeCommand(`${DASHBOARD_VIEW_ID}.focus`);
+
+			return;
+		}
+
+		this.showEditorTab();
+	}
+
+	getPlacement(): DashboardPlacement {
+		const stored = this.context.globalState.get<string>(DASHBOARD_PLACEMENT_STATE_KEY);
+
+		if (stored === 'panel' || stored === 'editor') {
+			return stored;
+		}
+
+		const legacy = vscode.workspace
+			.getConfiguration(LEGACY_DASHBOARD_PLACEMENT_SECTION)
+			.get<string>(LEGACY_DASHBOARD_PLACEMENT_SETTING);
+
+		if (legacy === 'panel') {
+			return 'panel';
+		}
+
+		return 'editor';
+	}
+
+	async setPlacement(placement: DashboardPlacement): Promise<void> {
+		await this.context.globalState.update(DASHBOARD_PLACEMENT_STATE_KEY, placement);
+		await vscode.workspace
+			.getConfiguration(LEGACY_DASHBOARD_PLACEMENT_SECTION)
+			.update(LEGACY_DASHBOARD_PLACEMENT_SETTING, undefined, vscode.ConfigurationTarget.Global);
+		this.sendPlacementState(placement);
 	}
 
 	setPort(port: number | null): void {
@@ -80,9 +106,14 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		}
 
 		this.currentPort = port;
+		const options = this.getWebviewOptions();
+
+		if (this.panel) {
+			this.panel.webview.options = options;
+		}
 
 		if (this.view) {
-			this.view.webview.options = this.getWebviewOptions();
+			this.view.webview.options = options;
 		}
 
 		this.sendPort();
@@ -94,7 +125,7 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		buffer.push(entry);
 		SharedLogStore.append(source, entry);
 
-		this.view?.webview.postMessage({ type: 'log', source, entry });
+		this.postToWebviews({ type: 'log', source, entry });
 	}
 
 	clearLogs(source: 'api' | 'tunnel'): void {
@@ -102,30 +133,73 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		buffer.clear();
 		SharedLogStore.clear(source);
 		this.syncLogFileOffsets();
-		this.view?.webview.postMessage({ type: 'logs-cleared', source });
+		this.postToWebviews({ type: 'logs-cleared', source });
 	}
 
 	sendInitialState(tunnelState: TunnelState): void {
 		this.sendPort();
 		this.sendBufferedLogs('api');
 		this.sendBufferedLogs('tunnel');
-		this.view?.webview.postMessage({ type: 'tunnel-status', state: tunnelState });
+		this.postToWebviews({ type: 'tunnel-status', state: tunnelState });
 	}
 
 	sendKeyFixState(enabled: boolean): void {
-		this.view?.webview.postMessage({ type: 'key-fix-state', enabled });
+		this.postToWebviews({ type: 'key-fix-state', enabled });
 	}
 
 	sendAutoTunnelState(enabled: boolean): void {
-		this.view?.webview.postMessage({ type: 'auto-tunnel-state', enabled });
+		this.postToWebviews({ type: 'auto-tunnel-state', enabled });
+	}
+
+	sendPlacementState(placement: DashboardPlacement = this.getPlacement()): void {
+		this.postToWebviews({ type: 'dashboard-placement-state', placement });
 	}
 
 	sendTunnelState(state: TunnelState): void {
-		this.view?.webview.postMessage({ type: 'tunnel-status', state });
+		this.postToWebviews({ type: 'tunnel-status', state });
 	}
 
 	isOpen(): boolean {
-		return this.view !== null;
+		return this.panel !== null || this.view !== null;
+	}
+
+	private showEditorTab(): void {
+		if (this.panel) {
+			this.panel.reveal();
+
+			return;
+		}
+
+		this.panel = vscode.window.createWebviewPanel('ungate', 'Ungate', vscode.ViewColumn.One, this.getWebviewOptions());
+		this.panel.iconPath = vscode.Uri.file(path.join(this.context.extensionPath, 'resources', 'icon.png'));
+		this.bindWebview(this.panel.webview);
+		this.panel.webview.html = this.buildHtml(this.panel.webview);
+
+		this.panel.onDidChangeViewState(() => {
+			if (this.panel?.visible) {
+				this.sendBufferedLogs('api');
+				this.sendBufferedLogs('tunnel');
+			}
+		});
+
+		this.panel.onDidDispose(() => {
+			this.panel = null;
+			this.maybeStopLogPoll();
+		});
+
+		this.ensureLogPoll();
+	}
+
+	private bindWebview(webview: vscode.Webview): void {
+		webview.onDidReceiveMessage((message: unknown) => {
+			const parsed = Dashboard.parseIncomingMessage(message);
+
+			if (!parsed) {
+				return;
+			}
+
+			this.onMessage(parsed);
+		});
 	}
 
 	private static parseIncomingMessage(raw: unknown): Msg | null {
@@ -158,6 +232,16 @@ export class Dashboard implements vscode.WebviewViewProvider {
 			}
 
 			return { type, enabled };
+		}
+
+		if (type === 'set-dashboard-placement') {
+			const placement = record.placement;
+
+			if (placement !== 'editor' && placement !== 'panel') {
+				return null;
+			}
+
+			return { type: 'set-dashboard-placement', placement };
 		}
 
 		if (type === 'clear-logs') {
@@ -200,37 +284,51 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		return path.join(this.context.extensionPath, 'bundled', 'web', 'dist');
 	}
 
+	private postToWebviews(message: unknown): void {
+		void this.panel?.webview.postMessage(message);
+		void this.view?.webview.postMessage(message);
+	}
+
 	private sendPort(): void {
-		this.view?.webview.postMessage({ type: 'port', port: this.currentPort });
+		this.postToWebviews({ type: 'port', port: this.currentPort });
 	}
 
 	private rebuildHtml(): void {
-		if (!this.view) {
-			return;
+		if (this.panel) {
+			this.panel.webview.html = this.buildHtml(this.panel.webview);
 		}
 
-		this.view.webview.html = this.buildHtml();
+		if (this.view) {
+			this.view.webview.html = this.buildHtml(this.view.webview);
+		}
 	}
 
 	private sendBufferedLogs(source: 'api' | 'tunnel'): void {
 		const entries = SharedLogStore.readAll(source);
 
 		if (entries.length > 0) {
-			this.view?.webview.postMessage({ type: 'log-bulk', source, entries });
+			this.postToWebviews({ type: 'log-bulk', source, entries });
 		}
 
 		this.syncLogFileOffsets();
 	}
 
-	private startLogPoll(): void {
-		this.stopLogPoll();
+	private ensureLogPoll(): void {
+		if (this.logPollTimer) {
+			return;
+		}
+
 		this.logPollTimer = setInterval(() => {
 			this.pollSharedLogs('api');
 			this.pollSharedLogs('tunnel');
 		}, LOG_POLL_INTERVAL_MS);
 	}
 
-	private stopLogPoll(): void {
+	private maybeStopLogPoll(): void {
+		if (this.panel || this.view) {
+			return;
+		}
+
 		if (this.logPollTimer) {
 			clearInterval(this.logPollTimer);
 			this.logPollTimer = null;
@@ -248,7 +346,7 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		}
 
 		for (const entry of entries) {
-			this.view?.webview.postMessage({ type: 'log', source, entry });
+			this.postToWebviews({ type: 'log', source, entry });
 		}
 	}
 
@@ -259,10 +357,10 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		this.tunnelLogFileOffset = fileSize;
 	}
 
-	private buildHtml(): string {
+	private buildHtml(webview: vscode.Webview): string {
 		const distPath = this.getWebDistPath();
-		const assetsUri = this.view!.webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'assets')));
-		const faviconUri = this.view!.webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'favicon.png')));
+		const assetsUri = webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'assets')));
+		const faviconUri = webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'favicon.png')));
 
 		let html = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
 

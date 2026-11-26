@@ -1,4 +1,5 @@
 <script lang="ts">
+import { getTunnelStore } from '../tunnel/tunnel-store.svelte';
 import TunnelPanel from '../tunnel/TunnelPanel.svelte';
 
 import ModelsSection from './ModelsSection.svelte';
@@ -10,6 +11,7 @@ import { getSettingsUiStore } from './settings-ui-store.svelte';
 const store = getSettingsStore();
 const formStore = getSettingsFormStore();
 const uiStore = getSettingsUiStore();
+const tunnelStore = getTunnelStore();
 
 let showAdvanced = $state(false);
 let validationError = $state<string | null>(null);
@@ -36,6 +38,17 @@ function handleSaveWithoutRestart() {
 	}
 
 	void store.save(formStore.toSavePayload());
+}
+
+function handleDashboardPlacementChange(event: Event): void {
+	const target = event.currentTarget as HTMLSelectElement;
+	const value = target.value;
+
+	if (value !== 'editor' && value !== 'panel') {
+		return;
+	}
+
+	tunnelStore.setDashboardPlacement(value);
 }
 
 $effect(() => {
@@ -103,6 +116,22 @@ $effect(() => {
 						placeholder="No key (open access)" />
 				</label>
 			</div>
+		</div>
+
+		<div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-2">
+			<div class="flex items-center gap-3">
+				<span class="text-sm font-semibold">Open dashboard as</span>
+				<select
+					class="select w-fit text-sm border border-surface-700/30"
+					value={tunnelStore.dashboardPlacement}
+					onchange={handleDashboardPlacementChange}>
+					<option value="editor">Editor tab</option>
+					<option value="panel">Bottom panel</option>
+				</select>
+			</div>
+			<p class="text-xs text-surface-400">
+				Bottom panel stays available in Agent layout when the editor is hidden. Takes effect the next time you open the dashboard.
+			</p>
 		</div>
 
 		<div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">

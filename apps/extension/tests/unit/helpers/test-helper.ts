@@ -58,6 +58,7 @@ export class TestHelper {
 		return {
 			webview: {
 				html: '',
+				options: {} as Record<string, unknown>,
 				postMessage: vi.fn(),
 				asWebviewUri: vi.fn((value) => value),
 				onDidReceiveMessage: vi.fn()
