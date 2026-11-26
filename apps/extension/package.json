@@ -2,7 +2,7 @@
 	"name": "ungate",
 	"displayName": "Ungate",
 	"description": "Use Claude, GPT, or MiniMax subscriptions in Cursor instead of paying for API tokens",
-	"version": "1.7.15",
+	"version": "1.7.16",
 	"publisher": "orchidfiles",
 	"license": "MIT",
 	"pricing": "Free",
@@ -42,6 +42,24 @@
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
+		"viewsContainers": {
+			"panel": [
+				{
+					"id": "ungate",
+					"title": "Ungate",
+					"icon": "resources/icon.png"
+				}
+			]
+		},
+		"views": {
+			"ungate": [
+				{
+					"type": "webview",
+					"id": "ungate.dashboard",
+					"name": "Dashboard"
+				}
+			]
+		},
 		"commands": [
 			{
 				"command": "ungate.openDashboard",

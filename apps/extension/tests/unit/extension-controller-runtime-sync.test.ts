@@ -26,6 +26,8 @@ interface MockDashboard {
 	pushLog: ReturnType<typeof vi.fn>;
 	sendKeyFixState: ReturnType<typeof vi.fn>;
 	sendAutoTunnelState: ReturnType<typeof vi.fn>;
+	sendTunnelConfig: ReturnType<typeof vi.fn>;
+	sendPlacementState: ReturnType<typeof vi.fn>;
 	show: ReturnType<typeof vi.fn>;
 }
 
@@ -82,7 +84,8 @@ vi.mock('vscode', () => {
 	return {
 		window: {
 			createOutputChannel: createOutputChannelMock,
-			createStatusBarItem: createStatusBarItemMock
+			createStatusBarItem: createStatusBarItemMock,
+			registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() }))
 		},
 		workspace: {
 			createFileSystemWatcher: vi.fn(() => ({
@@ -147,6 +150,7 @@ vi.mock('../../src/dashboard', () => {
 			sendKeyFixState = vi.fn();
 			sendAutoTunnelState = vi.fn();
 			sendTunnelConfig = vi.fn();
+			sendPlacementState = vi.fn();
 			pushLog = vi.fn();
 			setPort = vi.fn();
 			sendTunnelState = vi.fn();
@@ -250,6 +254,7 @@ function createController(windowId: string): {
 		sendKeyFixState: vi.fn(),
 		sendAutoTunnelState: vi.fn(),
 		sendTunnelConfig: vi.fn(),
+		sendPlacementState: vi.fn(),
 		show: vi.fn()
 	};
 	const statusBar = {

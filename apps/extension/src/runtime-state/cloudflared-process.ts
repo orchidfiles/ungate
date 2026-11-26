@@ -16,7 +16,9 @@ export class CloudflaredProcess {
 		}
 
 		if (port != null) {
-			return command.includes(localApiBaseUrl(port));
+			const origin = localApiBaseUrl(port);
+
+			return command.split(/\s+/).some((argument) => argument === origin || argument === `--url=${origin}`);
 		}
 
 		return /http:\/\/127\.0\.0\.1:\d+/.test(command);
