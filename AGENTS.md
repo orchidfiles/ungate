@@ -123,6 +123,10 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 **Auth (`src/auth/`):**
 - OAuth PKCE flow for Anthropic: `startLogin()` generates verifier/challenge, `completeLogin()` exchanges code for tokens. Manual `CODE#STATE` entry required (Anthropic rejects localhost redirect_uri for claude.ai OAuth).
 
+## Packaging copies
+
+`scripts/build-package/run.sh` overwrites `apps/extension/CHANGELOG.md`, `apps/extension/README.md`, and `apps/extension/LICENSE` from the repo root. Edit only the root files (`CHANGELOG.md`, `README.md`, `LICENSE`); do not change the copies under `apps/extension/`.
+
 ## apps/extension — VS Code extension
 
 User entry point. Manages the API server and tunnel lifecycle.
