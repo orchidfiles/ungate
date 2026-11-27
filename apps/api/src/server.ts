@@ -1,5 +1,7 @@
+import { createServer, type Server } from 'node:http';
+
 import cors from '@fastify/cors';
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 
 import { logger, setQuietMode } from 'src/utils/logger';
 
@@ -52,10 +54,87 @@ export async function startServer(): Promise<void> {
 	await app.register(analyticsPlugin);
 	await app.register(settingsPlugin);
 
-	globalThis.console.log(`[startup] listen ${config.port}...`);
-	await app.listen({ port: config.port, host: '0.0.0.0' });
+	globalThis.console.log(`[startup] listen ${config.hosts.join(',')}:${config.port}...`);
+	await listenOnAll(app, config.hosts, config.port);
 
 	// Always print port to stdout — extension parses this to detect the running port.
 	// Uses globalThis.console to bypass quiet mode.
 	globalThis.console.log(`[ungate] listening on localhost:${config.port}`);
+}
+
+/** How often a further address that is not on this machine yet is tried again. */
+const ABSENT_ADDRESS_RETRY_MS = 5000;
+
+/**
+ * Listens on each address in `hosts`. The first is Fastify's own server; each further address gets
+ * a plain listener that hands requests to it, so routes see the real peer of every socket.
+ *
+ * A further address may belong to an interface that comes and goes, such as a container's veth.
+ * While it is absent (`EADDRNOTAVAIL`) it is retried in the background and the other addresses
+ * serve; any other failure to listen is fatal. At startup that rejects; in a background retry it
+ * goes to `onLateFailure`, which by default ends the process so its supervisor restarts it
+ * rather than leaving an address unserved while loopback looks healthy.
+ */
+export async function listenOnAll(
+	app: FastifyInstance,
+	hosts: string[],
+	port: number,
+	retryMs: number = ABSENT_ADDRESS_RETRY_MS,
+	onLateFailure: (error: unknown) => void = exitOnLateListenFailure
+): Promise<void> {
+	const [first, ...rest] = hosts;
+	const extra: Server[] = [];
+	const retries = new Set<NodeJS.Timeout>();
+	let closed = false;
+	app.addHook('onClose', async () => {
+		closed = true;
+		for (const timer of retries) clearTimeout(timer);
+		await Promise.all(extra.map((server) => new Promise((resolve) => server.close(resolve))));
+	});
+
+	await app.listen({ port, host: first });
+
+	const listenExtra = (host: string): Promise<void> => {
+		const server = createServer((request, response) => app.server.emit('request', request, response));
+
+		return new Promise<void>((resolve, reject) => {
+			server.once('error', reject);
+			server.listen(port, host, () => {
+				server.off('error', reject);
+				extra.push(server);
+				resolve();
+			});
+		});
+	};
+
+	const retryLater = (host: string): void => {
+		const timer = setTimeout(() => {
+			retries.delete(timer);
+			if (closed) return;
+			listenExtra(host).then(
+				() => globalThis.console.log(`[startup] listening on ${host}:${port}`),
+				(error: unknown) => (isAbsentAddress(error) ? retryLater(host) : onLateFailure(error))
+			);
+		}, retryMs);
+		retries.add(timer);
+	};
+
+	for (const host of rest) {
+		try {
+			await listenExtra(host);
+		} catch (error) {
+			if (!isAbsentAddress(error)) throw error;
+			globalThis.console.log(`[startup] ${host} is not on this machine yet; trying every ${retryMs} ms`);
+			retryLater(host);
+		}
+	}
+}
+
+function exitOnLateListenFailure(error: unknown): void {
+	globalThis.console.error('[ungate] a further listen address failed; exiting', error);
+	process.exit(1);
+}
+
+function isAbsentAddress(error: unknown): boolean {
+	return (error as NodeJS.ErrnoException | undefined)?.code === 'EADDRNOTAVAIL';
 }
