@@ -1,3 +1,4 @@
+export * from './accounts';
 export * from './analytics';
 export * from './runtime';
 export * from './settings';
