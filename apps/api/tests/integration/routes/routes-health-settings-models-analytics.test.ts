@@ -73,7 +73,8 @@ describe('routes: health/settings/models/analytics', () => {
 					upstreamModel: 'claude-test-model',
 					sortOrder: 0,
 					reasoningBudget: null,
-					serviceTier: null
+					serviceTier: null,
+					toolMode: null
 				}
 			]
 		});
@@ -104,6 +105,20 @@ describe('routes: health/settings/models/analytics', () => {
 		expect(postRes.statusCode).toBe(200);
 		expect(postRes.json()).toEqual({ ok: true });
 		expect(settingsUpdateMock).toHaveBeenCalledWith({ quiet: true });
+		await app.close();
+	});
+
+	it('a saved apiKey replaces the running one at once, and null clears it', async () => {
+		const app = await withPlugin(settingsPlugin, { apiKey: 'old' });
+
+		await app.inject({ method: 'POST', url: '/settings', payload: { apiKey: 'new' } });
+		expect(app.config.apiKey).toBe('new');
+
+		await app.inject({ method: 'POST', url: '/settings', payload: { quiet: true } });
+		expect(app.config.apiKey).toBe('new');
+
+		await app.inject({ method: 'POST', url: '/settings', payload: { apiKey: null } });
+		expect(app.config.apiKey).toBeUndefined();
 		await app.close();
 	});
 

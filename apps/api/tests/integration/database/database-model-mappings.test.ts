@@ -1,8 +1,80 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { getSqlite } from 'src/database';
 import { ModelMappings } from 'src/database/model-mappings';
 
 describe('database-model-mappings', () => {
+	describe('migration _0015 (Cursor Grok 4.7 seed)', () => {
+		const seed = readFileSync(join(__dirname, '../../../drizzle/_0015.sql'), 'utf8');
+		const grokRows = () =>
+			ModelMappings.list()
+				.filter((m) => m.provider === 'cursor')
+				.map((m) => [m.id, m.upstreamModel, m.reasoningBudget]);
+
+		it('seeds medium and high', () => {
+			getSqlite().exec(seed);
+
+			expect(grokRows()).toEqual([
+				['cursor-grok-4.7-medium', 'grok-4.7-medium', 'medium'],
+				['cursor-grok-4.7-high', 'grok-4.7-high', 'high']
+			]);
+		});
+
+		it('is idempotent and skips models the user already imported', () => {
+			ModelMappings.replace([
+				{
+					id: 'my-grok',
+					label: 'My Grok',
+					provider: 'cursor',
+					upstreamModel: 'grok-4.7-high',
+					sortOrder: 0,
+					reasoningBudget: null,
+					serviceTier: null
+				}
+			]);
+			getSqlite().exec(seed);
+			getSqlite().exec(seed);
+
+			expect(grokRows()).toEqual([
+				['my-grok', 'grok-4.7-high', null],
+				['cursor-grok-4.7-medium', 'grok-4.7-medium', 'medium']
+			]);
+		});
+	});
+
+	describe('migration _0016 (cursor-* ids renamed to ungate-*)', () => {
+		const migration = readFileSync(join(__dirname, '../../../drizzle/_0016.sql'), 'utf8');
+		const row = (id: string, provider: 'cursor' | 'claude', sortOrder: number) => ({
+			id,
+			label: id,
+			provider,
+			upstreamModel: 'grok-4.7-high',
+			sortOrder,
+			reasoningBudget: null,
+			serviceTier: null
+		});
+
+		it('renames Cursor rows only and keeps a row whose new id is taken', () => {
+			ModelMappings.replace([
+				row('cursor-grok-4.7-high', 'cursor', 0),
+				row('cursor-grok-4.7-low', 'cursor', 1),
+				row('ungate-grok-4.7-low', 'cursor', 2),
+				row('cursor-claude-like', 'claude', 3)
+			]);
+			getSqlite().exec(migration);
+
+			expect(ModelMappings.list().map((m) => m.id)).toEqual([
+				'ungate-grok-4.7-high',
+				'cursor-grok-4.7-low',
+				'ungate-grok-4.7-low',
+				'cursor-claude-like'
+			]);
+		});
+	});
+
 	it('sanitizes invalid and trims valid rows', () => {
 		const sanitized = ModelMappings.sanitize([
 			{
@@ -33,7 +105,8 @@ describe('database-model-mappings', () => {
 			upstreamModel: 'gpt-5.4',
 			sortOrder: 0,
 			reasoningBudget: 'max',
-			serviceTier: 'priority'
+			serviceTier: 'priority',
+			toolMode: null
 		});
 	});
 
@@ -127,6 +200,34 @@ describe('database-model-mappings', () => {
 			expect(ModelMappings.resolveForChatCompletion('gpt-5.6-sol')?.id).toBe('gpt-5.6-sol');
 		});
 
+		it('uses the requested effort to pick between tiers that share a stripped id', () => {
+			ModelMappings.replace([
+				{
+					id: 'ungate-grok-4.7-medium',
+					label: 'Grok 4.7 Medium (Cursor)',
+					provider: 'cursor',
+					upstreamModel: 'grok-4.7-medium',
+					sortOrder: 0,
+					reasoningBudget: 'medium',
+					serviceTier: null
+				},
+				{
+					id: 'ungate-grok-4.7-high',
+					label: 'Grok 4.7 High (Cursor)',
+					provider: 'cursor',
+					upstreamModel: 'grok-4.7-high',
+					sortOrder: 1,
+					reasoningBudget: 'high',
+					serviceTier: null
+				}
+			]);
+
+			expect(ModelMappings.resolveForChatCompletion('ungate-grok-4.7', 'high')?.upstreamModel).toBe('grok-4.7-high');
+			expect(ModelMappings.resolveForChatCompletion('ungate-grok-4.7', 'medium')?.upstreamModel).toBe('grok-4.7-medium');
+			expect(ModelMappings.resolveForChatCompletion('ungate-grok-4.7')?.upstreamModel).toBe('grok-4.7-medium');
+			expect(ModelMappings.resolveForChatCompletion('ungate-grok-4.7-high', 'medium')?.upstreamModel).toBe('grok-4.7-high');
+		});
+
 		it('ignores a suffix that does not match the mapping budget', () => {
 			ModelMappings.replace([
 				{
@@ -141,6 +242,104 @@ describe('database-model-mappings', () => {
 			]);
 
 			expect(ModelMappings.resolveForChatCompletion('custom')).toBeNull();
+		});
+	});
+
+	describe('migration _0018 (custom slugs)', () => {
+		const seed = readFileSync(join(__dirname, '../../../drizzle/_0018.sql'), 'utf8');
+		const slugs = [
+			['sonnet-5.5-medium', 'claude', 'claude-sonnet-5-5', 'medium', null],
+			['sonnet-5.5-high', 'claude', 'claude-sonnet-5-5', 'high', null],
+			['haiku-5.5-medium', 'claude', 'claude-haiku-5-5', 'medium', null],
+			['haiku-5.5-high', 'claude', 'claude-haiku-5-5', 'high', null],
+			['fable-5.2-medium', 'claude', 'claude-fable-5-2', 'medium', null],
+			['ungate-astra-high', 'openai', 'gpt-6-astra', 'high', 'default']
+		] as const;
+
+		it('seeds the slugs Cursor has saved', () => {
+			getSqlite().exec(seed);
+
+			for (const [id, provider, upstreamModel, reasoningBudget, serviceTier] of slugs) {
+				expect(ModelMappings.resolveForChatCompletion(id)).toMatchObject({
+					id,
+					provider,
+					upstreamModel,
+					reasoningBudget,
+					serviceTier
+				});
+			}
+		});
+
+		it('is idempotent and skips a slug the user already defined', () => {
+			ModelMappings.replace([
+				{
+					id: 'my-fable',
+					label: 'My Fable',
+					provider: 'claude',
+					upstreamModel: 'claude-fable-5-2',
+					sortOrder: 0,
+					reasoningBudget: 'medium',
+					serviceTier: null
+				}
+			]);
+			getSqlite().exec(seed);
+			getSqlite().exec(seed);
+
+			expect(
+				ModelMappings.list()
+					.filter((model) => model.upstreamModel === 'claude-fable-5-2')
+					.map((model) => model.id)
+			).toEqual(['my-fable']);
+			expect(ModelMappings.list().filter((model) => model.id === 'ungate-astra-high')).toHaveLength(1);
+			expect(ModelMappings.resolveForChatCompletion('haiku-5.5-high')?.upstreamModel).toBe('claude-haiku-5-5');
+		});
+	});
+
+	describe('migration _0019 (one slug per Opus 5.5 tier)', () => {
+		const migration = readFileSync(join(__dirname, '../../../drizzle/_0019.sql'), 'utf8');
+		const opus = (id: string, label: string, reasoningBudget: 'low' | 'medium' | 'high' | 'xhigh' | null, sortOrder: number) => ({
+			id,
+			label,
+			provider: 'claude' as const,
+			upstreamModel: 'claude-opus-5-5',
+			sortOrder,
+			reasoningBudget,
+			serviceTier: null
+		});
+
+		it('drops the unopus copies and the id with a space, and restores the high label', () => {
+			ModelMappings.replace([
+				opus('unopus-5.5-medium', 'Opus 5.5 Medium', 'medium', 0),
+				opus('opus-5.5-medium', 'Opus 5.5 Medium', 'medium', 1),
+				opus('opus-5.5-high', 'Opus 5.5', 'high', 2),
+				opus('opus-5.5 high', 'Opus 5.5', 'high', 3),
+				opus('sonnet-5.5-medium', 'Sonnet 5.5 Medium', 'medium', 4)
+			]);
+			getSqlite().exec(migration);
+
+			expect(ModelMappings.list().map((model) => [model.id, model.label])).toEqual([
+				['opus-5.5-medium', 'Opus 5.5 Medium'],
+				['opus-5.5-high', 'Opus 5.5 High'],
+				['sonnet-5.5-medium', 'Sonnet 5.5 Medium']
+			]);
+		});
+
+		it('renames a lone unopus slug and a lone space id', () => {
+			ModelMappings.replace([opus('unopus-5.5-low', 'Opus 5.5 Low', 'low', 0), opus('opus-5.5 high', 'Opus 5.5', null, 1)]);
+			getSqlite().exec(migration);
+
+			expect(ModelMappings.list().map((model) => [model.id, model.reasoningBudget, model.label])).toEqual([
+				['opus-5.5-low', 'low', 'Opus 5.5 Low'],
+				['opus-5.5-high', 'high', 'Opus 5.5 High']
+			]);
+		});
+
+		it('is idempotent', () => {
+			ModelMappings.replace([opus('opus-5.5-medium', 'Opus 5.5 Medium', 'medium', 0)]);
+			getSqlite().exec(migration);
+			getSqlite().exec(migration);
+
+			expect(ModelMappings.list().map((model) => model.id)).toEqual(['opus-5.5-medium']);
 		});
 	});
 });

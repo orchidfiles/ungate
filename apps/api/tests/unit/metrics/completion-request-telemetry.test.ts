@@ -38,7 +38,7 @@ describe('CompletionRequestTelemetry', () => {
 
 		expect(order[0]).toBe('record');
 		expect(order.slice(1)).toEqual(['apply', 'apply', 'apply']);
-		expect(requestRecordMock).toHaveBeenCalledWith(record, undefined, undefined);
+		expect(requestRecordMock).toHaveBeenCalledWith(record);
 		expect(requestId).toBe(321);
 	});
 });
