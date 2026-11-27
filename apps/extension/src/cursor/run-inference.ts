@@ -276,6 +276,8 @@ export interface RunInferenceOptions {
 	signal?: AbortSignal;
 	deadlineMs?: number;
 	connect?: Http2Connect;
+	/** The user's billing guard (on unless turned off in the dashboard). Required so no caller skips it by omission. */
+	billingGuard: boolean;
 	/** Diagnostics; never receives credentials or tool argument values. */
 	onLog?: (level: 'info' | 'warn' | 'error', message: string) => void;
 }
@@ -322,13 +324,12 @@ interface AttemptOutcome {
 }
 
 /**
- * Public inference boundary. Always emits a terminal billing denial before reading credentials
- * or opening a transport; opt-in flags and injected transports cannot bypass this policy.
+ * Public inference boundary. While the billing guard is on it emits a terminal billing denial
+ * before reading credentials or opening a transport; injected transports cannot bypass it.
  */
 export async function* runInference(options: RunInferenceOptions): AsyncGenerator<CursorBridgeEventBody> {
-	const blocked = cursorInferenceBillingError();
-	if (blocked) {
-		yield { kind: 'end', error: blocked };
+	if (options.billingGuard) {
+		yield { kind: 'end', error: cursorInferenceBillingError() };
 
 		return;
 	}

@@ -22,6 +22,7 @@ export type Msg =
 	| { type: 'set-dashboard-placement'; placement: DashboardPlacement }
 	| { type: 'set-ngrok-domain'; domain: string | null }
 	| { type: 'set-cursor-provider-enabled'; enabled: boolean }
+	| { type: 'set-cursor-billing-guard'; enabled: boolean }
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' }
 	| Extract<WebviewToExtension, { type: (typeof MSGS_SIMPLE)[number] }>;
 
@@ -159,8 +160,8 @@ export class Dashboard implements vscode.WebviewViewProvider {
 		this.postToWebviews({ type: 'dashboard-placement-state', placement });
 	}
 
-	sendCursorProviderState(enabled: boolean): void {
-		this.postToWebviews({ type: 'cursor-provider-state', enabled });
+	sendCursorProviderState(state: { enabled: boolean; billingGuard: boolean }): void {
+		this.postToWebviews({ type: 'cursor-provider-state', ...state });
 	}
 
 	sendTunnelState(state: TunnelState): void {
@@ -236,7 +237,12 @@ export class Dashboard implements vscode.WebviewViewProvider {
 			return { type: 'open-external-url', url };
 		}
 
-		if (type === 'set-key-fix-enabled' || type === 'set-auto-tunnel-enabled' || type === 'set-cursor-provider-enabled') {
+		if (
+			type === 'set-key-fix-enabled' ||
+			type === 'set-auto-tunnel-enabled' ||
+			type === 'set-cursor-provider-enabled' ||
+			type === 'set-cursor-billing-guard'
+		) {
 			const enabled = record.enabled;
 
 			if (typeof enabled !== 'boolean') {

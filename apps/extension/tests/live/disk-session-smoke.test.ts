@@ -45,6 +45,8 @@ describe.runIf(process.env.CURSOR_LIVE === '1')('live Cursor disk session', () =
 			},
 			credentials: () => session.credentials(),
 			refresh: () => session.refresh(),
+			// Opt-in live test against a real account: the person running it accepts the billing risk.
+			billingGuard: false,
 			signal: new AbortController().signal
 		})) {
 			if (event.kind === 'text') text += event.text;

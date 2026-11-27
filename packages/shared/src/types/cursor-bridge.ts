@@ -106,12 +106,13 @@ export type CursorBridgeErrorKind =
 	| 'cancelled'
 	| 'upstream';
 
-/** Fail closed until Cursor provides an enforceable subscription-only billing contract. */
+/** Fails closed while the user's billing guard is on (the default): Cursor offers no enforceable subscription-only billing contract. */
 export function cursorInferenceBillingError(): CursorBridgeError {
 	return {
 		kind: 'billing_blocked',
 		code: 'billing_blocked',
-		message: 'Cursor inference is blocked because subscription-only billing cannot be guaranteed.'
+		message:
+			'Cursor inference is blocked because subscription-only billing cannot be guaranteed. To allow it, turn off the billing guard in the Ungate dashboard (Settings → Provider → Cursor).'
 	};
 }
 

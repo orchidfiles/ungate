@@ -34,7 +34,8 @@ export class TestHelper {
 				lastAppliedUrl: null
 			},
 			cursorProvider: {
-				enabled: false
+				enabled: false,
+				billingGuard: true
 			},
 			tunnelProvider: 'quick',
 			ngrokDomain: null,

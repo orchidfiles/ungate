@@ -31,6 +31,8 @@ export interface CursorBridgeOptions {
 	session: CursorSession;
 	/** Reads the opt-in flag fresh (runtime state file). */
 	isEnabled: () => boolean;
+	/** Reads the billing guard fresh (runtime state file). Defaults to on. */
+	isBillingGuardOn?: () => boolean;
 	onLog?: (level: 'info' | 'warn' | 'error', message: string) => void;
 	connect?: Http2Connect;
 	pacer?: RequestPacer;
@@ -156,6 +158,10 @@ export class CursorBridge {
 		await session.ensureSignedIn();
 	}
 
+	private billingGuardOn(): boolean {
+		return this.options.isBillingGuardOn?.() ?? true;
+	}
+
 	private async gate(): Promise<CursorBridgeError | null> {
 		await this.recoverToken();
 		const status = this.status();
@@ -208,10 +214,9 @@ export class CursorBridge {
 	}
 
 	private async invoke(id: string, request: CursorInferenceRequest): Promise<void> {
-		// Billing policy precedes auth recovery, request validation, pacing and transport.
-		const billingBlocked = cursorInferenceBillingError();
-		if (billingBlocked) {
-			this.emit(id, { kind: 'end', error: billingBlocked });
+		// While the guard is on, billing policy precedes auth recovery, request validation, pacing and transport.
+		if (this.billingGuardOn()) {
+			this.emit(id, { kind: 'end', error: cursorInferenceBillingError() });
 
 			return;
 		}
@@ -275,6 +280,7 @@ export class CursorBridge {
 					refresh: () => session.refresh(),
 					signal,
 					connect: this.options.connect,
+					billingGuard: this.billingGuardOn(),
 					onLog: this.options.onLog
 				})) {
 					if (event.kind === 'end' && event.error && !outputStarted && !signal.aborted) {

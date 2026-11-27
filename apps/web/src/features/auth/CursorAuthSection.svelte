@@ -22,6 +22,7 @@ const settingsStore = getSettingsStore();
 
 let status = $state<CursorSessionStatus | null>(null);
 let enabled = $state<boolean | null>(null);
+let billingGuard = $state(true);
 let loading = $state(true);
 let toggling = $state(false);
 let models = $state<CursorModelListItem[]>([]);
@@ -30,11 +31,11 @@ let importing = $state<string | null>(null);
 let error = $state<string | null>(null);
 
 const reasonText: Record<CursorSessionStatus['reason'], string> = {
-	ok: 'Session connected — inference blocked',
+	ok: 'Session connected',
 	disabled: 'Not connected',
 	no_bridge: 'Unavailable: the API was not started by this Cursor window',
 	no_cursor_api: 'Unavailable: this editor does not expose a Cursor session',
-	not_signed_in: 'Not signed in to Cursor — inference remains blocked',
+	not_signed_in: 'Not signed in to Cursor',
 	token_encrypted: 'Unavailable: this Cursor version encrypts its session token, which Ungate cannot read',
 	error: 'Could not read the Cursor session'
 };
@@ -82,6 +83,14 @@ async function setEnabled(next: boolean): Promise<void> {
 	if (!next) models = [];
 }
 
+function handleBillingGuardChange(event: Event): void {
+	const input = event.currentTarget as HTMLInputElement;
+	const next = input.checked;
+	// The extension confirms turning the guard off and replies with the resulting state.
+	input.checked = billingGuard;
+	postExtensionMessage({ type: 'set-cursor-billing-guard', enabled: next });
+}
+
 async function importModel(model: CursorModelListItem): Promise<void> {
 	importing = model.id;
 	error = null;
@@ -102,6 +111,7 @@ function handleMessage(event: MessageEvent): void {
 
 	if (message.type === 'cursor-provider-state') {
 		enabled = message.enabled;
+		billingGuard = message.billingGuard;
 	}
 }
 
@@ -121,14 +131,32 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 <div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
 	<div class="flex items-center gap-2">
 		<p class="text-sm font-semibold">Cursor</p>
-		<span class="badge text-[10px] preset-tonal-warning uppercase tracking-wide">Inference blocked</span>
+		{#if billingGuard}
+			<span class="badge text-[10px] preset-tonal-warning uppercase tracking-wide">Inference blocked</span>
+		{:else}
+			<span class="badge text-[10px] preset-tonal-error uppercase tracking-wide">Billing guard off</span>
+		{/if}
 	</div>
 
 	<p class="text-xs text-surface-400">
-		Cursor inference is blocked because subscription-only billing cannot be guaranteed. Signing in, connecting a session,
-		discovering models, or importing a model mapping does not grant permission to run inference or prove included plan usage.
+		{#if billingGuard}
+			Cursor inference is blocked because subscription-only billing cannot be guaranteed. Signing in, connecting a session,
+			discovering models, or importing a model mapping does not run inference.
+		{:else}
+			Cursor inference is allowed. Ungate cannot verify that Cursor bills these requests to your subscription only; if usage-based
+			pricing is on for your account or team, they may be charged.
+		{/if}
 		Billing for historical Cursor requests is unknown, not free. The session token stays inside the extension.
 	</p>
+
+	<label class="flex items-start gap-3 cursor-pointer">
+		<input
+			class="checkbox mt-0.5"
+			type="checkbox"
+			checked={billingGuard}
+			onchange={handleBillingGuardChange} />
+		<span class="text-sm leading-5">Block Cursor inference (billing guard)</span>
+	</label>
 
 	{#if loading}
 		<div class="flex items-center gap-2 text-sm text-surface-400">
@@ -185,7 +213,7 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 		{#if connected}
 			<div class="space-y-2">
 				<div class="flex items-center justify-between gap-2">
-					<p class="text-xs font-medium text-surface-300">Discovered models — inference blocked</p>
+					<p class="text-xs font-medium text-surface-300">Discovered models{billingGuard ? ' — inference blocked' : ''}</p>
 					<button
 						class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
 						disabled={modelsLoading}
@@ -228,8 +256,12 @@ const optedIn = $derived(enabled ?? (status ? status.reason !== 'disabled' : fal
 						{/each}
 					</ul>
 					<p class="text-xs text-surface-400">
-						Imported mappings appear below as <code class="code">cursor-&lt;model&gt;</code> for configuration only. Importing does
-						not enable inference; subscription-only billing remains unverified.
+						Imported mappings appear below as <code class="code">cursor-&lt;model&gt;</code>.
+						{#if billingGuard}
+							They stay configuration only while the billing guard is on.
+						{:else}
+							Subscription-only billing remains unverified.
+						{/if}
 					</p>
 				{/if}
 			</div>

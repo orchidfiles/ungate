@@ -79,14 +79,17 @@ describe('Cursor inference billing policy', () => {
 			const connect = vi.fn(() => {
 				throw new Error('must not connect or write');
 			});
-			const events = await collect(runInference({ request: { ...request, modelId }, credentials, refresh, connect }));
+			const events = await collect(
+				runInference({ request: { ...request, modelId }, credentials, refresh, connect, billingGuard: true })
+			);
 			expect(events).toEqual([
 				{
 					kind: 'end',
 					error: {
 						kind: 'billing_blocked',
 						code: 'billing_blocked',
-						message: 'Cursor inference is blocked because subscription-only billing cannot be guaranteed.'
+						message:
+							'Cursor inference is blocked because subscription-only billing cannot be guaranteed. To allow it, turn off the billing guard in the Ungate dashboard (Settings → Provider → Cursor).'
 					}
 				}
 			]);
@@ -122,6 +125,64 @@ describe('Cursor inference billing policy', () => {
 		expect(JSON.stringify(sent)).not.toContain(TOKEN);
 		child.emit('exit');
 		expect(bridge.isAttached()).toBe(false);
+	});
+
+	it('blocks when the billing guard reader is omitted', async () => {
+		const connect = vi.fn(() => {
+			throw new Error('must not connect');
+		});
+		const { child, sent } = fakeChild();
+		const bridge = new CursorBridge({ session: session(), isEnabled: () => true, connect });
+		bridge.attach(child);
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'invoke', id: 'default', request });
+		await tick();
+		expect(sent).toEqual([expect.objectContaining({ kind: 'end', error: expect.objectContaining({ kind: 'billing_blocked' }) })]);
+		expect(connect).not.toHaveBeenCalled();
+	});
+
+	it('runs inference past the policy once the user turns the billing guard off', async () => {
+		const connect = vi.fn(() => {
+			throw new Error('offline transport sentinel');
+		});
+		const { child, sent } = fakeChild();
+		const bridge = new CursorBridge({
+			session: session(),
+			isEnabled: () => true,
+			isBillingGuardOn: () => false,
+			connect,
+			retryDelaysMs: []
+		});
+		bridge.attach(child);
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'invoke', id: 'guard-off', request });
+		await tick();
+		expect(connect).toHaveBeenCalled();
+		expect(sent).not.toContainEqual(expect.objectContaining({ error: expect.objectContaining({ kind: 'billing_blocked' }) }));
+		expect(JSON.stringify(sent)).not.toContain(TOKEN);
+	});
+
+	it('re-reads the billing guard for every invocation', async () => {
+		let guard = false;
+		const connect = vi.fn(() => {
+			throw new Error('offline transport sentinel');
+		});
+		const { child, sent } = fakeChild();
+		const bridge = new CursorBridge({
+			session: session(),
+			isEnabled: () => true,
+			isBillingGuardOn: () => guard,
+			connect,
+			retryDelaysMs: []
+		});
+		bridge.attach(child);
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'invoke', id: 'open', request });
+		await tick();
+		guard = true;
+		bridge.handle({ channel: 'ungate.cursor-bridge', kind: 'invoke', id: 'closed', request });
+		await tick();
+		expect(connect).toHaveBeenCalledTimes(1);
+		expect(sent).toContainEqual(
+			expect.objectContaining({ id: 'closed', kind: 'end', error: expect.objectContaining({ kind: 'billing_blocked' }) })
+		);
 	});
 
 	it('uses the billing error even when signed out or the request is malformed', async () => {

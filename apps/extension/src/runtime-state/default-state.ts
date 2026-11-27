@@ -30,7 +30,8 @@ export class RuntimeStateDefaults {
 				lastAppliedUrl: null
 			},
 			cursorProvider: {
-				enabled: false
+				enabled: false,
+				billingGuard: true
 			},
 			tunnelProvider: 'quick',
 			ngrokDomain: null,

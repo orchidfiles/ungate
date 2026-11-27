@@ -131,6 +131,7 @@ export class ExtensionController {
 		this.cursorBridge = new CursorBridge({
 			session: new CursorSession((vscode as unknown as { cursor?: unknown }).cursor, this.createCursorDiskSession()),
 			isEnabled: () => RuntimeStateStore.read().cursorProvider.enabled,
+			isBillingGuardOn: () => RuntimeStateStore.read().cursorProvider.billingGuard,
 			onLog: (level, message) => {
 				this.log(message);
 				this.dashboard.pushLog('api', { timestamp: Date.now(), level, message });
@@ -421,7 +422,7 @@ export class ExtensionController {
 			this.dashboard.sendAutoTunnelState(this.autoTunnel.isEnabled());
 			void this.sendTunnelConfig();
 			this.dashboard.sendPlacementState();
-			this.dashboard.sendCursorProviderState(RuntimeStateStore.read().cursorProvider.enabled);
+			this.dashboard.sendCursorProviderState(RuntimeStateStore.read().cursorProvider);
 
 			return;
 		}
@@ -446,6 +447,12 @@ export class ExtensionController {
 
 		if (message.type === 'set-cursor-provider-enabled') {
 			void this.setCursorProviderByUser(message.enabled);
+
+			return;
+		}
+
+		if (message.type === 'set-cursor-billing-guard') {
+			void this.setCursorBillingGuardByUser(message.enabled);
 
 			return;
 		}
@@ -547,7 +554,7 @@ export class ExtensionController {
 	private async setCursorProviderByUser(enabled: boolean): Promise<void> {
 		try {
 			await RuntimeStateStore.mutate((current) => {
-				current.cursorProvider = { enabled };
+				current.cursorProvider = { ...current.cursorProvider, enabled };
 
 				return current;
 			});
@@ -560,7 +567,45 @@ export class ExtensionController {
 		}
 
 		this.log(`[cursor] provider ${enabled ? 'connected' : 'disconnected'}`);
-		this.dashboard.sendCursorProviderState(RuntimeStateStore.read().cursorProvider.enabled);
+		this.dashboard.sendCursorProviderState(RuntimeStateStore.read().cursorProvider);
+	}
+
+	private async setCursorBillingGuardByUser(billingGuard: boolean): Promise<void> {
+		if (!billingGuard) {
+			const confirm = 'Allow Cursor inference';
+			const choice = await vscode.window.showWarningMessage(
+				'Allow Cursor inference without the billing guard?',
+				{
+					modal: true,
+					detail:
+						'Ungate cannot verify that Cursor bills these requests to your subscription only. If usage-based pricing is on for your Cursor account or team, requests may be charged. Check your Cursor billing settings before continuing.'
+				},
+				confirm
+			);
+
+			if (choice !== confirm) {
+				this.dashboard.sendCursorProviderState(RuntimeStateStore.read().cursorProvider);
+
+				return;
+			}
+		}
+
+		try {
+			await RuntimeStateStore.mutate((current) => {
+				current.cursorProvider = { ...current.cursorProvider, billingGuard };
+
+				return current;
+			});
+		} catch (error: unknown) {
+			void vscode.window.showErrorMessage(`Could not change the Cursor billing guard: ${this.formatError(error)}`);
+		}
+
+		if (billingGuard) {
+			this.cursorBridge.cancelAll();
+		}
+
+		this.log(`[cursor] billing guard ${billingGuard ? 'on' : 'off'}`);
+		this.dashboard.sendCursorProviderState(RuntimeStateStore.read().cursorProvider);
 	}
 
 	private async sendTunnelConfig(runtimeState: RuntimeState = RuntimeStateStore.read()): Promise<void> {
@@ -726,8 +771,8 @@ export class ExtensionController {
 		this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
 		this.dashboard.sendAutoTunnelState(runtimeState.autoTunnel.enabled);
 		void this.sendTunnelConfig(runtimeState);
-		this.dashboard.sendCursorProviderState(runtimeState.cursorProvider.enabled);
-		if (!runtimeState.cursorProvider.enabled) {
+		this.dashboard.sendCursorProviderState(runtimeState.cursorProvider);
+		if (!runtimeState.cursorProvider.enabled || runtimeState.cursorProvider.billingGuard) {
 			this.cursorBridge?.cancelAll();
 		}
 		this.updateStatusBar();
