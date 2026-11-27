@@ -39,6 +39,28 @@ describe('proxy-request-builder', () => {
 		expect(system.find((block) => block.text === 'sys')?.cache_control?.ttl).toBeUndefined();
 		const userBlock = (prepared.messages[0].content as { cache_control?: { ttl?: number } }[])[0];
 		expect(userBlock.cache_control?.ttl).toBeUndefined();
+		expect(prepared.cache_control).toEqual({ type: 'ephemeral' });
+	});
+
+	it('enables automatic prompt caching when the client omitted cache_control', () => {
+		const prepared = RequestBuilder.prepareClaudeCodeBody({
+			model: 'claude-opus-5-5',
+			max_tokens: 1024,
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(prepared.cache_control).toEqual({ type: 'ephemeral' });
+	});
+
+	it('keeps a client-provided top-level cache_control and strips ttl', () => {
+		const prepared = RequestBuilder.prepareClaudeCodeBody({
+			model: 'claude-opus-5-5',
+			max_tokens: 1024,
+			cache_control: { type: 'ephemeral', ttl: 3600 },
+			messages: [{ role: 'user', content: 'hello' }]
+		});
+
+		expect(prepared.cache_control).toEqual({ type: 'ephemeral' });
 	});
 
 	it('passes each reasoning tier through verbatim as the effort level', () => {

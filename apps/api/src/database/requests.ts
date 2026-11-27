@@ -26,6 +26,8 @@ export class Requests {
 				source: record.source,
 				inputTokens: record.inputTokens,
 				outputTokens: record.outputTokens,
+				cacheReadTokens: cacheReadTokens ?? 0,
+				cacheCreationTokens: cacheCreationTokens ?? 0,
 				estimatedCost,
 				stream: record.stream,
 				latencyMs: record.latencyMs ?? null,

@@ -75,7 +75,13 @@ function handleLimitChange(event: Event) {
 				</div>
 				<div class="text-surface-400 text-xs">
 					{Formatter.date(req.timestamp ?? 0)} &bull;
-					{req.inputTokens} in / {req.outputTokens} out
+					{Formatter.number(req.inputTokens)} in / {Formatter.number(req.outputTokens)} out
+					{#if (req.cacheReadTokens ?? 0) > 0 || (req.cacheCreationTokens ?? 0) > 0}
+						&bull; cache {Formatter.number(req.cacheReadTokens ?? 0)} read
+						{#if (req.cacheCreationTokens ?? 0) > 0}
+							/ {Formatter.number(req.cacheCreationTokens ?? 0)} write
+						{/if}
+					{/if}
 					{#if req.latencyMs}
 						&bull; {Formatter.latency(req.latencyMs)}
 					{/if}
