@@ -661,11 +661,12 @@ describe('ExtensionController', () => {
 		expect(tunnelManager.restart).not.toHaveBeenCalled();
 	});
 
-	it('shows a flagged tunnel as running with a hidden hostname', async () => {
+	it('shows a flagged tunnel as running with a hidden hostname and sends the ngrok domain to the dashboard', async () => {
 		const { controller, dashboard, statusBar } = createController('window-a');
 		const internals = getInternals(controller);
 		const runtimeState = createRuntimeState(['window-a']);
 		runtimeState.tunnelProvider = 'ngrok';
+		runtimeState.ngrokDomain = 'api.example.com';
 		runtimeState.tunnel.status = 'running';
 		runtimeState.tunnel.ownerWindowId = 'window-a';
 		runtimeState.tunnel.warning = 'offensive-hostname';
@@ -683,6 +684,7 @@ describe('ExtensionController', () => {
 			error: null,
 			warning: 'offensive-hostname'
 		});
+		expect(dashboard.sendTunnelConfig).toHaveBeenCalledWith('ngrok', false, 'api.example.com');
 		expect((statusBar.tooltip as unknown as { value: string }).value).toContain('hostname hidden by the word filter');
 		expect((statusBar.tooltip as unknown as { value: string }).value).not.toContain('Copy URL');
 	});

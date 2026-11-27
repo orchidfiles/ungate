@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => {
 	return {
 		quickMock: vi.fn(),
 		killMock: vi.fn(),
-		runtimeReadMock: vi.fn<() => { clients: object; tunnelProvider: string; tunnel: { url: string | null } }>(),
+		runtimeReadMock:
+			vi.fn<() => { clients: object; tunnelProvider: string; ngrokDomain: null; tunnel: { url: string | null } }>(),
 		findServingCloudflaredMock: vi.fn<(port: number) => { pid: number; command: string } | null>(() => null),
 		persisted: [] as { url: string | null; warning: string | null }[]
 	};
@@ -131,7 +132,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		mocks.findServingCloudflaredMock.mockReset();
 		mocks.findServingCloudflaredMock.mockReturnValue(null);
 		mocks.runtimeReadMock.mockReset();
-		mocks.runtimeReadMock.mockReturnValue({ clients: {}, tunnelProvider: 'quick', tunnel: { url: null } });
+		mocks.runtimeReadMock.mockReturnValue({ clients: {}, tunnelProvider: 'quick', ngrokDomain: null, tunnel: { url: null } });
 		vi.spyOn(process, 'kill').mockImplementation((pid: number) => {
 			mocks.killMock(pid);
 
@@ -312,6 +313,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		mocks.runtimeReadMock.mockReturnValue({
 			clients: {},
 			tunnelProvider: 'quick',
+			ngrokDomain: null,
 			tunnel: { url: REJECTED_URL }
 		});
 

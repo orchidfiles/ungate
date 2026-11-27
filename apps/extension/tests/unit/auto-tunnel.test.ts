@@ -216,19 +216,34 @@ describe('AutoTunnel with a flagged tunnel hostname', () => {
 	});
 });
 
-describe('RuntimeStateNormalizer tunnel warning', () => {
-	it('defaults the warning when an older state file has none', () => {
-		const legacy = TestHelper.createRuntimeState(['window-a']);
+describe('RuntimeStateNormalizer tunnel hostname fields', () => {
+	it('defaults the warning and the ngrok domain when an older state file has neither', () => {
+		const legacy = TestHelper.createRuntimeState(['window-a']) as Partial<RuntimeState>;
+		delete legacy.ngrokDomain;
 		delete (legacy.tunnel as Partial<RuntimeState['tunnel']>).warning;
 
-		expect(RuntimeStateNormalizer.normalize(legacy).tunnel.warning).toBeNull();
+		const next = RuntimeStateNormalizer.normalize(legacy);
+
+		expect(next.ngrokDomain).toBeNull();
+		expect(next.tunnel.warning).toBeNull();
 	});
 
-	it('keeps a stored warning', () => {
+	it('keeps a stored warning and normalizes a stored domain', () => {
 		const stored = TestHelper.createRuntimeState(['window-a']);
 		stored.tunnel.warning = 'offensive-hostname';
+		stored.ngrokDomain = ' API.Example.com ';
 
-		expect(RuntimeStateNormalizer.normalize(stored).tunnel.warning).toBe('offensive-hostname');
+		const next = RuntimeStateNormalizer.normalize(stored);
+
+		expect(next.tunnel.warning).toBe('offensive-hostname');
+		expect(next.ngrokDomain).toBe('api.example.com');
+	});
+
+	it('drops a stored domain that is not a plain hostname', () => {
+		const stored = TestHelper.createRuntimeState(['window-a']);
+		stored.ngrokDomain = 'https://api.example.com/v1';
+
+		expect(RuntimeStateNormalizer.normalize(stored).ngrokDomain).toBeNull();
 	});
 });
 

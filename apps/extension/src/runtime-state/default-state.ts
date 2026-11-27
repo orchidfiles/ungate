@@ -30,6 +30,7 @@ export class RuntimeStateDefaults {
 				lastAppliedUrl: null
 			},
 			tunnelProvider: 'quick',
+			ngrokDomain: null,
 			clients: {},
 			commands: []
 		};

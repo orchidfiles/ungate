@@ -1,5 +1,5 @@
 <script lang="ts">
-import { NgrokAuthToken, sleep, type TunnelProvider } from '@ungate/shared/frontend';
+import { NgrokAuthToken, NgrokDomain, sleep, type TunnelProvider } from '@ungate/shared/frontend';
 import IconCopy from 'virtual:icons/lucide/copy';
 import IconPlay from 'virtual:icons/lucide/play';
 import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
@@ -27,9 +27,14 @@ const statusDotClass: Record<string, string> = {
 
 let copied = $state(false);
 let tokenDraft = $state('');
+let domainDraft = $state<string | null>(null);
 
 const ngrok = $derived(store.provider === 'ngrok');
+const domainInput = $derived(domainDraft ?? store.ngrokDomain ?? '');
+const domainNormalized = $derived(NgrokDomain.normalize(domainInput));
+const domainInvalid = $derived(domainInput.trim().length > 0 && domainNormalized === null);
 const tokenInvalid = $derived(tokenDraft.trim().length > 0 && NgrokAuthToken.normalize(tokenDraft) === null);
+const domainChanged = $derived(!domainInvalid && domainNormalized !== store.ngrokDomain);
 const hostnameFlagged = $derived(store.tunnel.warning === 'offensive-hostname');
 
 function handleCopy() {
@@ -55,6 +60,20 @@ function handleAutoTunnelChange(event: Event): void {
 function handleProviderChange(event: Event): void {
 	const target = event.currentTarget as HTMLSelectElement;
 	store.setProvider(target.value as TunnelProvider);
+}
+
+function handleDomainInput(event: Event): void {
+	const target = event.currentTarget as HTMLInputElement;
+	domainDraft = target.value;
+}
+
+function saveDomain(): void {
+	if (domainInvalid) {
+		return;
+	}
+
+	store.setNgrokDomain(domainNormalized);
+	domainDraft = null;
 }
 
 function switchToQuickTunnel(): void {
@@ -90,7 +109,10 @@ function saveToken(): void {
 				hidden. ngrok picks that name and does not let a free account change it. Requests to that address still reach Ungate; it
 				is listed under Domains in the ngrok dashboard.
 			</p>
-			<p class="text-xs opacity-80">Switch to the Quick tunnel for a different address.</p>
+			<p class="text-xs opacity-80">
+				Switch to the Quick tunnel for a different address, or enter a domain of your own under "ngrok domain" below (needs a paid
+				ngrok plan) and restart the tunnel.
+			</p>
 			<button
 				class="btn btn-sm preset-filled-primary-500"
 				onclick={switchToQuickTunnel}>
@@ -202,6 +224,30 @@ function saveToken(): void {
 			{#if tokenInvalid}
 				<p class="text-xs text-error-500">
 					That is not an ngrok authtoken. Copy the authtoken from dashboard.ngrok.com; a tunnel URL does not go here.
+				</p>
+			{/if}
+			<div class="flex items-center gap-2">
+				<input
+					class="input text-sm flex-1"
+					type="text"
+					placeholder="ngrok domain (optional), e.g. api.example.com"
+					autocomplete="off"
+					spellcheck="false"
+					value={domainInput}
+					oninput={handleDomainInput} />
+				<button
+					class="btn btn-sm preset-tonal-surface"
+					disabled={!domainChanged}
+					onclick={saveDomain}>
+					Save
+				</button>
+			</div>
+			{#if domainInvalid}
+				<p class="text-xs text-error-500">Enter a hostname only, such as api.example.com, without https:// or a path.</p>
+			{:else}
+				<p class="text-xs text-surface-400">
+					Leave empty to use the dev domain ngrok assigned to your account. A domain of your own needs a paid ngrok plan and
+					applies the next time the tunnel starts.
 				</p>
 			{/if}
 		{:else}

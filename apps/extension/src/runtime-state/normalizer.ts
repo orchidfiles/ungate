@@ -3,7 +3,8 @@ import {
 	runtimeStateSchema,
 	type RuntimeClientEntry,
 	type RuntimeCommand,
-	type RuntimeState
+	type RuntimeState,
+	NgrokDomain
 } from '@ungate/shared/frontend';
 import { z } from 'zod';
 
@@ -48,6 +49,10 @@ export class RuntimeStateNormalizer {
 
 		if (parsed.success && parsed.data.tunnelProvider) {
 			next.tunnelProvider = parsed.data.tunnelProvider;
+		}
+
+		if (parsed.success) {
+			next.ngrokDomain = NgrokDomain.normalize(parsed.data.ngrokDomain);
 		}
 
 		if (typeof next.api.lastSeenAt !== 'number') {
