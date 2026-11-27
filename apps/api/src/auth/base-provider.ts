@@ -1,6 +1,9 @@
 export type AIProviderName = 'claude' | 'minimax' | 'openai';
 
 export interface OAuthCredentials {
+	localAccountId?: string;
+	credentialVersion?: number;
+	providerUserId?: string | null;
 	accessToken: string;
 	refreshToken?: string | null;
 	expiresAt?: number | null;

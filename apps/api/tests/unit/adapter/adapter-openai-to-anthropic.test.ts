@@ -115,6 +115,7 @@ describe('openai-to-anthropic', () => {
 	it('keeps anthropic tool blocks and handles invalid tool json', () => {
 		const result = openaiToAnthropic({
 			model: 'claude-opus-4-6',
+			// The first message carries Anthropic-native content on purpose.
 			messages: [
 				{ role: 'assistant', content: [{ type: 'tool_use', id: 'x', name: 'Read', input: { path: 'a' } }] },
 				{
@@ -128,12 +129,12 @@ describe('openai-to-anthropic', () => {
 						}
 					]
 				}
-			]
+			] as unknown as OpenAIChatRequest['messages']
 		});
 
 		const assistantMessages = result.messages.filter((message) => message.role === 'assistant');
 		const allBlocks = assistantMessages.flatMap((message) => (Array.isArray(message.content) ? message.content : []));
-		const toolUse = allBlocks.find((block) => (block as Record<string, unknown>).type === 'tool_use' && block.id === 'call_bad');
+		const toolUse = allBlocks.find((block) => block.type === 'tool_use' && block.id === 'call_bad');
 		expect(toolUse).toBeTruthy();
 		expect((toolUse as { input?: Record<string, unknown> }).input).toEqual({ raw: '{"broken"' });
 	});
@@ -163,7 +164,7 @@ describe('openai-to-anthropic', () => {
 		expect(result.messages[0]).toEqual({ role: 'user', content: 'Continue.' });
 		expect(result.messages[1].role).toBe('assistant');
 		expect(result.messages[2].role).toBe('user');
-		const toolResults = result.messages[2].content as Record<string, unknown>[];
+		const toolResults = result.messages[2].content as unknown as Record<string, unknown>[];
 		expect(toolResults).toHaveLength(2);
 		expect(toolResults[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'call_1', content: 'ok1' });
 		expect(toolResults[1]).toMatchObject({ type: 'tool_result', tool_use_id: 'call_2', content: 'ok2' });
