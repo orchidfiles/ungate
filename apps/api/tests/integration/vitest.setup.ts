@@ -13,6 +13,8 @@ export function resetIntegrationDatabase(): void {
 		sqlite.exec('PRAGMA foreign_keys = OFF;');
 		sqlite.exec('DELETE FROM requests;');
 		sqlite.exec('DELETE FROM provider_settings;');
+		sqlite.exec('DELETE FROM oauth_accounts;');
+		sqlite.exec('DELETE FROM oauth_policies;');
 		sqlite.exec('DELETE FROM model_mappings;');
 		sqlite.exec('DELETE FROM app_settings;');
 		sqlite.exec("DELETE FROM sqlite_sequence WHERE name = 'requests';");

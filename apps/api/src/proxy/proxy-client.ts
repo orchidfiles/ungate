@@ -18,19 +18,21 @@ function detectProvider(model: string): AIProviderName {
 export async function proxyRequest(
 	endpoint: string,
 	body: AnthropicRequest,
-	headers: Record<string, string>
+	headers: Record<string, string>,
+	signal?: AbortSignal
 ): Promise<ProxyResult> {
-	return proxyAnthropicRequest(endpoint, body, headers);
+	return proxyAnthropicRequest(endpoint, body, headers, signal);
 }
 
 export async function proxyOpenAIRequest(
 	openaiBody: OpenAIChatRequest,
-	provider?: AIProviderName
+	provider?: AIProviderName,
+	signal?: AbortSignal
 ): Promise<{ response: Response; context: RequestContext }> {
 	const resolved = provider ?? detectProvider(openaiBody.model);
 
 	if (resolved === 'openai') {
-		return OpenAiClient.proxy(openaiBody);
+		return OpenAiClient.proxy(openaiBody, signal);
 	}
 
 	if (resolved === 'minimax') {
@@ -40,7 +42,7 @@ export async function proxyOpenAIRequest(
 	// Claude: convert OpenAI → Anthropic → proxy
 	const anthropicBody = openaiToAnthropic(openaiBody);
 	const anthropicHeaders: Record<string, string> = {};
-	const result = await proxyAnthropicRequest('/v1/messages', anthropicBody, anthropicHeaders);
+	const result = await proxyAnthropicRequest('/v1/messages', anthropicBody, anthropicHeaders, signal);
 
 	return result;
 }
