@@ -8,6 +8,7 @@ export function createTestApp(config: HarnessConfig = {}): FastifyInstance {
 	const app = Fastify({ logger: false });
 	app.decorate('config', {
 		port: 0,
+		hosts: [],
 		apiKey: config.apiKey,
 		quietMode: true
 	});
