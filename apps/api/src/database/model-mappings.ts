@@ -1,9 +1,11 @@
 import { cloneDeep, orderBy, trim } from 'lodash-es';
 
 import {
+	isCursorToolMode,
 	isModelMappingProvider,
 	isModelServiceTier,
 	isReasoningBudgetTier,
+	type CursorToolMode,
 	type ModelMappingConfig,
 	type ModelMappingProvider,
 	type ModelServiceTier,
@@ -50,6 +52,7 @@ export class ModelMappings {
 			const trimmedUpstreamModel = trim(model.upstreamModel);
 			let reasoningBudget: ReasoningBudgetTier | null = null;
 			let serviceTier: ModelServiceTier | null = null;
+			let toolMode: CursorToolMode | null = null;
 			let provider: ModelMappingProvider = 'claude';
 
 			if (isModelMappingProvider(model.provider)) {
@@ -64,6 +67,11 @@ export class ModelMappings {
 				serviceTier = model.serviceTier;
 			}
 
+			// Tool mode only matters for Cursor rows; `auto` is stored as null.
+			if (provider === 'cursor' && isCursorToolMode(model.toolMode) && model.toolMode !== 'auto') {
+				toolMode = model.toolMode;
+			}
+
 			if (!trimmedId || !trimmedLabel || !trimmedUpstreamModel) {
 				continue;
 			}
@@ -75,7 +83,8 @@ export class ModelMappings {
 				upstreamModel: trimmedUpstreamModel,
 				sortOrder: index,
 				reasoningBudget,
-				serviceTier
+				serviceTier,
+				toolMode
 			});
 		}
 
@@ -94,7 +103,8 @@ export class ModelMappings {
 				upstreamModel: row.upstreamModel,
 				sortOrder: row.sortOrder,
 				reasoningBudget: isReasoningBudgetTier(row.reasoningBudget) ? row.reasoningBudget : null,
-				serviceTier: isModelServiceTier(row.serviceTier) ? row.serviceTier : null
+				serviceTier: isModelServiceTier(row.serviceTier) ? row.serviceTier : null,
+				toolMode: isCursorToolMode(row.toolMode) ? row.toolMode : null
 			})),
 			['sortOrder'],
 			['asc']
@@ -107,21 +117,21 @@ export class ModelMappings {
 	// separate field, so a mapping saved as "gpt-5.6-sol-fast-medium" arrives as
 	// "gpt-5.6-sol-fast". Only re-attach a suffix that matches the row's own budget, and
 	// keep sortOrder precedence so the first matching mapping wins.
-	private static findByDroppedReasoningSuffix(mappings: ModelMappingConfig[], lowerRequested: string): ModelMappingConfig | null {
-		for (const mapping of mappings) {
-			if (!mapping.reasoningBudget) {
-				continue;
-			}
+	// When several tiers share the stripped id (`grok-4.7-medium` / `-high`), the effort Cursor
+	// sent alongside picks the tier.
+	private static findByDroppedReasoningSuffix(
+		mappings: ModelMappingConfig[],
+		lowerRequested: string,
+		requestedEffort: string | null
+	): ModelMappingConfig | null {
+		const candidates = mappings.filter(
+			(mapping) => mapping.reasoningBudget && mapping.id.toLowerCase() === `${lowerRequested}-${mapping.reasoningBudget}`
+		);
 
-			if (mapping.id.toLowerCase() === `${lowerRequested}-${mapping.reasoningBudget}`) {
-				return mapping;
-			}
-		}
-
-		return null;
+		return candidates.find((mapping) => mapping.reasoningBudget === requestedEffort) ?? candidates[0] ?? null;
 	}
 
-	static resolveForChatCompletion(requestedModel: string): ModelMappingConfig | null {
+	static resolveForChatCompletion(requestedModel: string, requestedEffort: string | null = null): ModelMappingConfig | null {
 		const mappings = this.list();
 		const t = requestedModel.trim();
 
@@ -141,7 +151,7 @@ export class ModelMappings {
 		// Must stay ahead of the upstream match: mappings that differ only by service tier
 		// share one upstream model, so matching upstream first collapses the priority-tier
 		// row onto the default-tier one.
-		const byDroppedSuffix = this.findByDroppedReasoningSuffix(mappings, lower);
+		const byDroppedSuffix = this.findByDroppedReasoningSuffix(mappings, lower, requestedEffort?.toLowerCase() ?? null);
 
 		if (byDroppedSuffix) {
 			return byDroppedSuffix;
@@ -155,6 +165,21 @@ export class ModelMappings {
 		}
 
 		return null;
+	}
+
+	/** Appends one mapping after the existing rows. Throws DuplicateModelIdError on an id collision. */
+	static append(model: Omit<ModelMappingConfig, 'sortOrder'>): ModelMappingConfig {
+		const existing = this.list();
+		const [sanitized] = this.sanitize([{ ...model, sortOrder: 0 }]);
+
+		if (!sanitized) {
+			throw new Error('Model mapping requires id, label and upstream model');
+		}
+
+		const next = { ...sanitized, sortOrder: existing.length };
+		this.replace([...existing, next]);
+
+		return next;
 	}
 
 	static replace(models: ModelMappingConfig[]): void {
@@ -173,7 +198,8 @@ export class ModelMappings {
 						upstreamModel: model.upstreamModel,
 						sortOrder: model.sortOrder,
 						reasoningBudget: model.reasoningBudget,
-						serviceTier: model.serviceTier
+						serviceTier: model.serviceTier,
+						toolMode: model.toolMode ?? null
 					})
 					.run();
 			}
