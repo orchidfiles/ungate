@@ -62,6 +62,10 @@
 		},
 		"commands": [
 			{
+				"command": "ungate.diagnoseCursorCapabilities",
+				"title": "Ungate: Diagnose Cursor Subscription Capabilities (Local Only)"
+			},
+			{
 				"command": "ungate.openDashboard",
 				"title": "Ungate: Open Dashboard"
 			},
@@ -88,7 +92,8 @@
 		"publish": "ovsx publish out/ungate.vsix",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix",
-		"test": "vitest run"
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p ."
 	},
 	"dependencies": {
 		"@ungate/shared": "workspace:*",
@@ -98,6 +103,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "~22.15.35",
+		"@types/tar": "~6.1.13",
 		"@types/vscode": "~1.96.0",
 		"@ungate/dev-kit": "workspace:*",
 		"@vscode/vsce": "~3.2.0",

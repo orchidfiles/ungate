@@ -18,10 +18,22 @@ export class StreamChunkMapper {
 		};
 
 		if (usage) {
-			chunk.usage = usage;
+			chunk.usage = this.openAiUsage(usage);
 		}
 
 		return chunk;
+	}
+
+	/** Internal flat usage → OpenAI chat usage with `*_tokens_details` objects. */
+	static openAiUsage(usage: Record<string, number> | undefined): Record<string, unknown> | undefined {
+		if (!usage) return undefined;
+
+		const { cached_tokens: cached, reasoning_tokens: reasoning, ...base } = usage;
+		const openAiUsage: Record<string, unknown> = { ...base };
+		if (cached !== undefined) openAiUsage.prompt_tokens_details = { cached_tokens: cached };
+		if (reasoning !== undefined) openAiUsage.completion_tokens_details = { reasoning_tokens: reasoning };
+
+		return openAiUsage;
 	}
 
 	static outputIndex(payload: Record<string, unknown>): number | undefined {
@@ -93,6 +105,9 @@ export class StreamChunkMapper {
 		if (!name) {
 			name = 'unknown';
 		}
+
+		state.toolNames.push(name);
+		state.firstTokenAt ??= Date.now();
 
 		const firstDelta: Record<string, unknown> = {
 			tool_calls: [
