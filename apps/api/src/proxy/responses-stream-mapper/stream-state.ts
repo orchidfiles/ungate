@@ -1,7 +1,16 @@
+/**
+ * `chunk` → forward as `data: <json>`; `done` → successful terminal `[DONE]`;
+ * `error` → upstream failure (`response.failed` / `error`): `data` is an OpenAI-style
+ * `{ error: { message, type, code } }` payload, `upstreamError` the raw (token-free) error object.
+ */
 export interface StreamProcessResult {
-	type: 'chunk' | 'done';
+	type: 'chunk' | 'done' | 'error';
 	data?: Record<string, unknown>;
+	upstreamError?: Record<string, unknown>;
 }
+
+/** Terminal outcome of a Codex `/responses` stream; null until a terminal event arrives. */
+export type StreamTerminal = 'completed' | 'incomplete' | 'failed';
 
 export interface PendingFunctionCallState {
 	callId: string;
@@ -24,6 +33,17 @@ export interface StreamState {
 	sseKindCounts: Map<string, number>;
 	outputItemTypeAdded: Map<string, number>;
 	outputItemTypeDone: Map<string, number>;
+	terminal: StreamTerminal | null;
+	/** Usage from the terminal event, mapped to OpenAI field names. */
+	usage?: Record<string, number>;
+	/** Set when `terminal === 'failed'`. */
+	failure?: { message: string; type: string; code?: string; upstream?: Record<string, unknown> };
+	/** Wall-clock time of the first assistant chunk (text or tool call), for time-to-first-token. */
+	firstTokenAt?: number;
+	/** Tool names in call order (function_call and custom_tool_call). */
+	toolNames: string[];
+	/** `incomplete_details.reason` of a `response.incomplete` terminal. */
+	incompleteReason?: string;
 }
 
 export class StreamStateFactory {
@@ -41,7 +61,9 @@ export class StreamStateFactory {
 			pendingFunctionCalls: new Map(),
 			sseKindCounts: new Map(),
 			outputItemTypeAdded: new Map(),
-			outputItemTypeDone: new Map()
+			outputItemTypeDone: new Map(),
+			terminal: null,
+			toolNames: []
 		};
 
 		return state;

@@ -13,6 +13,7 @@
 		"test": "pnpm run test:unit && pnpm run test:integration",
 		"test:unit": "vitest run --config tests/unit/vitest.config.ts",
 		"test:integration": "vitest run --config tests/integration/vitest.config.ts",
+		"typecheck": "tsc --noEmit -p .",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate"
 	},
