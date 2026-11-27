@@ -23,8 +23,8 @@ const renameSyncMock = vi.fn();
 const rmSyncMock = vi.fn();
 const mkdirSyncMock = vi.fn();
 const writeFileSyncMock = vi.fn();
-const readFileSyncMock = vi.fn(readStampedFile);
-const inspectMock = vi.fn(() => {
+const readFileSyncMock = vi.fn((...args: unknown[]) => readStampedFile(args[0]));
+const inspectMock = vi.fn((..._args: unknown[]) => {
 	return { abi: '137', platform: 'win32', arch: 'x64' };
 });
 
@@ -63,8 +63,8 @@ vi.mock('../../src/utils/node-resolver', () => {
 	};
 });
 
-const isApiStartSuppressedMock = vi.fn<() => boolean>(() => false);
-const suppressApiAutoStartMock = vi.fn<() => Promise<void>>(() => Promise.resolve());
+const isApiStartSuppressedMock = vi.fn<(...args: unknown[]) => boolean>(() => false);
+const suppressApiAutoStartMock = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve());
 
 vi.mock('../../src/runtime-state', () => {
 	return {

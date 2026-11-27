@@ -1,6 +1,8 @@
 import { config } from 'src/config';
 import { logger } from 'src/utils/logger';
 
+import { AccountRefreshRejected, REFRESH_TIMEOUT_MS } from '../account-token-service';
+
 export class OpenAIOAuthClient {
 	public static async exchangeCode(code: string, codeVerifier: string): Promise<Record<string, unknown>> {
 		const oauthConfig = config.openai.oauth;
@@ -45,12 +47,14 @@ export class OpenAIOAuthClient {
 					grant_type: 'refresh_token',
 					client_id: oauthConfig.clientId,
 					refresh_token: refreshTokenValue
-				})
+				}),
+				signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS)
 			});
 
 			if (!response.ok) {
-				const errorText = await response.text();
-				logger.error('Token refresh failed:', response.status, errorText);
+				const body: { error?: string } | null = await response.json().catch(() => null);
+				if (response.status === 401 || body?.error === 'invalid_grant') throw new AccountRefreshRejected('Refresh rejected');
+				logger.error('Token refresh failed:', response.status);
 
 				return null;
 			}
@@ -60,7 +64,8 @@ export class OpenAIOAuthClient {
 
 			return tokens;
 		} catch (error) {
-			logger.error('Failed to refresh token:', error);
+			if (error instanceof AccountRefreshRejected) throw error;
+			logger.error('Failed to refresh token');
 
 			return null;
 		}

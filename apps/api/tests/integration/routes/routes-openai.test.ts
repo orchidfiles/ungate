@@ -9,6 +9,13 @@ const proxyMiniMaxRequestMock = vi.fn();
 const proxyOpenAIRequestMock = vi.fn();
 const proxyRequestMock = vi.fn();
 const requestsRecordMock = vi.fn();
+const cursorInvokeMock = vi.fn();
+
+vi.mock('src/proxy/cursor-bridge-client', () => ({
+	cursorBridgeClient: {
+		invoke: (...args: unknown[]) => cursorInvokeMock(...args)
+	}
+}));
 
 vi.mock('src/database/model-mappings', () => ({
 	ModelMappings: {
@@ -60,6 +67,37 @@ describe('routes-openai', () => {
 		vi.clearAllMocks();
 	});
 
+	it.each([
+		['ungate-grok-4.7-high', true],
+		['grok-4.7-high', false],
+		['my-custom-cursor-model', true],
+		['ungate-grok-4.7', false]
+	] as const)('returns terminal billing denial for %s (stream=%s) without fallback', async (model, stream) => {
+		resolveForChatCompletionMock.mockReturnValueOnce({
+			provider: 'cursor',
+			upstreamModel: 'grok-4.7-high',
+			toolMode: null
+		});
+		cursorInvokeMock.mockImplementationOnce(async function* () {
+			await Promise.resolve();
+			yield { kind: 'end', error: { kind: 'billing_blocked', message: 'Subscription-only billing cannot be guaranteed.' } };
+		});
+		const app = await withPlugin(openaiPlugin, { apiKey: 'secret' });
+		const response = await app.inject({
+			method: 'POST',
+			url: '/v1/chat/completions',
+			headers: { 'x-api-key': 'secret' },
+			payload: { model, messages: [{ role: 'user', content: 'hi' }], stream }
+		});
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({ error: { code: 'billing_blocked' } });
+		expect(cursorInvokeMock).toHaveBeenCalledTimes(1);
+		expect(proxyRequestMock).not.toHaveBeenCalled();
+		expect(proxyOpenAIRequestMock).not.toHaveBeenCalled();
+		expect(proxyMiniMaxRequestMock).not.toHaveBeenCalled();
+		await app.close();
+	});
+
 	it('routes to minimax and returns non-stream response with headers', async () => {
 		resolveForChatCompletionMock.mockReturnValueOnce({ provider: 'minimax', upstreamModel: 'mini-up' });
 		proxyMiniMaxRequestMock.mockResolvedValueOnce({
@@ -91,7 +129,7 @@ describe('routes-openai', () => {
 		expect(response.headers['x-request-id']).toBeTruthy();
 		expect(response.headers['openai-processing-ms']).toBeTruthy();
 		expect(response.headers['openai-version']).toBe('2020-10-01');
-		expect(requestsRecordMock).toHaveBeenCalled();
+		expect(requestsRecordMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'cursor' }));
 		await app.close();
 	});
 
@@ -162,7 +200,9 @@ describe('routes-openai', () => {
 				reasoning: { effort: 'high' },
 				service_tier: 'priority'
 			}),
-			'openai'
+			'openai',
+			expect.any(AbortSignal),
+			expect.objectContaining({ clientId: 'cursor' })
 		);
 		await app.close();
 	});
