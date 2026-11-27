@@ -1,0 +1,56 @@
+name: Live tunnel
+
+on:
+  pull_request:
+    paths:
+      - 'apps/extension/**'
+      - 'packages/shared/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/live-tunnel.yml'
+  push:
+    paths:
+      - 'apps/extension/**'
+      - 'packages/shared/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/live-tunnel.yml'
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-tunnel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick-tunnel:
+    name: Quick tunnel (real cloudflared)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build dev-kit and shared
+        run: |
+          pnpm --filter @ungate/dev-kit build
+          pnpm --filter @ungate/shared build
+
+      - name: Start a quick tunnel and call it from the internet
+        run: pnpm --filter ungate test:live
