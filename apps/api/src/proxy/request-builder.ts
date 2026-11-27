@@ -105,6 +105,31 @@ export class RequestBuilder {
 		}
 	}
 
+	private static stripTopLevelCacheTtl(body: AnthropicRequest): void {
+		const cacheControl = body.cache_control;
+
+		if (!cacheControl || typeof cacheControl !== 'object') {
+			return;
+		}
+
+		if ('ttl' in cacheControl) {
+			delete cacheControl.ttl;
+		}
+	}
+
+	/**
+	 * Cursor's OpenAI chat-completions path never sends cache_control. Without it Anthropic
+	 * bills the full prompt every turn. Top-level automatic caching moves the breakpoint to
+	 * the last cacheable block as the conversation grows (see Anthropic prompt-caching docs).
+	 */
+	private static ensureAutomaticPromptCache(body: AnthropicRequest): void {
+		if (body.cache_control) {
+			return;
+		}
+
+		body.cache_control = { type: 'ephemeral' };
+	}
+
 	static prepareClaudeCodeBody(body: AnthropicRequest): AnthropicRequest {
 		const prepared = { ...body };
 
@@ -167,6 +192,9 @@ export class RequestBuilder {
 				}
 			}
 		}
+
+		this.ensureAutomaticPromptCache(prepared);
+		this.stripTopLevelCacheTtl(prepared);
 
 		return prepared;
 	}

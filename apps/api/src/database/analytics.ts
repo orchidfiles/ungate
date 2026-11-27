@@ -20,7 +20,9 @@ export class Analytics {
 				openaiRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'openai' THEN 1 ELSE 0 END)`,
 				errorRequests: sql<number>`SUM(CASE WHEN ${requests.source} = 'error' THEN 1 ELSE 0 END)`,
 				totalInputTokens: sql<number>`SUM(${requests.inputTokens})`,
-				totalOutputTokens: sql<number>`SUM(${requests.outputTokens})`
+				totalOutputTokens: sql<number>`SUM(${requests.outputTokens})`,
+				totalCacheReadTokens: sql<number>`SUM(${requests.cacheReadTokens})`,
+				totalCacheCreationTokens: sql<number>`SUM(${requests.cacheCreationTokens})`
 			})
 			.from(requests)
 			.where(sql`${requests.timestamp} >= ${since} AND ${requests.timestamp} <= ${until}`)
@@ -34,6 +36,8 @@ export class Analytics {
 			errorRequests: totals?.errorRequests ?? 0,
 			totalInputTokens: totals?.totalInputTokens ?? 0,
 			totalOutputTokens: totals?.totalOutputTokens ?? 0,
+			totalCacheReadTokens: totals?.totalCacheReadTokens ?? 0,
+			totalCacheCreationTokens: totals?.totalCacheCreationTokens ?? 0,
 			periodStart: since,
 			periodEnd: until
 		};
@@ -55,6 +59,8 @@ export class Analytics {
 				source: row.source,
 				inputTokens: row.inputTokens,
 				outputTokens: row.outputTokens,
+				cacheReadTokens: row.cacheReadTokens,
+				cacheCreationTokens: row.cacheCreationTokens,
 				estimatedCost: row.estimatedCost,
 				stream: row.stream,
 				latencyMs: row.latencyMs,

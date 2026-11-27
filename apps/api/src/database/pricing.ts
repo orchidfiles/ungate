@@ -10,6 +10,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
 	'gpt-5.6-luna': { inputPerMTok: 1.0, outputPerMTok: 6.0 },
 	'gpt-5.6': { inputPerMTok: 5.0, outputPerMTok: 30.0 },
 
+	'claude-opus-5-5': { inputPerMTok: 4.0, outputPerMTok: 20.0 },
 	'claude-opus-4-8': { inputPerMTok: 5.0, outputPerMTok: 25.0 },
 	'claude-opus-4-7': { inputPerMTok: 5.0, outputPerMTok: 25.0 },
 	'claude-opus-4-6': { inputPerMTok: 5.0, outputPerMTok: 25.0 },

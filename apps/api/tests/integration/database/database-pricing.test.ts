@@ -10,6 +10,7 @@ describe('database-pricing', () => {
 		expect(Pricing.getModel('gpt-5.6-luna')).toEqual({ inputPerMTok: 1.0, outputPerMTok: 6.0 });
 		expect(Pricing.getModel('claude-sonnet-4-6')).toEqual({ inputPerMTok: 3.0, outputPerMTok: 15.0 });
 		expect(Pricing.getModel('claude-sonnet-4-6-20250514')).toEqual({ inputPerMTok: 3.0, outputPerMTok: 15.0 });
+		expect(Pricing.getModel('claude-opus-5-5')).toEqual({ inputPerMTok: 4.0, outputPerMTok: 20.0 });
 		expect(Pricing.getModel('unknown-model')).toEqual({ inputPerMTok: 3.0, outputPerMTok: 15.0 });
 	});
 

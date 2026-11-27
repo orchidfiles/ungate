@@ -10,6 +10,8 @@ export interface AnalyticsSummary {
 	errorRequests: number;
 	totalInputTokens: number;
 	totalOutputTokens: number;
+	totalCacheReadTokens: number;
+	totalCacheCreationTokens: number;
 	periodStart: number;
 	periodEnd: number;
 	period?: Period;
@@ -23,6 +25,8 @@ export interface RequestRecord {
 	source: RequestSource;
 	inputTokens: number;
 	outputTokens: number;
+	cacheReadTokens?: number;
+	cacheCreationTokens?: number;
 	estimatedCost?: number;
 	stream: boolean;
 	latencyMs: number | null;

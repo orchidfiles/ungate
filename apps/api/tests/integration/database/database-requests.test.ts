@@ -6,20 +6,26 @@ import { Requests } from 'src/database/requests';
 
 describe('database-requests', () => {
 	it('records request with estimated cost and error field', () => {
-		const id = Requests.record({
-			model: 'claude-sonnet-4-6',
-			source: 'claude',
-			inputTokens: 10,
-			outputTokens: 20,
-			stream: false,
-			error: 'boom'
-		});
+		const id = Requests.record(
+			{
+				model: 'claude-sonnet-4-6',
+				source: 'claude',
+				inputTokens: 10,
+				outputTokens: 20,
+				stream: false,
+				error: 'boom'
+			},
+			4,
+			3
+		);
 
 		expect(id).toBeGreaterThan(0);
 		const row = getDb().select().from(schema.requests).where(eq(schema.requests.id, id)).get();
 		expect(row?.model).toBe('claude-sonnet-4-6');
 		expect(row?.estimatedCost).toBeTypeOf('number');
 		expect(row?.error).toBe('boom');
+		expect(row?.cacheReadTokens).toBe(4);
+		expect(row?.cacheCreationTokens).toBe(3);
 	});
 
 	it('updates tokens and recalculates cost', () => {

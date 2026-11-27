@@ -137,6 +137,8 @@ describe('routes: health/settings/models/analytics', () => {
 			errorRequests: 0,
 			totalInputTokens: 10,
 			totalOutputTokens: 20,
+			totalCacheReadTokens: 8,
+			totalCacheCreationTokens: 2,
 			periodStart: 0,
 			periodEnd: 0
 		});

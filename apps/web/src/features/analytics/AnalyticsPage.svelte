@@ -88,6 +88,23 @@ function handleConfirmReset() {
 				variant="error" />
 		</div>
 
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+			<StatCard
+				label="Input Tokens"
+				value={Formatter.number(store.summary.totalInputTokens)} />
+			<StatCard
+				label="Output Tokens"
+				value={Formatter.number(store.summary.totalOutputTokens)} />
+			<StatCard
+				label="Cache Read"
+				value={Formatter.number(store.summary.totalCacheReadTokens ?? 0)}
+				variant="success" />
+			<StatCard
+				label="Cache Write"
+				value={Formatter.number(store.summary.totalCacheCreationTokens ?? 0)}
+				variant="warning" />
+		</div>
+
 		<TokenChart
 			series={store.tokenSeries}
 			period={store.period} />

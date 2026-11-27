@@ -70,6 +70,8 @@ export interface AnthropicRequest {
 	thinking?: ThinkingConfig;
 	output_config?: OutputConfig;
 	context_management?: ContextManagement;
+	/** Automatic prompt caching: Anthropic places the breakpoint on the last cacheable block. */
+	cache_control?: { type: string; ttl?: number };
 }
 
 export interface Tool {
