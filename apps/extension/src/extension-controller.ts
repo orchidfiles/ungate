@@ -104,7 +104,7 @@ export class ExtensionController {
 				this.dashboard.sendTunnelState(state);
 				this.updateStatusBar();
 
-				if (state.status === 'running' && state.url) {
+				if (state.status === 'running' && state.url && !state.warning) {
 					void this.autoTunnel.onTunnelUrl(state.url).catch((error: unknown) => {
 						this.log(`[auto-tunnel] announce failed: ${this.formatError(error)}`);
 					});
@@ -350,6 +350,14 @@ export class ExtensionController {
 
 	private async copyTunnelUrlFromCommand(): Promise<void> {
 		const url = this.getTunnelApiUrl();
+
+		if (!url && this.currentTunnelState.warning === 'offensive-hostname') {
+			void vscode.window.showWarningMessage(
+				'The tunnel hostname was rejected by the word filter and is hidden. Open the Ungate dashboard for the options.'
+			);
+
+			return;
+		}
 
 		if (!url) {
 			void vscode.window.showWarningMessage('No tunnel URL yet. Start the tunnel from the menu or dashboard.');
@@ -610,7 +618,8 @@ export class ExtensionController {
 		this.currentTunnelState = {
 			status: runtimeState.tunnel.status,
 			url: runtimeState.tunnel.url,
-			error: runtimeState.tunnel.lastError
+			error: runtimeState.tunnel.lastError,
+			warning: runtimeState.tunnel.warning
 		};
 		this.dashboard.setPort(this.currentPort);
 		this.dashboard.sendTunnelState(this.currentTunnelState);

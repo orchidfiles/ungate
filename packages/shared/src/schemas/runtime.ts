@@ -32,12 +32,19 @@ export const runtimeApiStateSchema = z.object({
 	startSuppressed: z.boolean().optional()
 });
 
+/** `offensive-hostname`: the provider assigned a hostname the word filter rejects and it cannot be rerolled. */
+export const TUNNEL_WARNINGS = ['offensive-hostname'] as const;
+
+export const runtimeTunnelWarningSchema = z.enum(TUNNEL_WARNINGS);
+
 export const runtimeTunnelStateSchema = z.object({
 	status: runtimeTunnelStatusSchema,
 	url: z.string().nullable(),
 	lastSeenAt: z.number(),
 	lastError: z.string().nullable(),
-	ownerWindowId: z.string().nullable()
+	ownerWindowId: z.string().nullable(),
+	// State files written before hostname screening have no `warning`.
+	warning: runtimeTunnelWarningSchema.nullable().default(null)
 });
 
 export const runtimeKeyFixStateSchema = z.object({

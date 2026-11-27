@@ -1,5 +1,5 @@
 <script lang="ts">
-import { sleep, type TunnelProvider } from '@ungate/shared/frontend';
+import { NgrokAuthToken, sleep, type TunnelProvider } from '@ungate/shared/frontend';
 import IconCopy from 'virtual:icons/lucide/copy';
 import IconPlay from 'virtual:icons/lucide/play';
 import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
@@ -29,6 +29,8 @@ let copied = $state(false);
 let tokenDraft = $state('');
 
 const ngrok = $derived(store.provider === 'ngrok');
+const tokenInvalid = $derived(tokenDraft.trim().length > 0 && NgrokAuthToken.normalize(tokenDraft) === null);
+const hostnameFlagged = $derived(store.tunnel.warning === 'offensive-hostname');
 
 function handleCopy() {
 	if (!store.tunnel.url) return;
@@ -55,8 +57,13 @@ function handleProviderChange(event: Event): void {
 	store.setProvider(target.value as TunnelProvider);
 }
 
+function switchToQuickTunnel(): void {
+	store.setProvider('quick');
+	store.restartTunnel();
+}
+
 function saveToken(): void {
-	const token = tokenDraft.trim();
+	const token = NgrokAuthToken.normalize(tokenDraft);
 
 	if (!token) {
 		return;
@@ -76,7 +83,23 @@ function saveToken(): void {
 		</div>
 	</div>
 
-	{#if store.tunnel.status === 'running' && store.tunnel.url}
+	{#if store.tunnel.status === 'running' && hostnameFlagged}
+		<div class="card preset-tonal-warning p-3 space-y-2">
+			<p class="text-sm">
+				The tunnel is running, but the address ngrok assigned to your account contains a word Ungate's filter rejects, so it is
+				hidden. ngrok picks that name and does not let a free account change it. Requests to that address still reach Ungate; it
+				is listed under Domains in the ngrok dashboard.
+			</p>
+			<p class="text-xs opacity-80">Switch to the Quick tunnel for a different address.</p>
+			<button
+				class="btn btn-sm preset-filled-primary-500"
+				onclick={switchToQuickTunnel}>
+				Switch to Quick tunnel
+			</button>
+		</div>
+	{/if}
+
+	{#if store.tunnel.status === 'running' && store.tunnel.url && !hostnameFlagged}
 		<div class="space-y-2">
 			<div class="flex items-center gap-2">
 				<code class="code text-surface-950-50 text-xs flex-1 truncate">{store.tunnel.url}/v1</code>
@@ -171,11 +194,16 @@ function saveToken(): void {
 					bind:value={tokenDraft} />
 				<button
 					class="btn btn-sm preset-tonal-surface"
-					disabled={!tokenDraft.trim()}
+					disabled={!tokenDraft.trim() || tokenInvalid}
 					onclick={saveToken}>
 					Save
 				</button>
 			</div>
+			{#if tokenInvalid}
+				<p class="text-xs text-error-500">
+					That is not an ngrok authtoken. Copy the authtoken from dashboard.ngrok.com; a tunnel URL does not go here.
+				</p>
+			{/if}
 		{:else}
 			<p class="text-xs text-surface-400">Nothing to configure. The public URL is new every time the tunnel starts.</p>
 		{/if}

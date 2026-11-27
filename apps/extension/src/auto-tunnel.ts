@@ -30,7 +30,8 @@ export interface AutoTunnelContext {
 /**
  * Starts the tunnel once per API process and, each time the tunnel URL changes, hands the new
  * base URL to the user. Cursor exposes no command to write the OpenAI base URL or key, so the
- * URL is copied and Cursor's model settings are one click away.
+ * URL is copied and Cursor's model settings are one click away. A tunnel flagged with a warning
+ * (a hostname the word filter rejects) is never copied or announced.
  */
 export class AutoTunnel {
 	private enabled = DEFAULT_AUTO_TUNNEL_ENABLED;
@@ -73,7 +74,7 @@ export class AutoTunnel {
 		const { api, tunnel } = runtimeState;
 
 		if (tunnel.status === 'running' && tunnel.url) {
-			if (runtimeState.autoTunnel.lastAppliedUrl !== tunnel.url) {
+			if (!tunnel.warning && runtimeState.autoTunnel.lastAppliedUrl !== tunnel.url) {
 				await this.onTunnelUrl(tunnel.url);
 			}
 

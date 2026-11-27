@@ -6,16 +6,19 @@ import * as path from 'node:path';
 import { localApiBaseUrl } from '@ungate/shared';
 import { bin, use, Tunnel } from 'cloudflared';
 
+import { NgrokLogLine, type NgrokFailure } from './ngrok-log-line';
+import { NgrokOutputLines } from './ngrok-output-lines';
 import { NgrokTokenStore, UnavailableNgrokSecrets } from './ngrok-token-store';
-import { NgrokUrl } from './ngrok-url';
 import { CloudflaredProcess, RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
+import { TunnelHostnameScreen } from './tunnel-hostname-screen';
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
 import { NGROK_VERSION, NgrokInstaller } from './utils/ngrok-installer';
 
 import type { LogEntry, TunnelState } from '@ungate/shared/frontend';
 
 const CLOUDFLARED_BIN_DIR = path.join(os.homedir(), '.ungate', 'bin');
+const QUICK_TUNNEL_API_URL = 'https://api.trycloudflare.com';
 
 interface NgrokProcess {
 	stdout: NodeJS.ReadableStream | null;
@@ -28,10 +31,12 @@ interface NgrokProcess {
 export class TunnelManager {
 	private tunnel: Tunnel | null = null;
 	private ngrok: NgrokProcess | null = null;
+	private ngrokFailure: NgrokFailure | null = null;
 	private adoptedPid: number | null = null;
 	private state: TunnelState = { status: 'stopped', url: null, error: null };
 	private readonly windowId: string;
 	private autoStopTimer: NodeJS.Timeout | null = null;
+	private hostnameRerollTimer: NodeJS.Timeout | null = null;
 	/** Bumped by every start and stop; a start resuming after an await quits once it is stale. */
 	private generation = 0;
 
@@ -78,7 +83,7 @@ export class TunnelManager {
 			return;
 		}
 
-		this.spawnTunnel(port);
+		this.spawnTunnel(port, generation, 1);
 		this.scheduleAutoStop();
 	}
 
@@ -95,6 +100,11 @@ export class TunnelManager {
 	}
 
 	private stopProcesses(): void {
+		if (this.hostnameRerollTimer) {
+			clearTimeout(this.hostnameRerollTimer);
+			this.hostnameRerollTimer = null;
+		}
+
 		if (this.tunnel) {
 			this.tunnel.stop();
 			this.tunnel = null;
@@ -110,7 +120,8 @@ export class TunnelManager {
 
 	/**
 	 * A cloudflared process is already proxying this port and the shared state
-	 * still has its public URL. Reuse that URL instead of requesting a new quick tunnel.
+	 * still has its public URL. Reuse that URL instead of requesting a new quick tunnel,
+	 * unless its hostname fails the word filter: then the process is retired and replaced.
 	 */
 	private adoptRunningTunnel(port: number): boolean {
 		const serving = CloudflaredProcess.findServing(port);
@@ -121,6 +132,17 @@ export class TunnelManager {
 		}
 
 		this.adoptedPid = serving.pid;
+
+		if (!TunnelHostnameScreen.isAcceptable(recordedUrl)) {
+			this.onLog({
+				timestamp: Date.now(),
+				level: 'warn',
+				message: 'Running tunnel hostname rejected by the word filter, replacing it with a new tunnel'
+			});
+
+			return false;
+		}
+
 		this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${recordedUrl}` });
 		this.setState({ status: 'running', url: recordedUrl, error: null });
 		this.scheduleAutoStop();
@@ -253,19 +275,23 @@ export class TunnelManager {
 			return;
 		}
 
-		const child = cp.spawn(binaryPath, ['http', String(port), '--authtoken', token, '--log', 'stdout', '--log-format', 'json'], {
-			stdio: ['ignore', 'pipe', 'pipe']
+		const child = cp.spawn(binaryPath, ['http', String(port), '--log', 'stdout', '--log-format', 'json'], {
+			stdio: ['ignore', 'pipe', 'pipe'],
+			env: { ...process.env, NGROK_AUTHTOKEN: token }
 		});
+		const stdoutLines = new NgrokOutputLines();
+		const stderrLines = new NgrokOutputLines();
 		this.ngrok = child;
+		this.ngrokFailure = null;
 		this.scheduleAutoStop();
 
 		child.stdout?.on('data', (chunk: Buffer) => {
 			if (this.ngrok !== child) return;
-			this.consumeNgrokOutput(chunk.toString('utf8'));
+			this.consumeNgrokLines(stdoutLines.push(chunk.toString('utf8')));
 		});
 		child.stderr?.on('data', (chunk: Buffer) => {
 			if (this.ngrok !== child) return;
-			this.consumeNgrokOutput(chunk.toString('utf8'));
+			this.consumeNgrokLines(stderrLines.push(chunk.toString('utf8')));
 		});
 		child.on('error', (err) => {
 			if (this.ngrok !== child) return;
@@ -274,31 +300,87 @@ export class TunnelManager {
 		});
 		child.on('exit', (code, signal) => {
 			if (this.ngrok !== child) return;
+			this.consumeNgrokLines([...stdoutLines.flush(), ...stderrLines.flush()]);
 			this.onLog({ timestamp: Date.now(), level: 'warn', message: `Tunnel exited code=${code} signal=${signal}` });
 
 			if (this.state.status !== 'stopped') {
-				const failed = this.state.status === 'starting';
-				this.setState(
-					failed
-						? { status: 'error', url: null, error: `Process exited before tunnel was ready (code=${code})` }
-						: { status: 'stopped', url: null, error: null }
-				);
+				this.setState(this.ngrokExitState(code));
 			}
 
 			this.ngrok = null;
 		});
 	}
 
-	private consumeNgrokOutput(output: string): void {
-		for (const line of output.split('\n').filter((entry) => entry.trim())) {
-			this.onLog({ timestamp: Date.now(), level: 'info', message: line });
+	/** ngrok explains a failed exit in its own output; that reason is what the user needs to see. */
+	private ngrokExitState(code: number | null): TunnelState {
+		const failure = this.ngrokFailure;
 
-			const url = NgrokUrl.read(line);
+		if (failure && code !== 0) {
+			const reason = failure.message ?? `ngrok exited (code=${code})`;
+			const described = failure.code ? `${reason} (${failure.code})` : reason;
+			const error = `ngrok: ${TunnelHostnameScreen.redact(described)}`;
 
-			if (url && this.state.url !== url) {
-				this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${url}` });
-				this.setState({ status: 'running', url, error: null });
+			return { status: 'error', url: null, error };
+		}
+
+		if (this.state.status === 'starting') {
+			return { status: 'error', url: null, error: `Process exited before tunnel was ready (code=${code})` };
+		}
+
+		return { status: 'stopped', url: null, error: null };
+	}
+
+	private rememberNgrokFailure(next: NgrokFailure): void {
+		const current = this.ngrokFailure;
+
+		if (!current || (next.code && next.message)) {
+			this.ngrokFailure = next;
+
+			return;
+		}
+
+		this.ngrokFailure = { code: current.code ?? next.code, message: current.message ?? next.message };
+	}
+
+	/**
+	 * An ngrok dev domain is fixed per account and cannot be rerolled, so a rejected one keeps
+	 * serving, but its URL is withheld: the state carries a warning instead of the URL and the
+	 * log shows it redacted.
+	 */
+	private consumeNgrokLines(lines: string[]): void {
+		for (const line of lines) {
+			const parsed = new NgrokLogLine(line);
+			const message = TunnelHostnameScreen.redact(line);
+			this.onLog({ timestamp: Date.now(), level: parsed.level, message });
+
+			if (parsed.failure) {
+				this.rememberNgrokFailure(parsed.failure);
 			}
+
+			const url = parsed.tunnelUrl;
+
+			if (!url || this.state.url === url) {
+				continue;
+			}
+
+			if (!TunnelHostnameScreen.isAcceptable(url)) {
+				if (this.state.warning === 'offensive-hostname') {
+					continue;
+				}
+
+				this.onLog({
+					timestamp: Date.now(),
+					level: 'warn',
+					message:
+						'Tunnel is running, but the hostname ngrok assigned was rejected by the word filter. It is hidden and will not be stored, copied or announced. Switch to the Quick tunnel for a different address.'
+				});
+				this.setState({ status: 'running', url: null, error: null, warning: 'offensive-hostname' });
+
+				continue;
+			}
+
+			this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${url}` });
+			this.setState({ status: 'running', url, error: null });
 		}
 	}
 
@@ -333,7 +415,11 @@ export class TunnelManager {
 		}
 	}
 
-	private spawnTunnel(port: number): void {
+	/**
+	 * The quick-tunnel hostname is screened before anything is published. A rejected hostname
+	 * never reaches the log or the state; its process is stopped and another tunnel is requested.
+	 */
+	private spawnTunnel(port: number, generation: number, attempt: number): void {
 		const t = Tunnel.quick(localApiBaseUrl(port), {
 			'--config': this.getCloudflaredConfigArg(),
 			'--edge-ip-version': '4'
@@ -341,26 +427,42 @@ export class TunnelManager {
 		this.tunnel = t;
 
 		t.on('url', (url) => {
+			if (this.tunnel !== t || url === QUICK_TUNNEL_API_URL) return;
+
+			if (!TunnelHostnameScreen.isAcceptable(url)) {
+				this.tunnel = null;
+				t.stop();
+				this.rerollQuickTunnel(port, generation, attempt);
+
+				return;
+			}
+
 			this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${url}` });
 			this.setState({ status: 'running', url, error: null });
 			this.scheduleAutoStop();
 		});
 
 		t.on('stderr', (data) => {
+			if (this.tunnel !== t) return;
+
 			const lines = data.split('\n').filter((line) => line.trim());
 
 			for (const line of lines) {
-				this.onLog({ timestamp: Date.now(), level: 'info', message: line });
+				this.onLog({ timestamp: Date.now(), level: 'info', message: TunnelHostnameScreen.redact(line) });
 			}
 		});
 
 		t.on('error', (err) => {
-			const message = err.message;
+			if (this.tunnel !== t) return;
+
+			const message = TunnelHostnameScreen.redact(err.message);
 			this.onLog({ timestamp: Date.now(), level: 'error', message: `Tunnel error: ${message}` });
 			this.setState({ status: 'error', url: null, error: message });
 		});
 
 		t.on('exit', (code, signal) => {
+			if (this.tunnel !== t) return;
+
 			this.onLog({ timestamp: Date.now(), level: 'warn', message: `Tunnel exited code=${code} signal=${signal}` });
 
 			const wasStarting = this.state.status === 'starting';
@@ -385,6 +487,33 @@ export class TunnelManager {
 		});
 	}
 
+	private rerollQuickTunnel(port: number, generation: number, attempt: number): void {
+		const { hostnameMaxAttempts, hostnameRerollDelayMs } = config.tunnelManager;
+
+		if (attempt >= hostnameMaxAttempts) {
+			const error = `Cloudflare assigned a hostname rejected by the word filter ${hostnameMaxAttempts} times in a row. Start the tunnel again to retry.`;
+			this.onLog({ timestamp: Date.now(), level: 'error', message: error });
+			this.setState({ status: 'error', url: null, error });
+
+			return;
+		}
+
+		const nextAttempt = attempt + 1;
+		this.onLog({
+			timestamp: Date.now(),
+			level: 'warn',
+			message: `Tunnel hostname rejected by the word filter, requesting another (attempt ${nextAttempt} of ${hostnameMaxAttempts})`
+		});
+
+		this.hostnameRerollTimer = setTimeout(() => {
+			this.hostnameRerollTimer = null;
+
+			if (generation !== this.generation) return;
+
+			this.spawnTunnel(port, generation, nextAttempt);
+		}, hostnameRerollDelayMs);
+	}
+
 	private setState(next: TunnelState): void {
 		this.state = next;
 		void this.persistTunnelState(next).catch(() => {});
@@ -396,6 +525,7 @@ export class TunnelManager {
 			current.tunnel.url = next.url;
 			current.tunnel.lastSeenAt = Date.now();
 			current.tunnel.lastError = next.error;
+			current.tunnel.warning = next.warning ?? null;
 			current.tunnel.ownerWindowId = this.windowId;
 
 			return current;

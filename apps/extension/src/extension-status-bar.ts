@@ -17,6 +17,10 @@ export class ExtensionStatusBar {
 	}
 
 	public static formatTunnelTip(tunnel: TunnelState, tunnelApiUrl: string | null): string {
+		if (tunnel.status === 'running' && tunnel.warning === 'offensive-hostname') {
+			return '$(warning) Tunnel: running (hostname hidden by the word filter, see the dashboard)';
+		}
+
 		if (tunnelApiUrl) {
 			return `$(globe) Tunnel: running\n\n\`${tunnelApiUrl}\``;
 		}

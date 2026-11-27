@@ -4,8 +4,9 @@ import { RuntimeStateStore } from '../../src/runtime-state/runtime-state-store';
 
 import type { RuntimeState, TunnelStatus } from '@ungate/shared/frontend';
 
-const { runtimeMutateMock, runtimeReadMock, findServingCloudflaredMock } = vi.hoisted(() => {
+const { runtimeMutateMock, runtimeReadMock, findServingCloudflaredMock, terminateCloudflaredMock } = vi.hoisted(() => {
 	return {
+		terminateCloudflaredMock: vi.fn<(pid: number) => void>(),
 		runtimeMutateMock: vi.fn<(mutator: (current: RuntimeState) => RuntimeState) => Promise<RuntimeState>>(),
 		runtimeReadMock: vi.fn<() => RuntimeState>(),
 		findServingCloudflaredMock: vi.fn<(port: number | null) => { pid: number; command: string } | null>(() => null)
@@ -15,7 +16,8 @@ const { runtimeMutateMock, runtimeReadMock, findServingCloudflaredMock } = vi.ho
 vi.mock('../../src/runtime-state/cloudflared-process', () => {
 	return {
 		CloudflaredProcess: {
-			findServing: (port: number | null) => findServingCloudflaredMock(port)
+			findServing: (port: number | null) => findServingCloudflaredMock(port),
+			terminate: (pid: number) => terminateCloudflaredMock(pid)
 		}
 	};
 });
@@ -47,7 +49,8 @@ function createState(apiStatus: RuntimeState['api']['status'], lastError: string
 			url: null,
 			lastSeenAt: 0,
 			lastError: null,
-			ownerWindowId: null
+			ownerWindowId: null,
+			warning: null
 		},
 		keyFix: { enabled: false },
 		autoTunnel: { enabled: false, lastAppliedUrl: null },
@@ -74,6 +77,7 @@ describe('RuntimeStateStore', () => {
 		runtimeReadMock.mockReset();
 		findServingCloudflaredMock.mockReset();
 		findServingCloudflaredMock.mockReturnValue(null);
+		terminateCloudflaredMock.mockReset();
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(() => Promise.resolve({ ok: false }))
@@ -139,6 +143,24 @@ describe('RuntimeStateStore', () => {
 		expect(next.tunnel.url).toBe('https://example.trycloudflare.com');
 		expect(runtimeMutateMock).not.toHaveBeenCalled();
 		expect(findServingCloudflaredMock).toHaveBeenCalledWith(47821);
+	});
+
+	it('retires an orphaned tunnel whose hostname is rejected even while cloudflared still serves it', async () => {
+		const initial = createOrphanedTunnelState('running');
+		initial.tunnel.url = 'https://table-stupid-range-seeds.trycloudflare.com';
+		findServingCloudflaredMock.mockReturnValue({
+			pid: 42,
+			command: 'cloudflared tunnel --url http://127.0.0.1:47821'
+		});
+		runtimeReadMock.mockReturnValue(initial);
+		runtimeMutateMock.mockImplementation((mutator) => Promise.resolve(mutator(structuredClone(initial))));
+
+		const next = await RuntimeStateStore.reconcileOrphanedTunnel(initial);
+
+		expect(terminateCloudflaredMock).toHaveBeenCalledWith(42);
+		expect(next.tunnel.status).toBe('stopped');
+		expect(next.tunnel.url).toBeNull();
+		expect(next.tunnel.warning).toBeNull();
 	});
 
 	it('returns live-owned tunnel unchanged without mutate', async () => {

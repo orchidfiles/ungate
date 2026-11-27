@@ -9,6 +9,7 @@ import type {
 	runtimeLogLevelSchema,
 	runtimeStateSchema,
 	runtimeTunnelStateSchema,
+	runtimeTunnelWarningSchema,
 	runtimeTunnelStatusSchema
 } from '../schemas/runtime';
 import type { z } from 'zod';
@@ -22,5 +23,6 @@ export type RuntimeCommand = z.infer<typeof runtimeCommandSchema>;
 export type RuntimeApiState = z.infer<typeof runtimeApiStateSchema>;
 export type RuntimeTunnelState = z.infer<typeof runtimeTunnelStateSchema>;
 export type RuntimeAutoTunnelState = z.infer<typeof runtimeAutoTunnelStateSchema>;
+export type TunnelWarning = z.infer<typeof runtimeTunnelWarningSchema>;
 export type TunnelProvider = z.infer<typeof runtimeTunnelProviderSchema>;
 export type RuntimeState = z.infer<typeof runtimeStateSchema>;
