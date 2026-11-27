@@ -1,14 +1,17 @@
-import { EventEmitter } from 'node:events';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
 	return {
-		quickMock: vi.fn(),
 		killMock: vi.fn(),
-		runtimeReadMock:
-			vi.fn<() => { clients: object; tunnelProvider: string; ngrokDomain: null; tunnel: { url: string | null } }>(),
-		findServingCloudflaredMock: vi.fn<(port: number) => { pid: number; command: string } | null>(() => null),
+		runtimeReadMock: vi.fn<
+			() => {
+				clients: object;
+				tunnelProvider: string;
+				ngrokDomain: null;
+				tunnel: { url: string | null; pid: number | null; metricsPort: number | null };
+			}
+		>(),
+		isRunningCommandMock: vi.fn<(pid: number, port: number | null) => boolean>(() => false),
 		persisted: [] as { url: string | null; warning: string | null }[]
 	};
 });
@@ -16,11 +19,14 @@ const mocks = vi.hoisted(() => {
 vi.mock('cloudflared', () => {
 	return {
 		bin: '/dev/cloudflared-package/bin/cloudflared',
-		use: vi.fn(),
-		Tunnel: {
-			quick: mocks.quickMock
-		}
+		use: vi.fn()
 	};
+});
+
+vi.mock('../../src/detached-cloudflared', async () => {
+	const { FakeDetachedCloudflared } = await import('./helpers/fake-detached-cloudflared');
+
+	return { DetachedCloudflared: FakeDetachedCloudflared };
 });
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -35,7 +41,7 @@ vi.mock('node:fs', async (importOriginal) => {
 vi.mock('../../src/runtime-state', () => {
 	return {
 		CloudflaredProcess: {
-			findServing: (port: number) => mocks.findServingCloudflaredMock(port)
+			isRunningCommand: (pid: number, port: number | null) => mocks.isRunningCommandMock(pid, port)
 		},
 		RuntimeStateStore: {
 			mutate: vi.fn((mutator: (state: { tunnel: { url: string | null; warning: string | null } }) => unknown) => {
@@ -54,6 +60,8 @@ vi.mock('../../src/runtime-state', () => {
 import { config } from '../../src/runtime-state/config';
 import { TunnelManager } from '../../src/tunnel-manager';
 
+import { FakeDetachedCloudflared } from './helpers/fake-detached-cloudflared';
+
 import type { LogEntry, TunnelState } from '@ungate/shared/frontend';
 
 const REJECTED_URL = 'https://table-stupid-range-seeds.trycloudflare.com';
@@ -61,47 +69,17 @@ const SECOND_REJECTED_URL = 'https://acre-idiot-case-shaw.trycloudflare.com';
 const CLEAN_URL = 'https://table-tee-defines-customs.trycloudflare.com';
 const REJECTED_WORDS = /stupid|idiot/;
 
-class FakeQuickTunnel extends EventEmitter {
-	stopped = 0;
-
-	stop(): void {
-		this.stopped++;
-	}
-
-	/** cloudflared prints the URL in a banner; the package emits `url` and `stderr` for the same chunk. */
-	announce(url: string, urlFirst = true): void {
-		const banner = `2026-11-23T00:00:00Z INF |  ${url}  |\n`;
-
-		if (urlFirst) {
-			this.emit('url', url);
-			this.emit('stderr', banner);
-
-			return;
-		}
-
-		this.emit('stderr', banner);
-		this.emit('url', url);
-	}
-}
-
 interface Harness {
 	manager: TunnelManager;
 	states: TunnelState[];
 	logs: LogEntry[];
-	tunnels: FakeQuickTunnel[];
+	tunnels: FakeDetachedCloudflared[];
 }
 
 function createHarness(): Harness {
 	const states: TunnelState[] = [];
 	const logs: LogEntry[] = [];
-	const tunnels: FakeQuickTunnel[] = [];
-
-	mocks.quickMock.mockImplementation(() => {
-		const tunnel = new FakeQuickTunnel();
-		tunnels.push(tunnel);
-
-		return tunnel;
-	});
+	FakeDetachedCloudflared.reset();
 
 	const manager = new TunnelManager(
 		'window-a',
@@ -114,7 +92,21 @@ function createHarness(): Harness {
 		}
 	);
 
-	return { manager, states, logs, tunnels };
+	return { manager, states, logs, tunnels: FakeDetachedCloudflared.spawned };
+}
+
+function publish(tunnel: FakeDetachedCloudflared, url: string, urlFirst = true): void {
+	const banner = `2026-11-23T00:00:00Z INF |  ${url}  |`;
+
+	if (urlFirst) {
+		tunnel.emitUrl(url);
+		tunnel.emitLog(banner);
+
+		return;
+	}
+
+	tunnel.emitLog(banner);
+	tunnel.emitUrl(url);
 }
 
 function everythingPublished(harness: Harness): string {
@@ -127,12 +119,17 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		mocks.persisted.length = 0;
-		mocks.quickMock.mockReset();
 		mocks.killMock.mockReset();
-		mocks.findServingCloudflaredMock.mockReset();
-		mocks.findServingCloudflaredMock.mockReturnValue(null);
+		mocks.isRunningCommandMock.mockReset();
+		mocks.isRunningCommandMock.mockReturnValue(false);
+		FakeDetachedCloudflared.reset();
 		mocks.runtimeReadMock.mockReset();
-		mocks.runtimeReadMock.mockReturnValue({ clients: {}, tunnelProvider: 'quick', ngrokDomain: null, tunnel: { url: null } });
+		mocks.runtimeReadMock.mockReturnValue({
+			clients: {},
+			tunnelProvider: 'quick',
+			ngrokDomain: null,
+			tunnel: { url: null, pid: null, metricsPort: null }
+		});
 		vi.spyOn(process, 'kill').mockImplementation((pid: number) => {
 			mocks.killMock(pid);
 
@@ -154,7 +151,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		const harness = createHarness();
 
 		await harness.manager.start(47821);
-		harness.tunnels[0].announce(CLEAN_URL);
+		harness.tunnels[0].emitUrl(CLEAN_URL);
 		await vi.advanceTimersByTimeAsync(0);
 
 		expect(harness.manager.getState()).toEqual({ status: 'running', url: CLEAN_URL, error: null });
@@ -169,7 +166,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		const harness = createHarness();
 
 		await harness.manager.start(47821);
-		harness.tunnels[0].announce(REJECTED_URL, urlFirst);
+		publish(harness.tunnels[0], REJECTED_URL, urlFirst);
 
 		expect(harness.tunnels[0].stopped).toBe(1);
 		expect(harness.manager.getState().status).toBe('starting');
@@ -181,7 +178,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		await vi.advanceTimersByTimeAsync(1);
 		expect(harness.tunnels).toHaveLength(2);
 
-		harness.tunnels[1].announce(CLEAN_URL, urlFirst);
+		publish(harness.tunnels[1], CLEAN_URL, urlFirst);
 		await vi.advanceTimersByTimeAsync(0);
 
 		expect(harness.manager.getState()).toEqual({ status: 'running', url: CLEAN_URL, error: null });
@@ -196,11 +193,11 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 
 		await harness.manager.start(47821);
 		const rejected = harness.tunnels[0];
-		rejected.announce(REJECTED_URL);
-		rejected.emit('stderr', `ERR request failed dest=${REJECTED_URL}/v1/models\n`);
-		rejected.emit('url', REJECTED_URL);
-		rejected.emit('error', new Error(`late failure for ${REJECTED_URL}`));
-		rejected.emit('exit', 0, 'SIGINT');
+		rejected.emitUrl(REJECTED_URL);
+		rejected.emitLog(`ERR request failed dest=${REJECTED_URL}/v1/models`);
+		rejected.emitUrl(REJECTED_URL);
+		rejected.emitLog(`late failure for ${REJECTED_URL}`);
+		rejected.emitExit('late exit');
 
 		expect(rejected.stopped).toBe(1);
 		expect(harness.manager.getState().status).toBe('starting');
@@ -215,7 +212,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		const harness = createHarness();
 
 		await harness.manager.start(47821);
-		harness.tunnels[0].emit('stderr', `INF previous tunnel ${REJECTED_URL} closed\n`);
+		harness.tunnels[0].emitLog(`INF previous tunnel ${REJECTED_URL} closed`);
 
 		expect(harness.logs.map((entry) => entry.message)).toEqual([
 			'INF previous tunnel https://hidden-hostname.trycloudflare.com closed'
@@ -229,7 +226,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 
 		for (let attempt = 1; attempt <= hostnameMaxAttempts; attempt++) {
 			expect(harness.tunnels).toHaveLength(attempt);
-			harness.tunnels[attempt - 1].announce(attempt % 2 === 0 ? SECOND_REJECTED_URL : REJECTED_URL);
+			harness.tunnels[attempt - 1].emitUrl(attempt % 2 === 0 ? SECOND_REJECTED_URL : REJECTED_URL);
 			await vi.advanceTimersByTimeAsync(hostnameRerollDelayMs);
 		}
 
@@ -249,7 +246,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		const harness = createHarness();
 
 		await harness.manager.start(47821);
-		harness.tunnels[0].announce(REJECTED_URL);
+		harness.tunnels[0].emitUrl(REJECTED_URL);
 		harness.manager.stop();
 
 		await vi.advanceTimersByTimeAsync(hostnameRerollDelayMs * 10);
@@ -262,7 +259,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		const harness = createHarness();
 
 		await harness.manager.start(47821);
-		harness.tunnels[0].announce(REJECTED_URL);
+		harness.tunnels[0].emitUrl(REJECTED_URL);
 		await harness.manager.start(47822);
 
 		expect(harness.tunnels).toHaveLength(2);
@@ -270,7 +267,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		await vi.advanceTimersByTimeAsync(hostnameRerollDelayMs * 10);
 
 		expect(harness.tunnels).toHaveLength(2);
-		expect(mocks.quickMock).toHaveBeenLastCalledWith('http://127.0.0.1:47822', expect.any(Object));
+		expect(FakeDetachedCloudflared.starts.at(-1)?.origin).toBe('http://127.0.0.1:47822');
 	});
 
 	it('does not report a deliberate stop during startup as a failed start', async () => {
@@ -279,42 +276,43 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		await harness.manager.start(47821);
 		const tunnel = harness.tunnels[0];
 		harness.manager.stop();
-		tunnel.emit('exit', 0, 'SIGINT');
+		tunnel.emitExit('stopped');
 
 		expect(harness.manager.getState()).toEqual({ status: 'stopped', url: null, error: null });
-		expect(harness.logs.map((entry) => entry.message)).not.toContain('Tunnel exited code=0 signal=SIGINT');
+		expect(harness.logs.map((entry) => entry.message).join('\n')).not.toContain('Tunnel exited');
 	});
 
 	it('still reports a process that dies before the tunnel is ready', async () => {
 		const harness = createHarness();
 
 		await harness.manager.start(47821);
-		harness.tunnels[0].emit('exit', 1, null);
+		harness.tunnels[0].emitExit();
 
 		expect(harness.manager.getState()).toEqual({
 			status: 'error',
 			url: null,
-			error: 'Process exited before tunnel was ready (code=1)'
+			error: 'Attempt 1 failed: Process exited before tunnel was ready'
 		});
 	});
 
-	it('does not treat the quick-tunnel API address in an error line as the tunnel URL', async () => {
+	it('does not treat the quick-tunnel API address as the tunnel URL', async () => {
 		const harness = createHarness();
 
 		await harness.manager.start(47821);
-		harness.tunnels[0].emit('url', 'https://api.trycloudflare.com');
+		harness.tunnels[0].emitUrl('https://api.trycloudflare.com');
 
 		expect(harness.manager.getState().status).toBe('starting');
 	});
 
 	it('refuses to adopt a running tunnel whose recorded hostname is rejected', async () => {
 		const harness = createHarness();
-		mocks.findServingCloudflaredMock.mockReturnValue({ pid: 42, command: 'cloudflared tunnel --url http://127.0.0.1:47821' });
+		mocks.isRunningCommandMock.mockReturnValue(true);
+		FakeDetachedCloudflared.reportedHostname = 'table-stupid-range-seeds.trycloudflare.com';
 		mocks.runtimeReadMock.mockReturnValue({
 			clients: {},
 			tunnelProvider: 'quick',
 			ngrokDomain: null,
-			tunnel: { url: REJECTED_URL }
+			tunnel: { url: REJECTED_URL, pid: 42, metricsPort: 45000 }
 		});
 
 		await harness.manager.start(47821);
@@ -323,7 +321,7 @@ describe('TunnelManager quick tunnel hostname screening', () => {
 		expect(harness.tunnels).toHaveLength(1);
 		expect(harness.manager.getState().status).toBe('starting');
 
-		harness.tunnels[0].announce(CLEAN_URL);
+		harness.tunnels[0].emitUrl(CLEAN_URL);
 		await vi.advanceTimersByTimeAsync(0);
 
 		expect(harness.manager.getState()).toEqual({ status: 'running', url: CLEAN_URL, error: null });

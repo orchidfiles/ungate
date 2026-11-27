@@ -1,5 +1,6 @@
 import { localApiHealthUrl } from '@ungate/shared';
 
+import { DetachedCloudflared } from '../detached-cloudflared';
 import { TunnelHostnameScreen } from '../tunnel-hostname-screen';
 
 import { CloudflaredProcess } from './cloudflared-process';
@@ -85,7 +86,7 @@ export class RuntimeStateStore {
 		RuntimeStateFileStore.write(next);
 	}
 
-	public static mutate(mutator: (current: RuntimeState) => RuntimeState): Promise<RuntimeState> {
+	public static mutate(mutator: (current: RuntimeState) => RuntimeState | Promise<RuntimeState>): Promise<RuntimeState> {
 		return RuntimeStateFileStore.mutate(mutator);
 	}
 
@@ -142,16 +143,20 @@ export class RuntimeStateStore {
 
 		// The owner window is gone, but cloudflared may still be proxying the API.
 		// Dropping the URL here is what mints a new quick-tunnel name on the next start.
-		if (this.keepsOrphanedTunnelUrl(state)) {
+		const keepsUrl = await this.keepsOrphanedTunnelUrl(state);
+
+		if (keepsUrl) {
 			return state;
 		}
 
-		return await this.mutate((current) => {
+		return await this.mutate(async (current) => {
 			if (!this.isOrphanedTunnel(current)) {
 				return current;
 			}
 
-			if (this.keepsOrphanedTunnelUrl(current)) {
+			const keepsUrl = await this.keepsOrphanedTunnelUrl(current);
+
+			if (keepsUrl) {
 				return current;
 			}
 
@@ -162,6 +167,8 @@ export class RuntimeStateStore {
 			current.tunnel.warning = null;
 			current.tunnel.lastError = null;
 			current.tunnel.ownerWindowId = null;
+			current.tunnel.pid = null;
+			current.tunnel.metricsPort = null;
 			current.tunnel.lastSeenAt = now;
 
 			return current;
@@ -275,25 +282,43 @@ export class RuntimeStateStore {
 	}
 
 	/**
-	 * An orphaned quick tunnel keeps its URL only while cloudflared still serves it and the
-	 * hostname passes the word filter. A rejected one is retired so it is never shown again.
+	 * An orphaned quick tunnel keeps its URL only when the recorded pid is still that cloudflared
+	 * and /quicktunnel on the recorded metrics port returns the same hostname. A rejected or
+	 * different hostname is retired so it is never shown again.
 	 */
-	private static keepsOrphanedTunnelUrl(state: RuntimeState): boolean {
-		if (!state.tunnel.url) {
+	private static async keepsOrphanedTunnelUrl(state: RuntimeState): Promise<boolean> {
+		const url = state.tunnel.url;
+		const pid = state.tunnel.pid;
+		const metricsPort = state.tunnel.metricsPort;
+
+		if (!url || pid == null || metricsPort == null) {
 			return false;
 		}
 
-		const serving = CloudflaredProcess.findServing(state.api.port);
-
-		if (!serving) {
+		if (!CloudflaredProcess.isRunningCommand(pid, state.api.port)) {
 			return false;
 		}
 
-		if (TunnelHostnameScreen.isAcceptable(state.tunnel.url)) {
+		const probe = new DetachedCloudflared({
+			onLog() {},
+			onUrl() {},
+			onExit() {}
+		});
+		const reported = await probe.readQuickTunnelHostname(metricsPort, config.tunnelManager.quickTunnelAdoptAttempts);
+
+		if (!reported || !probe.hostnameMatches(url, reported)) {
+			if (reported) {
+				CloudflaredProcess.terminate(pid);
+			}
+
+			return false;
+		}
+
+		if (TunnelHostnameScreen.isAcceptable(url)) {
 			return true;
 		}
 
-		CloudflaredProcess.terminate(serving.pid);
+		CloudflaredProcess.terminate(pid);
 
 		return false;
 	}

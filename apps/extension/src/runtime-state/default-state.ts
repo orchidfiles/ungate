@@ -20,7 +20,9 @@ export class RuntimeStateDefaults {
 				lastSeenAt: now,
 				lastError: null,
 				ownerWindowId: null,
-				warning: null
+				warning: null,
+				pid: null,
+				metricsPort: null
 			},
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED

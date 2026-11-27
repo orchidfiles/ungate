@@ -24,7 +24,9 @@ export class TestHelper {
 				lastError: null,
 				ownerWindowId: null,
 				lastSeenAt: 0,
-				warning: null
+				warning: null,
+				pid: null,
+				metricsPort: null
 			},
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED

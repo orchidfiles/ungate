@@ -4,8 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { localApiBaseUrl, NgrokDomain } from '@ungate/shared';
-import { bin, use, Tunnel } from 'cloudflared';
+import { bin, use } from 'cloudflared';
 
+import { DetachedCloudflared, type DetachedCloudflaredListener } from './detached-cloudflared';
 import { NgrokLogLine, type NgrokFailure } from './ngrok-log-line';
 import { NgrokOutputLines } from './ngrok-output-lines';
 import { NgrokTokenStore, UnavailableNgrokSecrets } from './ngrok-token-store';
@@ -29,7 +30,8 @@ interface NgrokProcess {
 }
 
 export class TunnelManager {
-	private tunnel: Tunnel | null = null;
+	private cloudflared: DetachedCloudflared | null = null;
+	private cloudflaredBinaryPath: string | null = null;
 	private ngrok: NgrokProcess | null = null;
 	private ngrokFailure: NgrokFailure | null = null;
 	private adoptedPid: number | null = null;
@@ -37,6 +39,11 @@ export class TunnelManager {
 	private readonly windowId: string;
 	private autoStopTimer: NodeJS.Timeout | null = null;
 	private hostnameRerollTimer: NodeJS.Timeout | null = null;
+	private retryTimer: NodeJS.Timeout | null = null;
+	private quickTunnelPort: number | null = null;
+	private retryAttempt = 0;
+	private attemptSaw429 = false;
+	private attemptLogLine: string | null = null;
 	/** Bumped by every start and stop; a start resuming after an await quits once it is stale. */
 	private generation = 0;
 
@@ -55,13 +62,23 @@ export class TunnelManager {
 	}
 
 	async start(port: number): Promise<void> {
-		const generation = ++this.generation;
-
 		if (this.state.status === 'running') {
 			return;
 		}
 
-		if (this.adoptRunningTunnel(port)) {
+		const generation = ++this.generation;
+
+		this.retryAttempt = 0;
+		this.quickTunnelPort = port;
+		this.clearRetryTimer();
+
+		const adopted = await this.adoptRunningTunnel(port, generation);
+
+		if (adopted) {
+			return;
+		}
+
+		if (generation !== this.generation) {
 			return;
 		}
 
@@ -77,13 +94,14 @@ export class TunnelManager {
 
 		this.setState({ status: 'starting', url: null, error: null });
 
-		await this.ensureBinary(generation);
+		const binaryPath = await this.ensureBinary(generation);
 
-		if (generation !== this.generation || this.state.status === 'error') {
+		if (!binaryPath || generation !== this.generation || this.state.status === 'error') {
 			return;
 		}
 
-		this.spawnTunnel(port, generation, 1);
+		this.cloudflaredBinaryPath = binaryPath;
+		await this.spawnTunnel(port, generation, 1);
 		this.scheduleAutoStop();
 	}
 
@@ -105,9 +123,11 @@ export class TunnelManager {
 			this.hostnameRerollTimer = null;
 		}
 
-		if (this.tunnel) {
-			this.tunnel.stop();
-			this.tunnel = null;
+		this.clearRetryTimer();
+
+		if (this.cloudflared) {
+			this.cloudflared.stop();
+			this.cloudflared = null;
 		}
 
 		if (this.ngrok) {
@@ -119,19 +139,39 @@ export class TunnelManager {
 	}
 
 	/**
-	 * A cloudflared process is already proxying this port and the shared state
-	 * still has its public URL. Reuse that URL instead of requesting a new quick tunnel,
-	 * unless its hostname fails the word filter: then the process is retired and replaced.
+	 * A detached cloudflared is already proxying this port. Reuse it when its pid is still that
+	 * process and /quicktunnel on the recorded metrics port returns the same hostname. A mismatch
+	 * or a rejected hostname retires that pid so the caller can request a new tunnel.
 	 */
-	private adoptRunningTunnel(port: number): boolean {
-		const serving = CloudflaredProcess.findServing(port);
-		const recordedUrl = RuntimeStateStore.read().tunnel?.url ?? null;
+	private async adoptRunningTunnel(port: number, generation: number): Promise<boolean> {
+		const recorded = RuntimeStateStore.read().tunnel;
+		const recordedUrl = recorded?.url ?? null;
+		const pid = recorded?.pid ?? null;
+		const metricsPort = recorded?.metricsPort ?? null;
 
-		if (!serving || !recordedUrl) {
+		if (!recordedUrl || pid == null || metricsPort == null) {
 			return false;
 		}
 
-		this.adoptedPid = serving.pid;
+		if (!CloudflaredProcess.isRunningCommand(pid, port)) {
+			return false;
+		}
+
+		this.adoptedPid = pid;
+		const probe = new DetachedCloudflared(this.noopListener());
+		const reported = await probe.readQuickTunnelHostname(metricsPort, config.tunnelManager.quickTunnelAdoptAttempts);
+
+		if (generation !== this.generation) {
+			return false;
+		}
+
+		if (!reported || !probe.hostnameMatches(recordedUrl, reported)) {
+			if (!reported) {
+				this.adoptedPid = null;
+			}
+
+			return false;
+		}
 
 		if (!TunnelHostnameScreen.isAcceptable(recordedUrl)) {
 			this.onLog({
@@ -143,11 +183,29 @@ export class TunnelManager {
 			return false;
 		}
 
+		this.adoptedPid = null;
+		const cloudflared = this.openCloudflared(port, generation, 1);
+		cloudflared.attach({
+			pid,
+			metricsPort,
+			originPort: port,
+			logPath: config.paths.cloudflaredLogPath
+		});
+		this.cloudflared = cloudflared;
+		this.retryAttempt = 0;
 		this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${recordedUrl}` });
 		this.setState({ status: 'running', url: recordedUrl, error: null });
 		this.scheduleAutoStop();
 
 		return true;
+	}
+
+	private noopListener(): DetachedCloudflaredListener {
+		return {
+			onLog() {},
+			onUrl() {},
+			onExit() {}
+		};
 	}
 
 	private stopAdoptedProcess(): void {
@@ -169,9 +227,9 @@ export class TunnelManager {
 		await this.start(port);
 	}
 
-	private async ensureBinary(generation: number): Promise<void> {
+	private async ensureBinary(generation: number): Promise<string | null> {
 		if (fs.existsSync(bin)) {
-			return;
+			return bin;
 		}
 
 		const userBinPath = this.resolveUserBinaryPath();
@@ -179,7 +237,7 @@ export class TunnelManager {
 		if (userBinPath) {
 			use(userBinPath);
 
-			return;
+			return userBinPath;
 		}
 
 		this.setState({ status: 'installing', url: null, error: null });
@@ -189,18 +247,22 @@ export class TunnelManager {
 			const installedPath = await CloudflaredInstaller.install(this.getCloudflaredBinPath());
 
 			use(installedPath);
-			if (generation !== this.generation) return;
+			if (generation !== this.generation) return null;
 			this.onLog({
 				timestamp: Date.now(),
 				level: 'info',
 				message: `cloudflared ${CLOUDFLARED_VERSION} installed and checksum-verified`
 			});
 			this.setState({ status: 'starting', url: null, error: null });
+
+			return installedPath;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			this.onLog({ timestamp: Date.now(), level: 'error', message: `Failed to install cloudflared: ${message}` });
-			if (generation !== this.generation) return;
+			if (generation !== this.generation) return null;
 			this.setState({ status: 'error', url: null, error: `Install failed: ${message}` });
+
+			return null;
 		}
 	}
 
@@ -419,75 +481,191 @@ export class TunnelManager {
 	}
 
 	/**
-	 * The quick-tunnel hostname is screened before anything is published. A rejected hostname
-	 * never reaches the log or the state; its process is stopped and another tunnel is requested.
+	 * The quick-tunnel hostname from /quicktunnel is screened before anything is published.
+	 * A rejected hostname never reaches the log or the state; its process is stopped and another
+	 * tunnel is requested. A process that exits is retried with backoff, cancelled by generation.
 	 */
-	private spawnTunnel(port: number, generation: number, attempt: number): void {
-		const t = Tunnel.quick(localApiBaseUrl(port), {
-			'--config': this.getCloudflaredConfigArg(),
-			'--edge-ip-version': '4'
-		});
-		this.tunnel = t;
+	private async spawnTunnel(port: number, generation: number, attempt: number): Promise<void> {
+		const binaryPath = this.cloudflaredBinaryPath;
 
-		t.on('url', (url) => {
-			if (this.tunnel !== t || url === QUICK_TUNNEL_API_URL) return;
+		if (!binaryPath || generation !== this.generation) {
+			return;
+		}
 
-			if (!TunnelHostnameScreen.isAcceptable(url)) {
-				this.tunnel = null;
-				t.stop();
-				this.rerollQuickTunnel(port, generation, attempt);
+		const cloudflared = this.openCloudflared(port, generation, attempt);
+		this.cloudflared = cloudflared;
+		this.attemptSaw429 = false;
+		this.attemptLogLine = null;
+
+		try {
+			await cloudflared.start({
+				binaryPath,
+				origin: localApiBaseUrl(port),
+				originPort: port,
+				configArg: this.getCloudflaredConfigArg(),
+				logPath: config.paths.cloudflaredLogPath
+			});
+		} catch (error) {
+			if (this.cloudflared !== cloudflared) {
+				cloudflared.stop();
 
 				return;
 			}
 
-			this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${url}` });
-			this.setState({ status: 'running', url, error: null });
-			this.scheduleAutoStop();
-		});
+			this.cloudflared = null;
+			const message = error instanceof Error ? error.message : String(error);
+			this.scheduleRetry(generation, message);
 
-		t.on('stderr', (data) => {
-			if (this.tunnel !== t) return;
+			return;
+		}
 
-			const lines = data.split('\n').filter((line) => line.trim());
+		if (generation !== this.generation || this.cloudflared !== cloudflared) {
+			cloudflared.stop();
 
-			for (const line of lines) {
-				this.onLog({ timestamp: Date.now(), level: 'info', message: TunnelHostnameScreen.redact(line) });
+			if (this.cloudflared === cloudflared) {
+				this.cloudflared = null;
+			}
+
+			return;
+		}
+
+		this.setState({ ...this.state });
+	}
+
+	private openCloudflared(port: number, generation: number, attempt: number): DetachedCloudflared {
+		const cloudflared = new DetachedCloudflared({
+			onLog: (line) => {
+				this.handleCloudflaredLog(cloudflared, line);
+			},
+			onUrl: (url) => {
+				this.handleCloudflaredUrl(cloudflared, port, generation, attempt, url);
+			},
+			onExit: (exit) => {
+				this.handleCloudflaredExit(cloudflared, generation, exit.reason);
 			}
 		});
 
-		t.on('error', (err) => {
-			if (this.tunnel !== t) return;
+		return cloudflared;
+	}
 
-			const message = TunnelHostnameScreen.redact(err.message);
-			this.onLog({ timestamp: Date.now(), level: 'error', message: `Tunnel error: ${message}` });
-			this.setState({ status: 'error', url: null, error: message });
+	private handleCloudflaredLog(cloudflared: DetachedCloudflared, line: string): void {
+		if (this.cloudflared !== cloudflared) {
+			return;
+		}
+
+		this.attemptLogLine = line;
+
+		if (line.includes('status 429')) {
+			this.attemptSaw429 = true;
+		}
+
+		this.onLog({ timestamp: Date.now(), level: 'info', message: TunnelHostnameScreen.redact(line) });
+	}
+
+	private handleCloudflaredUrl(
+		cloudflared: DetachedCloudflared,
+		port: number,
+		generation: number,
+		attempt: number,
+		url: string
+	): void {
+		if (this.cloudflared !== cloudflared || url === QUICK_TUNNEL_API_URL) {
+			return;
+		}
+
+		if (!TunnelHostnameScreen.isAcceptable(url)) {
+			this.cloudflared = null;
+			cloudflared.stop();
+			this.rerollQuickTunnel(port, generation, attempt);
+
+			return;
+		}
+
+		this.retryAttempt = 0;
+		this.attemptSaw429 = false;
+		this.attemptLogLine = null;
+		this.onLog({ timestamp: Date.now(), level: 'info', message: `Tunnel URL: ${url}` });
+		this.setState({ status: 'running', url, error: null });
+		this.scheduleAutoStop();
+	}
+
+	private handleCloudflaredExit(cloudflared: DetachedCloudflared, generation: number, reason: string): void {
+		if (this.cloudflared !== cloudflared) {
+			return;
+		}
+
+		this.cloudflared = null;
+		const detail = this.attemptLogLine ?? reason;
+		this.onLog({
+			timestamp: Date.now(),
+			level: 'warn',
+			message: `Tunnel exited: ${TunnelHostnameScreen.redact(detail)}`
 		});
 
-		t.on('exit', (code, signal) => {
-			if (this.tunnel !== t) return;
+		if (this.state.status === 'stopped') {
+			return;
+		}
 
-			this.onLog({ timestamp: Date.now(), level: 'warn', message: `Tunnel exited code=${code} signal=${signal}` });
+		this.scheduleRetry(generation, detail);
+	}
 
-			const wasStarting = this.state.status === 'starting';
+	private scheduleRetry(generation: number, reason: string): void {
+		if (generation !== this.generation) {
+			return;
+		}
 
-			if (this.state.status !== 'stopped') {
-				let next: TunnelState;
+		const port = this.quickTunnelPort;
 
-				if (wasStarting) {
-					next = {
-						status: 'error',
-						url: null,
-						error: `Process exited before tunnel was ready (code=${code})`
-					};
-				} else {
-					next = { status: 'stopped', url: null, error: null };
-				}
+		if (port == null) {
+			return;
+		}
 
-				this.setState(next);
+		this.clearRetryTimer();
+		this.retryAttempt += 1;
+		const delay = this.retryDelay(this.retryAttempt, this.attemptSaw429);
+		const shown = TunnelHostnameScreen.redact(reason);
+		const error = `Attempt ${this.retryAttempt} failed: ${shown}`;
+		this.onLog({
+			timestamp: Date.now(),
+			level: 'warn',
+			message: `${error}. Retrying in ${Math.round(delay / 1000)}s.`
+		});
+		this.setState({ status: 'error', url: null, error });
+		this.retryTimer = setTimeout(() => {
+			this.retryTimer = null;
+
+			if (generation !== this.generation) {
+				return;
 			}
 
-			this.tunnel = null;
-		});
+			this.setState({ status: 'starting', url: null, error });
+			void this.spawnTunnel(port, generation, 1);
+		}, delay);
+	}
+
+	private retryDelay(attempt: number, rateLimited: boolean): number {
+		const { startRetryDelaysMs, startRetryLongDelayMs } = config.tunnelManager;
+
+		if (rateLimited) {
+			return startRetryLongDelayMs;
+		}
+
+		const index = attempt - 1;
+
+		if (index >= 0 && index < startRetryDelaysMs.length) {
+			return startRetryDelaysMs[index];
+		}
+
+		return startRetryLongDelayMs;
+	}
+
+	private clearRetryTimer(): void {
+		if (!this.retryTimer) {
+			return;
+		}
+
+		clearTimeout(this.retryTimer);
+		this.retryTimer = null;
 	}
 
 	private rerollQuickTunnel(port: number, generation: number, attempt: number): void {
@@ -513,7 +691,7 @@ export class TunnelManager {
 
 			if (generation !== this.generation) return;
 
-			this.spawnTunnel(port, generation, nextAttempt);
+			void this.spawnTunnel(port, generation, nextAttempt);
 		}, hostnameRerollDelayMs);
 	}
 
@@ -530,6 +708,8 @@ export class TunnelManager {
 			current.tunnel.lastError = next.error;
 			current.tunnel.warning = next.warning ?? null;
 			current.tunnel.ownerWindowId = this.windowId;
+			current.tunnel.pid = this.cloudflared?.getPid() ?? null;
+			current.tunnel.metricsPort = this.cloudflared?.getMetricsPort() ?? null;
 
 			return current;
 		});

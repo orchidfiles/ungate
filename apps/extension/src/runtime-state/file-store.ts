@@ -36,13 +36,13 @@ export class RuntimeStateFileStore {
 		fs.renameSync(temp, config.paths.stateFilePath);
 	}
 
-	public static async mutate(mutator: (current: RuntimeState) => RuntimeState): Promise<RuntimeState> {
+	public static async mutate(mutator: (current: RuntimeState) => RuntimeState | Promise<RuntimeState>): Promise<RuntimeState> {
 		this.ensureStorage();
 		const release = await CrossProcessLock.acquire(RUNTIME_STATE_LOCK);
 
 		try {
 			const current = this.read();
-			const next = mutator(current);
+			const next = await mutator(current);
 			this.write(next);
 
 			return next;
