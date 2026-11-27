@@ -54,6 +54,7 @@ function createState(apiStatus: RuntimeState['api']['status'], lastError: string
 		},
 		keyFix: { enabled: false },
 		autoTunnel: { enabled: false, lastAppliedUrl: null },
+		cursorProvider: { enabled: false, billingGuard: true },
 		tunnelProvider: 'quick',
 		ngrokDomain: null,
 		clients: {},

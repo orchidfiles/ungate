@@ -85,6 +85,9 @@ function handleLimitChange(event: Event) {
 					{#if req.latencyMs}
 						&bull; {Formatter.latency(req.latencyMs)}
 					{/if}
+					{#if req.estimatedCost === null}
+						&bull; Cost unknown (not free)
+					{/if}
 					{#if req.stream}
 						&bull; stream
 					{/if}

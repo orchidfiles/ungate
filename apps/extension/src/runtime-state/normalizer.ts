@@ -47,6 +47,13 @@ export class RuntimeStateNormalizer {
 			};
 		}
 
+		if (parsed.success && parsed.data.cursorProvider) {
+			next.cursorProvider = {
+				enabled: parsed.data.cursorProvider.enabled === true,
+				billingGuard: parsed.data.cursorProvider.billingGuard !== false
+			};
+		}
+
 		if (parsed.success && parsed.data.tunnelProvider) {
 			next.tunnelProvider = parsed.data.tunnelProvider;
 		}

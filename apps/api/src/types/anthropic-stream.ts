@@ -68,4 +68,12 @@ export type AnthropicStreamEvent =
 			delta?: { stop_reason?: AnthropicStopReason | null };
 			usage?: { output_tokens: number };
 	  }
-	| { type: 'message_stop' };
+	| { type: 'message_stop' }
+	| { type: 'ping' }
+	/** Upstream failure after HTTP 200 (e.g. `overloaded_error`, `rate_limit_error`); terminates the stream. */
+	| { type: 'error'; error?: AnthropicStreamError };
+
+export interface AnthropicStreamError {
+	type?: string;
+	message?: string;
+}
