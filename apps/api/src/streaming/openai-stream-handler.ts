@@ -2,10 +2,12 @@ import { logger } from 'src/utils/logger';
 
 import { AnthropicToOpenai } from '../adapter/anthropic-to-openai';
 import { Requests } from '../database/requests';
+import { RequestHeuristics } from '../metrics/request-heuristics';
 import { ToolNormalizer } from '../tools/normalizer';
 import { type ToolUseBlock, type StreamResult, type RequestContext } from '../types/proxy';
 
 import type { AnthropicStopReason, AnthropicStreamEvent } from '../types/anthropic-stream';
+import type { RequestRecord, StopReason } from '@ungate/shared';
 
 export interface StreamTimingOptions {
 	keepaliveIntervalMs: number;
@@ -75,6 +77,12 @@ export class OpenAIStreamHandler {
 
 		let cancelled = false;
 		let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+		let finalized = false;
+		let stopReason: AnthropicStopReason | null = null;
+		let finalUsage: StreamUsage | null = null;
+		let firstTokenAt: number | null = null;
+		let reasoningChars = 0;
+		const toolNames: string[] = [];
 		const activeToolCalls = new Map<number, ActiveToolCall>();
 
 		const stopKeepalive = () => {
@@ -82,6 +90,27 @@ export class OpenAIStreamHandler {
 				clearInterval(keepaliveTimer);
 				keepaliveTimer = null;
 			}
+		};
+
+		/** One analytics row per stream, merged with router/account telemetry. */
+		const record = (fields: Pick<RequestRecord, 'source' | 'error'>, outcome: StopReason) => {
+			Requests.record({
+				...context.telemetry,
+				model: context.model,
+				source: fields.source,
+				inputTokens: finalUsage?.input_tokens ?? 0,
+				outputTokens: finalUsage?.output_tokens ?? 0,
+				cacheReadTokens: finalUsage?.cache_read_input_tokens ?? null,
+				cacheCreationTokens: finalUsage?.cache_creation_input_tokens ?? null,
+				reasoningChars: reasoningChars || null,
+				stopReason: outcome,
+				toolCallCount: toolNames.length,
+				toolNames,
+				stream: true,
+				latencyMs: Date.now() - context.startTime,
+				firstTokenMs: firstTokenAt ? firstTokenAt - context.startTime : null,
+				error: fields.error ?? null
+			});
 		};
 
 		const describeOpenTools = (): string => {
@@ -101,9 +130,6 @@ export class OpenAIStreamHandler {
 				let sentStart = false;
 				let nextToolCallIndex = 0;
 				let completedToolCallCount = 0;
-				let finalized = false;
-				let stopReason: AnthropicStopReason | null = null;
-				let finalUsage: StreamUsage | null = null;
 				let salvageFailed = false;
 				const streamStartedAt = Date.now();
 				let lastEmitAt = streamStartedAt;
@@ -122,6 +148,7 @@ export class OpenAIStreamHandler {
 					logger.error(`Aborting upstream stream id=${streamId} reason=${reason} ${describeOpenTools()}`);
 					reader.cancel(new Error(reason)).catch(() => {});
 				};
+				let failed = false;
 
 				const safeEnqueue = (data: Uint8Array) => {
 					try {
@@ -230,6 +257,34 @@ export class OpenAIStreamHandler {
 					return 'stop';
 				};
 
+				/**
+				 * Upstream `event: error` after HTTP 200 (post-commit): never replayed. The client gets an
+				 * OpenAI-style error event instead of a synthetic finish_reason/[DONE], and the request is
+				 * recorded once as failed.
+				 */
+				const failStream = (error: Record<string, unknown> | undefined) => {
+					if (finalized || cancelled) {
+						return;
+					}
+
+					finalized = true;
+					const type = typeof error?.type === 'string' && error.type ? error.type : 'api_error';
+					const message = typeof error?.message === 'string' && error.message ? error.message : 'Upstream stream error';
+
+					logger.error(`Upstream stream error type=${type} id=${streamId} ${describeOpenTools()}`);
+					activeToolCalls.clear();
+
+					try {
+						context.onStreamError?.(error);
+					} catch (hookError) {
+						logger.error(`Stream error hook failed: ${String(hookError)}`);
+					}
+
+					safeEnqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: { message, type, code: type } })}\n\n`));
+
+					record({ source: 'error', error: message.slice(0, 500) }, 'error');
+				};
+
 				const finalizeStream = (unexpectedEof: boolean) => {
 					if (finalized || cancelled) {
 						return;
@@ -261,20 +316,13 @@ export class OpenAIStreamHandler {
 								})
 							)
 						);
-
-						Requests.record(
-							{
-								model: context.model,
-								source: context.source,
-								inputTokens: finalUsage.input_tokens,
-								outputTokens: finalUsage.output_tokens,
-								stream: true,
-								latencyMs: Date.now() - context.startTime
-							},
-							finalUsage.cache_read_input_tokens,
-							finalUsage.cache_creation_input_tokens
-						);
 					}
+
+					// Previously a stream without usage left no row; record it so truncations are visible.
+					let outcome: StopReason = RequestHeuristics.normalizeStopReason(stopReason ?? finishReason);
+					if (unexpectedEof) outcome = 'error';
+					else if (finishReason === 'length') outcome = 'max_tokens';
+					record({ source: context.source }, outcome);
 
 					safeEnqueue(new TextEncoder().encode('data: [DONE]\n\n'));
 				};
@@ -311,6 +359,12 @@ export class OpenAIStreamHandler {
 							try {
 								const event = JSON.parse(data) as AnthropicStreamEvent;
 
+								if (event.type === 'error') {
+									failStream(event.error as Record<string, unknown> | undefined);
+									failed = true;
+									break;
+								}
+
 								if (event.type === 'message_start' && !sentStart) {
 									safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamStart(streamId, modelName)));
 									sentStart = true;
@@ -326,6 +380,8 @@ export class OpenAIStreamHandler {
 
 									if (block?.type === 'tool_use') {
 										const originalName = context.reverseToolMapping[block.name] ?? block.name;
+										toolNames.push(originalName);
+										firstTokenAt ??= Date.now();
 										const toolCall: ActiveToolCall = {
 											id: block.id,
 											name: originalName,
@@ -368,6 +424,9 @@ export class OpenAIStreamHandler {
 								}
 
 								if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta' && event.delta.thinking) {
+									firstTokenAt ??= Date.now();
+									reasoningChars += event.delta.thinking.length;
+
 									if (!sentStart) {
 										safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamStart(streamId, modelName)));
 										sentStart = true;
@@ -379,6 +438,7 @@ export class OpenAIStreamHandler {
 								}
 
 								if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta?.text) {
+									firstTokenAt ??= Date.now();
 									if (!sentStart) {
 										safeEnqueue(new TextEncoder().encode(AnthropicToOpenai.streamStart(streamId, modelName)));
 										sentStart = true;
@@ -430,6 +490,8 @@ export class OpenAIStreamHandler {
 								}
 							}
 						}
+
+						if (failed) break;
 					}
 				} catch (streamError) {
 					if (!cancelled) {
@@ -442,6 +504,11 @@ export class OpenAIStreamHandler {
 								streamId: options.streamId,
 								model: options.modelName
 							});
+						}
+
+						if (!finalized) {
+							finalized = true;
+							record({ source: 'error', error: `Stream processing failed: ${errorStr}`.slice(0, 500) }, 'error');
 						}
 
 						try {
@@ -470,6 +537,10 @@ export class OpenAIStreamHandler {
 				cancelled = true;
 				stopKeepalive();
 				logger.error(`Downstream cancelled stream id=${streamId} reason=${String(reason)} ${describeOpenTools()}`);
+				if (!finalized) {
+					finalized = true;
+					record({ source: context.source, error: 'Client cancelled stream' }, 'aborted');
+				}
 				reader.cancel(reason).catch(() => {});
 			}
 		});

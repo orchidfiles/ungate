@@ -46,6 +46,16 @@ export class CompletionModelRouting {
 		return true;
 	}
 
+	/** Cursor is reachable only through an explicit `model_mappings` row, never by name prefix. */
+	static isCursorMapped(resolved: ModelMappingConfig | null): resolved is ModelMappingConfig {
+		return resolved?.provider === 'cursor';
+	}
+
+	/** Gemini (Code Assist) is reachable only through an explicit `model_mappings` row, never by name prefix. */
+	static isGeminiMapped(resolved: ModelMappingConfig | null): resolved is ModelMappingConfig {
+		return resolved?.provider === 'gemini';
+	}
+
 	static buildOpenAiUpstreamBody(openaiBody: OpenAIChatRequest, resolved: ModelMappingConfig): OpenAIChatRequest {
 		const withModel: OpenAIChatRequest = {
 			...openaiBody,

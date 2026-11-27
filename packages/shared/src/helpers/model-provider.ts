@@ -23,6 +23,14 @@ export function detectProviderBySource(source: RequestSource): ModelMappingProvi
 		return 'minimax';
 	}
 
+	if (source === 'cursor') {
+		return 'cursor';
+	}
+
+	if (source === 'gemini') {
+		return 'gemini';
+	}
+
 	if (source === 'claude') {
 		return 'claude';
 	}

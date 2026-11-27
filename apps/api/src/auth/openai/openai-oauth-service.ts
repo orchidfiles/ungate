@@ -1,147 +1,145 @@
-import { randomBytes } from 'node:crypto';
-
 import { config } from 'src/config';
-import { ProviderSettings } from 'src/database/provider-settings';
-import { logger } from 'src/utils/logger';
+import { OAuthAccounts } from 'src/database/oauth-accounts';
+
+import { AccountLoginSessions, LoginConflictError } from '../account-login-sessions';
+import { AccountTokenService } from '../account-token-service';
 
 import { OpenAICallbackServer } from './callback-server';
 import { OpenAIOAuthClient } from './oauth-client';
 import { OpenAIOAuthUtils } from './openai-oauth-utils';
-import { OpenAIPkceSessionStore } from './pkce-session-store';
 
 import type { OAuthCredentials } from '../base-provider';
+import type { AccountLoginCompleteResponse } from '@ungate/shared';
 import type { ServerResponse } from 'node:http';
 
 export class OpenAIOAuthService {
-	static {
-		OpenAIPkceSessionStore.startCleanup();
-	}
+	private static starting = false;
+	private static listenerSession: string | null = null;
 
-	public static async startLogin(): Promise<{ authUrl: string; sessionId: string }> {
-		const { verifier, challenge } = await OpenAIOAuthUtils.generatePkce();
-		const sessionId = OpenAIOAuthUtils.base64urlEncode(randomBytes(32));
-		const oauthConfig = config.openai.oauth;
-		const redirectUri = oauthConfig.redirectUri;
-
-		OpenAIPkceSessionStore.set(sessionId, {
-			codeVerifier: verifier,
-			state: verifier,
-			expiresAt: Date.now() + 10 * 60 * 1000
-		});
-
-		await OpenAICallbackServer.start((requestUrl, path, response) => this.handleCallbackRequest(requestUrl, path, response));
-		const params = new URLSearchParams({
-			response_type: 'code',
-			client_id: oauthConfig.clientId,
-			redirect_uri: redirectUri,
-			scope: oauthConfig.scope,
-			code_challenge: challenge,
-			code_challenge_method: oauthConfig.codeChallengeMethod,
-			...oauthConfig.extraParams,
-			state: sessionId
-		});
-
-		return { authUrl: `${oauthConfig.authorizeUrl}?${params}`, sessionId };
-	}
-
-	public static async completeLogin(code: string, sessionId: string): Promise<{ ok: boolean; email?: string; error?: string }> {
-		const session = OpenAIPkceSessionStore.get(sessionId);
-
-		if (!session) {
-			return { ok: false, error: 'Session not found or expired' };
-		}
-
-		if (Date.now() >= session.expiresAt) {
-			OpenAIPkceSessionStore.delete(sessionId);
-
-			return { ok: false, error: 'Session expired' };
-		}
-
-		OpenAIPkceSessionStore.delete(sessionId);
-		let tokens: Record<string, unknown>;
+	/**
+	 * Starts a session-scoped login. Only one OpenAI login may be pending because the provider's
+	 * fixed redirect URI owns a single local callback listener; overlapping starts throw
+	 * `LoginConflictError` instead of silently replacing the listener.
+	 */
+	public static async startLogin(accountId?: string): Promise<{ authUrl: string; sessionId: string }> {
+		const pending = AccountLoginSessions.findPending('openai');
+		if (this.starting || pending) throw new LoginConflictError(pending ?? '');
+		this.starting = true;
+		let sessionId: string | undefined;
 		try {
-			tokens = await OpenAIOAuthClient.exchangeCode(code, session.codeVerifier);
+			const { verifier, challenge } = await OpenAIOAuthUtils.generatePkce();
+			const session = AccountLoginSessions.create('openai', verifier, accountId);
+			sessionId = session.result.sessionId;
+			await OpenAICallbackServer.stop();
+			await OpenAICallbackServer.start((url, path, response) => this.handleCallbackRequest(url, path, response));
+			this.listenerSession = sessionId;
+			const oauthConfig = config.openai.oauth;
+			const params = new URLSearchParams({
+				response_type: 'code',
+				client_id: oauthConfig.clientId,
+				redirect_uri: oauthConfig.redirectUri,
+				scope: oauthConfig.scope,
+				code_challenge: challenge,
+				code_challenge_method: oauthConfig.codeChallengeMethod,
+				...oauthConfig.extraParams,
+				state: sessionId
+			});
+
+			return { authUrl: `${oauthConfig.authorizeUrl}?${params}`, sessionId };
 		} catch (error) {
-			return { ok: false, error: error instanceof Error ? error.message : 'Token exchange failed' };
+			if (sessionId) AccountLoginSessions.cancel(sessionId, 'openai');
+			throw error;
+		} finally {
+			this.starting = false;
 		}
-
-		const idToken = typeof tokens.id_token === 'string' ? tokens.id_token : null;
-		let email: string | null = null;
-		let accountId: string | null = null;
-
-		if (idToken) {
-			const parsed = OpenAIOAuthUtils.parseIdToken(idToken);
-			email = parsed.email;
-			accountId = OpenAIOAuthUtils.resolveWorkspace(parsed.authInfo);
-		}
-
-		const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600;
-		const credentials: OAuthCredentials = {
-			accessToken: tokens.access_token as string,
-			refreshToken: (tokens.refresh_token as string) || '',
-			expiresAt: Date.now() + expiresIn * 1000,
-			email: email ?? undefined,
-			accountId: accountId ?? undefined
-		};
-
-		ProviderSettings.upsertOAuth('openai', credentials);
-		logger.log('✓ OpenAI OAuth login complete', email ? `(${email})` : '');
-
-		return { ok: true, email: email ?? undefined };
 	}
 
-	public static async getValidToken(): Promise<OAuthCredentials | null> {
-		const credentials = ProviderSettings.get('openai');
+	public static async completeLogin(code: string, sessionId: string): Promise<AccountLoginCompleteResponse> {
+		const session = AccountLoginSessions.claim(sessionId, 'openai');
+		if (!session) return { ok: false, error: 'Session not found, expired, or already used' };
+		try {
+			const tokens = await OpenAIOAuthClient.exchangeCode(code, session.verifier);
+			if (typeof tokens.access_token !== 'string' || typeof tokens.id_token !== 'string')
+				throw new Error('OpenAI returned no access or id token');
+			// Identity is accepted only from the token endpoint response, never client-submitted claims.
+			const parsed = OpenAIOAuthUtils.parseIdToken(tokens.id_token);
+			if (!parsed.userId) throw new Error('Provider did not return a user identity');
+			if (!AccountLoginSessions.pending(session)) return { ok: false, error: 'Login cancelled or expired' };
+			const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600;
+			const row = OAuthAccounts.saveLogin(
+				'openai',
+				{
+					accessToken: tokens.access_token,
+					refreshToken: typeof tokens.refresh_token === 'string' ? tokens.refresh_token : null,
+					expiresAt: Date.now() + expiresIn * 1000
+				},
+				{
+					providerUserId: parsed.userId,
+					providerAccountId: OpenAIOAuthUtils.resolveWorkspace(parsed.authInfo),
+					email: parsed.email
+				},
+				session.snapshot,
+				session.reconnectId
+			);
+			AccountLoginSessions.finish(session, row.id);
 
-		if (!credentials) {
-			return null;
+			return { ok: true, email: row.email ?? undefined, accountId: row.id };
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Login failed';
+			AccountLoginSessions.finish(session, undefined, message);
+
+			return { ok: false, error: message };
+		}
+	}
+
+	public static getSession(sessionId: string) {
+		return AccountLoginSessions.status(sessionId, 'openai');
+	}
+
+	public static async cancelLogin(sessionId: string): Promise<boolean> {
+		const cancelled = AccountLoginSessions.cancel(sessionId, 'openai');
+		if (this.listenerSession === sessionId) {
+			this.listenerSession = null;
+			await OpenAICallbackServer.stop();
 		}
 
-		const bufferMs = 60_000;
+		return cancelled;
+	}
 
-		if (Date.now() < (credentials.expiresAt ?? 0) - bufferMs) {
-			return credentials;
-		}
+	private static async exchangeRefresh(token: string) {
+		const tokens = await OpenAIOAuthClient.refreshToken(token);
+		if (!tokens || typeof tokens.access_token !== 'string') return null;
 
-		return this.refreshToken(credentials.refreshToken ?? '');
+		return {
+			accessToken: tokens.access_token,
+			refreshToken: typeof tokens.refresh_token === 'string' ? tokens.refresh_token : token,
+			expiresAt: Date.now() + (typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600) * 1000
+		};
+	}
+
+	public static async getValidToken(accountId?: string): Promise<OAuthCredentials | null> {
+		return AccountTokenService.get('openai', accountId, 60_000, (token) => this.exchangeRefresh(token));
+	}
+
+	public static async refreshAccountToken(accountId: string, expectedVersion?: number): Promise<OAuthCredentials | null> {
+		return AccountTokenService.refresh('openai', accountId, (token) => this.exchangeRefresh(token), expectedVersion);
 	}
 
 	public static async refreshToken(refreshTokenValue: string): Promise<OAuthCredentials | null> {
-		logger.log('Refreshing OpenAI token...');
-		const tokens = await OpenAIOAuthClient.refreshToken(refreshTokenValue);
+		const row = OAuthAccounts.list('openai').find((account) => account.refreshToken === refreshTokenValue);
 
-		if (!tokens) {
-			return null;
-		}
-
-		const existingCredentials = ProviderSettings.get('openai');
-		const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600;
-		const credentials: OAuthCredentials = {
-			accessToken: tokens.access_token as string,
-			refreshToken: (tokens.refresh_token as string | null) ?? refreshTokenValue,
-			expiresAt: Date.now() + expiresIn * 1000,
-			email: existingCredentials?.email ?? undefined,
-			accountId: existingCredentials?.accountId ?? undefined
-		};
-
-		ProviderSettings.upsertOAuth('openai', credentials);
-		logger.log('OpenAI token refreshed successfully');
-
-		return credentials;
+		return row ? this.refreshAccountToken(row.id, row.credentialVersion) : null;
 	}
 
 	public static getAuthStatus(): { authenticated: boolean; email?: string } {
-		const credentials = ProviderSettings.get('openai');
+		const row = OAuthAccounts.active('openai');
 
-		return {
-			authenticated: !!credentials?.accessToken,
-			email: credentials?.email ?? undefined
-		};
+		return { authenticated: !!row && !row.needsLogin, email: row?.email ?? undefined };
 	}
 
 	public static logout(): void {
-		ProviderSettings.remove('openai');
-		logger.log('✓ OpenAI OAuth logged out, tokens deleted');
+		const row = OAuthAccounts.active('openai');
+		if (row) OAuthAccounts.remove('openai', row.id);
 	}
 
 	private static async handleCallbackRequest(
@@ -149,47 +147,34 @@ export class OpenAIOAuthService {
 		path: string,
 		response: ServerResponse
 	): Promise<void> {
-		if (!requestUrl) {
-			response.statusCode = 400;
-			response.setHeader('Content-Type', 'text/html; charset=utf-8');
-			response.end('<html><body><h1>Missing request URL</h1></body></html>');
-
-			return;
-		}
-
-		const url = new URL(requestUrl, config.openai.oauth.redirectUri);
-
+		const url = new URL(requestUrl ?? '/', config.openai.oauth.redirectUri);
+		response.setHeader('Content-Type', 'text/html; charset=utf-8');
 		if (url.pathname !== path) {
 			response.statusCode = 404;
-			response.setHeader('Content-Type', 'text/html; charset=utf-8');
-			response.end('<html><body><h1>Not found</h1></body></html>');
+			response.end('Not found');
 
 			return;
 		}
-
-		const code = url.searchParams.get('code');
 		const sessionId = url.searchParams.get('state');
-
-		if (!code || !sessionId) {
+		const code = url.searchParams.get('code');
+		if (!sessionId || sessionId !== this.listenerSession) {
 			response.statusCode = 400;
-			response.setHeader('Content-Type', 'text/html; charset=utf-8');
-			response.end('<html><body><h1>Missing code or session</h1><p>Please close this window and try again.</p></body></html>');
+			response.end('Invalid login session');
 
 			return;
 		}
-
-		const result = await this.completeLogin(code, sessionId);
-		response.setHeader('Content-Type', 'text/html; charset=utf-8');
-
-		if (result.ok) {
-			response.end(
-				'<html><body><h1>Connected!</h1><p>You can close this window.</p><script>window.close()</script></body></html>'
-			);
-		} else {
-			response.statusCode = 400;
-			response.end(`<html><body><h1>Error</h1><p>${result.error ?? 'Unknown error'}</p></body></html>`);
+		if (!code) {
+			const session = AccountLoginSessions.get(sessionId, 'openai');
+			const reason = url.searchParams.has('error') ? 'Provider denied authorization' : 'Missing authorization code';
+			if (session) AccountLoginSessions.finish(session, undefined, reason);
 		}
-
-		await OpenAICallbackServer.stop();
+		const result: AccountLoginCompleteResponse = code ? await this.completeLogin(code, sessionId) : { ok: false };
+		response.statusCode = result.ok ? 200 : 400;
+		response.end(OpenAIOAuthUtils.callbackPage(result.ok, result.error));
+		// Old callbacks cannot close a newer session's listener.
+		if (this.listenerSession === sessionId) {
+			this.listenerSession = null;
+			await OpenAICallbackServer.stop();
+		}
 	}
 }
