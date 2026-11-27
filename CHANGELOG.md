@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.17 - 2026-11-27
+
+- Enable Claude automatic prompt caching so long chats reuse the cached prefix instead of billing the full prompt every turn
+- Show cache read and write tokens in Analytics
+- Add ngrok as an optional tunnel provider that keeps one URL across restarts, so the Base URL in Cursor does not need updating
+- Add an optional ngrok domain for a reserved domain on a paid ngrok plan
+- Hide offensive tunnel hostnames: a quick tunnel retries with a new URL, an ngrok tunnel hides its URL and offers to switch to the quick tunnel
+
 ## 1.7.16 - 2026-11-26
 
 - Open the dashboard as a panel view so it stays visible when Cursor's chat is maximized
