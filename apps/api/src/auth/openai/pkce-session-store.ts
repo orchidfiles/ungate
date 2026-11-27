@@ -18,7 +18,7 @@ export class OpenAIPkceSessionStore {
 					this.pkceStore.delete(sessionId);
 				}
 			}
-		}, 60_000);
+		}, 60_000).unref();
 	}
 
 	public static set(sessionId: string, session: PkceSession): void {
