@@ -11,6 +11,15 @@ export class ResponsesEventRouter {
 		const kind = payload?.type as string | undefined;
 		StreamDiagnostics.noteKind(state, kind);
 
+		// A terminal event ends the logical response: anything after it is ignored.
+		if (state.terminal) {
+			return;
+		}
+
+		if (this.handleFailureEvent(state, payload, kind, results)) {
+			return;
+		}
+
 		if (this.handleCreatedEvent(state, payload, kind)) {
 			return;
 		}
@@ -36,6 +45,73 @@ export class ResponsesEventRouter {
 		}
 
 		this.handleCompletedEvent(state, payload, kind, results);
+	}
+
+	/**
+	 * Upstream failures must never look like a successful completion:
+	 * - `response.failed` (`response.error: { code, message, resets_at?, ... }`) and the bare `error`
+	 *   event (`{ code, message }` or `{ error: { type, code, message, resets_at, resets_in_seconds } }`)
+	 *   emit an `error` result and no `[DONE]`;
+	 * - `response.incomplete` finishes with `length` (`max_output_tokens`) / `content_filter`, never
+	 *   a plain `stop`.
+	 * Matches openai/codex `codex-rs/codex-api/src/sse/responses.rs`, which turns these into errors.
+	 */
+	private static handleFailureEvent(
+		state: StreamState,
+		payload: Record<string, unknown>,
+		kind: string | undefined,
+		results: StreamProcessResult[]
+	): boolean {
+		if (kind === 'response.incomplete') {
+			const resp = this.record(payload.response);
+			const reason = this.record(resp?.incomplete_details)?.reason;
+			const finish = reason === 'content_filter' ? 'content_filter' : 'length';
+			state.terminal = 'incomplete';
+			state.usage = StreamDiagnostics.mapUsage(resp?.usage as Record<string, number> | undefined);
+			logger.warn(`[Codex] response.incomplete reason=${typeof reason === 'string' ? reason : 'unknown'}`);
+			results.push({ type: 'chunk', data: StreamChunkMapper.chunk(state, {}, finish, state.usage) });
+			results.push({ type: 'done' });
+
+			return true;
+		}
+
+		if (kind !== 'response.failed' && kind !== 'error') {
+			return false;
+		}
+
+		const upstream =
+			kind === 'response.failed'
+				? this.record(this.record(payload.response)?.error)
+				: (this.record(payload.error) ?? this.withoutType(payload));
+		const code = this.firstString(upstream?.code, upstream?.type);
+		const type = this.firstString(upstream?.type, upstream?.code) ?? 'api_error';
+		const message = this.firstString(upstream?.message) ?? `ChatGPT stream failed (${kind})`;
+
+		state.terminal = 'failed';
+		state.failure = code ? { message, type, code, upstream } : { message, type, upstream };
+		logger.warn(`[Codex] ${kind} type=${type}${code ? ` code=${code}` : ''}`);
+		results.push({
+			type: 'error',
+			data: { error: code ? { message, type, code } : { message, type } },
+			upstreamError: upstream
+		});
+
+		return true;
+	}
+
+	private static record(value: unknown): Record<string, unknown> | undefined {
+		return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+	}
+
+	private static withoutType(payload: Record<string, unknown>): Record<string, unknown> {
+		const rest: Record<string, unknown> = { ...payload };
+		delete rest.type;
+
+		return rest;
+	}
+
+	private static firstString(...values: unknown[]): string | undefined {
+		return values.find((value): value is string => typeof value === 'string' && value.length > 0);
 	}
 
 	private static handleCreatedEvent(state: StreamState, payload: Record<string, unknown>, kind: string | undefined): boolean {
@@ -320,6 +396,8 @@ export class ResponsesEventRouter {
 		}
 
 		const mappedUsage = StreamDiagnostics.mapUsage(usage);
+		state.terminal = 'completed';
+		state.usage = mappedUsage;
 
 		results.push({ type: 'chunk', data: StreamChunkMapper.chunk(state, {}, finish, mappedUsage) });
 		results.push({ type: 'done' });

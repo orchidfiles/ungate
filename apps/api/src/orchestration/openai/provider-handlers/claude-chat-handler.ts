@@ -4,6 +4,7 @@ import { CompletionRequestTelemetry } from 'src/metrics';
 import { CompletionErrorMapper, CompletionModelRouting, CompletionStreamingGateway } from 'src/orchestration/openai';
 import { proxyRequest } from 'src/proxy/anthropic-client';
 import { logger } from 'src/utils/logger';
+import { clientAbortSignal } from 'src/utils/request-abort';
 
 import type { ModelMappingConfig } from '@ungate/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -20,7 +21,7 @@ export class ClaudeChatHandler {
 
 		const anthropicBody = CompletionModelRouting.toAnthropicRequest(openaiBody, resolvedModel);
 		const headers = HeadersExtractor.extractAnthropicHeaders(request.headers);
-		const { response, context } = await proxyRequest('/v1/messages', anthropicBody, headers);
+		const { response, context } = await proxyRequest('/v1/messages', anthropicBody, headers, clientAbortSignal(reply));
 
 		if (!response.ok) {
 			const errorJson = await response.json().catch(() => ({ error: { message: `HTTP ${response.status}`, type: 'api_error' } }));
@@ -44,6 +45,8 @@ export class ClaudeChatHandler {
 			if (payload.type) {
 				body.error.type = payload.type;
 			}
+
+			CompletionErrorMapper.applySafeRetryHeaders(reply, response);
 
 			return reply.code(response.status).send(body);
 		}

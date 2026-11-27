@@ -1,4 +1,4 @@
-import cors from '@fastify/cors';
+import cors, { type FastifyCorsOptions } from '@fastify/cors';
 import Fastify from 'fastify';
 
 import { logger, setQuietMode } from 'src/utils/logger';
@@ -15,6 +15,9 @@ import healthPlugin from './routes/health';
 import modelsPlugin from './routes/models';
 import openaiPlugin from './routes/openai';
 import settingsPlugin from './routes/settings';
+
+/** Dashboard webviews call account routes cross-origin; PATCH/DELETE must pass the preflight. */
+export const CORS_OPTIONS: FastifyCorsOptions = { origin: '*', methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'] };
 
 export async function startServer(): Promise<void> {
 	globalThis.console.log('[startup] getDb...');
@@ -41,7 +44,7 @@ export async function startServer(): Promise<void> {
 	});
 
 	globalThis.console.log('[startup] register cors...');
-	await app.register(cors, { origin: '*' });
+	await app.register(cors, CORS_OPTIONS);
 
 	globalThis.console.log('[startup] register plugins...');
 	await app.register(healthPlugin);
