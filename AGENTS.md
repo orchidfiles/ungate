@@ -49,7 +49,7 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 **Entry points:**
 - `/v1/chat/completions` — OpenAI-compatible endpoint, accepts requests from Cursor
 - `/v1/messages` — Anthropic-compatible endpoint (direct proxy)
-- `/v1/analytics` — request statistics
+- `/v1/analytics` — request statistics; `/analytics/insights?period=` — usage insights (token mix, account pool, sessions, rotations, continuations)
 - `/v1/auth/*` — OAuth routes (Claude, ChatGPT)
 - `/v1/models` — model list
 - `/v1/settings` — settings
@@ -102,9 +102,16 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 - OpenAI chat completion → Codex `/responses` payload transformation
 - `input-shape.ts`, `build-body.ts`, `input-text.ts`, `resolve-model.ts`, `types.ts`
 
+**Subscription usage (`src/usage/`):**
+- `usage-parsers.ts` — pure parsers for Claude `GET /api/oauth/usage` (`five_hour`/`seven_day[_<model>]`, utilization 0–100), `anthropic-ratelimit-unified-<window>-utilization` headers (0–1 fraction), ChatGPT `GET /backend-api/wham/usage` (`rate_limit.{primary,secondary}_window`) and `x-codex-{primary,secondary}-*` headers
+- `usage-store.ts` — `AccountUsageStore`, in-memory per-account cache (not persisted). Updates merge by window id so header updates never drop endpoint-only windows (e.g. `7d_opus`); a window the usage endpoint reports as `null` is dropped
+- `usage-fetcher.ts` — `UsageFetcher.refresh(provider, accountId?)`: live fetch per non-needs-login account, one 401 refresh retry, 60 s per-account throttle, in-flight dedupe, 10 s timeout. Never changes cooldowns or needs-login state
+- `AccountFallback.run` records rate-limit headers of every upstream attempt; `OAuthAccounts.dto()` exposes `usage`; `POST /v1/auth/:provider/usage/refresh` (`{ accountId? }`) fetches and returns the account list
+
 **Database (`src/database/`):**
 - SQLite via Drizzle ORM + better-sqlite3
-- Tables: `app_settings` (port, apiKey, quiet, extraInstruction, claudeCliVersionMode, claudeCliVersionCustom), `provider_settings` (per-provider OAuth tokens, refresh tokens, expiry), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget), `requests` (analytics)
+- Tables: `app_settings` (port, apiKey, quiet, extraInstruction, claudeCliVersionMode, claudeCliVersionCustom), `provider_settings` (per-provider OAuth tokens, refresh tokens, expiry), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget), `requests` (analytics). Since `_0013`, `requests` also stores nullable telemetry: `accountId`, `attempts`, `rotationReason`, `reasoningTokens` (Codex), `reasoningChars` (Anthropic/MiniMax thinking text length — an estimate, Anthropic reports no thinking-token count), `reasoningTier`, `stopReason` (`end_turn | tool_use | max_tokens | stop_sequence | error | aborted | unknown`; client cancels record `aborted`), `toolCallCount`, `toolNames` (JSON array), `sessionKey`, `turnIndex`, `messageCount`, `continuation`, `firstTokenMs`. Rows recorded before `_0013` have these as null and the dashboard shows them as "not tracked", not 0. `cacheReadTokens` / `cacheCreationTokens` (`_0011`) default to 0, so `cacheReported` marks rows whose provider reported a cache split; insights count only those toward cache hit rate. `inputTokens` stays the total input including cache reads/writes
+- Insights: `database/insights.ts` (`UsageInsightsQuery`, called by `Analytics.getInsights`) runs grouped raw SQL over `requests` (window functions for continuation causes, `json_each` for tool names); pool balance is `1 − normalized Gini` over per-account tokens of the largest provider pool
 - Migrations: `apps/api/drizzle/` — idempotent (`CREATE TABLE IF NOT EXISTS`, `INSERT OR IGNORE`). Generated with `pnpm drizzle-kit generate --name <index>` (config: `prefix: 'none'`); files are named `_0000.sql`, `_0001.sql`, …
 - Model registry: `model_mappings` is the single source of truth for model routing. Default models are seeded by migration `_0002.sql` only — there are no runtime defaults in code.
 - Databases on disk: `~/.ungate/data.db` (production default) and `~/.ungate/data-dev.db` (used when `DB_PATH=$HOME/.ungate/data-dev.db` is set in dev). Always verify which database the running API process is using before debugging analytics or auth.
@@ -118,6 +125,7 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 
 **Metrics (`src/metrics/`):**
 - `completion-request-telemetry.ts` — request recording, response headers
+- `request-heuristics.ts` — `RequestHeuristics`: pure request-side heuristics computed once in `routes/openai.ts` and carried on `RequestContext.telemetry` to every `Requests.record` site. `sessionKey` = sha256 of the whole first user message (Cursor resends the chat each step; model excluded so model switches stay one session), `turnIndex` = assistant messages in history, `continuation` = short "continue / keep going / …" nudge, or the previous row of the same session ended `max_tokens` / `error` / `aborted`. Also `normalizeStopReason` across Anthropic, Codex and OpenAI values. Sessions and continuations are heuristics, not ground truth
 - `index.ts` — barrel export
 
 **Auth (`src/auth/`):**
@@ -166,8 +174,9 @@ Dashboard for managing providers, tunnel, and all user-facing Ungate settings. T
 - `src/shared/api.ts` — HTTP client to API
 - `src/shared/vscode.ts` — `acquireVsCodeApi()` singleton
 - `src/features/settings/` — settings and providers (settings-store, settings-ui-store, provider-store)
+- `src/features/auth/` — subscription accounts (account-store, AccountManager, `UsageBars.svelte` for per-account usage windows)
 - `src/features/tunnel/` — tunnel management and extension-hosted toggles (auto tunnel, key fix) via `tunnel-store`; dashboard placement lives on the Settings page and uses the same store
-- `src/features/analytics/` — request statistics (analytics-store)
+- `src/features/analytics/` — request statistics (analytics-store); `insights/` — usage insights section below the token chart (insights-store follows the analytics period selector; Tokens / Accounts / Agents / Reliability tabs built with LayerChart; stat cards for cache hit rate, tokens per session, continuation rate, pool balance)
 - `src/features/logs/` — log viewer (logs-store)
 
 ## packages/shared — shared library
@@ -189,6 +198,10 @@ Types, constants, Zod schemas, helpers.
 **System prompt conflict:** Claude Code's system prompt describing tools conflicts with Cursor's actual `input_schema`. The prompt must be minimal — identity only — and delegate tool shape to `input_schema`. The `extraInstruction` field in `app_settings` reinforces this priority. Full removal breaks API contract (empty blocks error), long prompts cause `invalid arguments` on large plans.
 
 **Tool mapping:** Cursor tool names (Shell, LS, StrReplace) are mapped to Claude Code names (Bash, Glob, Edit) on outbound requests and reverse-mapped in responses. Required for Anthropic OAuth whitelist — Anthropic validates tool names server-side and only allows standard Claude Code names. Mapping covers: Bash↔Shell, Read↔Read, Write↔Write, Edit↔StrReplace, Edit↔Delete, Glob↔LS, Grep↔Grep, WebFetch↔WebFetch, WebSearch↔WebSearch.
+
+**Usage limits:** each saved Claude/ChatGPT account card in the dashboard shows its subscription windows (5-hour, weekly, model-specific) with % used and reset time. Two sources feed the in-memory `AccountUsageStore`: rate-limit headers on every proxied response (free, arrive with the 5 s account-list poll) and the providers' usage endpoints (`/api/oauth/usage` for Claude with `anthropic-beta: oauth-2025-04-20`; `/backend-api/wham/usage` for ChatGPT with `chatgpt-account-id`), fetched on dashboard attach/focus, every 5 min while visible, and via "Refresh usage". Usage is display-only, with one narrow exception: it never creates or extends a cooldown and never drives account switching, but a successful endpoint fetch may *lift* an existing cooldown (`usage/upgrade-detector.ts`): `plan_upgraded` when the tier ranks higher than the last one persisted in `oauth_accounts.planType` (Claude tier from `GET /api/oauth/profile`, ChatGPT from `plan_type`), or `usage_available` when the cooldown came from a usage limit and every endpoint window is under 100% (header-only data never lifts). The clear is credential-version aware and never touches needs-login. Entering a cooldown triggers one throttled refresh so an upgrade is noticed quickly; `POST /v1/auth/:provider/accounts/:id/clear-cooldown` ("Clear cooldown" on the account card) is the manual override. Usage windows are lost on API restart and refilled by the next refresh.
+
+**Usage insights:** every proxied completion records per-request telemetry (account + fallback attempts, cache split, reasoning, stop reason, tool calls, TTFT, inferred session/turn/continuation) into `requests`. Account data comes from `AccountFallback.run` outcomes (`accountId`, `attempts`, `rotationReason`); stream-side data from `OpenAIStreamHandler` (Anthropic `message_start` / `message_delta` / `tool_use` / `thinking_delta`), `StreamDiagnostics.telemetry` (Codex `input_tokens_details.cached_tokens`, `output_tokens_details.reasoning_tokens`, terminal status) and `MiniMaxStreamHandler`. The Analytics tab's Usage insights section reads `GET /analytics/insights`. It is analysis-only and never influences routing or account selection.
 
 **Multi-window:** multiple Cursor windows sync via a file-based runtime state in `~/.ungate/`. One window is the leader (runs the API), others read state. Heartbeat-based liveness, command queue for coordinated actions (start/restart/stop tunnel, restart API). Tunnel owner window handles tunnel lifecycle.
 
