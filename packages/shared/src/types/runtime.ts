@@ -3,6 +3,7 @@ import type {
 	runtimeAutoTunnelStateSchema,
 	runtimeApiStatusSchema,
 	runtimeClientEntrySchema,
+	runtimeCursorProviderStateSchema,
 	runtimeTunnelProviderSchema,
 	runtimeCommandActionSchema,
 	runtimeCommandSchema,
@@ -24,5 +25,6 @@ export type RuntimeApiState = z.infer<typeof runtimeApiStateSchema>;
 export type RuntimeTunnelState = z.infer<typeof runtimeTunnelStateSchema>;
 export type RuntimeAutoTunnelState = z.infer<typeof runtimeAutoTunnelStateSchema>;
 export type TunnelWarning = z.infer<typeof runtimeTunnelWarningSchema>;
+export type RuntimeCursorProviderState = z.infer<typeof runtimeCursorProviderStateSchema>;
 export type TunnelProvider = z.infer<typeof runtimeTunnelProviderSchema>;
 export type RuntimeState = z.infer<typeof runtimeStateSchema>;
